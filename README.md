@@ -1,114 +1,141 @@
-![](https://img.shields.io/badge/Built%20with%20%E2%9D%A4%EF%B8%8F-at%20Technologiestiftung%20Berlin-blue)
+# Unternehmensdatenbank
 
-<!-- ALL-CONTRIBUTORS-BADGE:START - Do not remove or modify this section -->
+Local development scaffold for a Postgres-backed company data platform with Airflow for orchestration and Flyway for schema migrations.
 
-[![All Contributors](https://img.shields.io/badge/all_contributors-0-orange.svg?style=flat-square)](#contributors-)
+## Stack
 
-<!-- ALL-CONTRIBUTORS-BADGE:END -->
+- Postgres `16` for both Airflow metadata and the application database
+- Airflow `3.2.0` for local DAG development
+- Flyway `12` for SQL-first schema migrations
 
-# {repo-template}
+## Why this setup
 
-## TODO (after you generated the repo)
+- Airflow orchestrates syncs and workflows
+- Flyway owns schema changes
+- Postgres is split into two databases on the same local server:
+  - `airflow` for Airflow's metadata
+  - `unternehmensdatenbank` for the actual application schema
 
-- [ ] Review the content of the README.md and adjust to your liking
-- [ ] Read the README.md till the end and adjust the content licensing,
-      logos, etc (I know you stopped at tbd...)
-- [ ] Adjust the file [.github/CODEOWNERS](./.github/CODEOWNERS)
-- [ ] Adjust the files under [.github/ISSUE_TEMPLATE](./.github/ISSUE_TEMPLATE)
-- [ ] If you use staging and main branches use this template for [.github/renovate.json](./.github/renovate.json)
+That separation keeps Airflow infrastructure state away from the domain data model.
 
-```json
-{
-  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
-  "extends": ["github>technologiestiftung/renovate-config"],
-  "baseBranches": ["staging"]
-}
+## Repository structure
+
+```text
+.
+├── airflow/
+│   ├── config/
+│   ├── dags/
+│   └── plugins/
+├── db/
+│   └── migrations/
+├── postgres/
+│   └── init/
+└── docker-compose.yml
 ```
 
-- [ ] Do you want to honor all kinds of contributions? Use [all-contributors](https://allcontributors.org/)
+## Quickstart
+
+1. Create a local env file:
 
 ```bash
-npx all-contributors-cli check
-npx all-contributors-cli add github-name doc
+cp .env.example .env
 ```
 
-You can use it on GitHub just by commenting on PRs and issues:
+Or do the whole startup sequence in one command:
 
-```plain
-@all-contributors please add @github-name for infrastructure, tests and code
+```bash
+./scripts/dev-up.sh
 ```
 
-- [ ] Add your project description
-- [ ] Get fancy shields at https://shields.io
+2. Start Postgres:
 
-## Prerequisites
+```bash
+docker compose up -d postgres
+```
 
-tbd...
+3. Run database migrations:
 
-## Installation
+```bash
+docker compose --profile tools run --rm flyway
+```
 
-tbd...
+4. Initialize Airflow metadata and create the local admin user:
 
-## Usage or Deployment
+```bash
+docker compose up airflow-init
+```
 
-tbd...
+5. Start Airflow:
 
-## Development
+```bash
+docker compose up -d airflow-apiserver airflow-scheduler airflow-dag-processor airflow-triggerer
+```
 
-tbd...
+## Access
 
-## Tests
+- Airflow UI/API: http://localhost:8080
+- pgAdmin: http://localhost:5051
+- Airflow username: `airflow`
+- Airflow password: `airflow`
+- pgAdmin email: `admin@example.com`
+- pgAdmin password: `admin`
+- Postgres host: `localhost`
+- Postgres port: `5433` by default, configurable via `POSTGRES_PORT`
+- App database: `unternehmensdatenbank`
 
-tbd...
+## Common commands
 
-## Contributing
+Start the full local stack in the safe order:
 
-Before you create a pull request, write an issue so we can discuss your changes.
+```bash
+./scripts/dev-up.sh
+```
 
-## Contributors
+Run pending migrations:
 
-Thanks goes to these wonderful people ([emoji key](https://allcontributors.org/docs/en/emoji-key)):
+```bash
+docker compose --profile tools run --rm flyway
+```
 
-<!-- ALL-CONTRIBUTORS-LIST:START - Do not remove or modify this section -->
-<!-- prettier-ignore-start -->
-<!-- markdownlint-disable -->
-<table>
-  <tr>
-  </tr>
-</table>
+Inspect Flyway migration state:
 
-<!-- markdownlint-restore -->
-<!-- prettier-ignore-end -->
+```bash
+docker compose --profile tools run --rm flyway info
+```
 
-<!-- ALL-CONTRIBUTORS-LIST:END -->
+Open an Airflow CLI shell:
 
-This project follows the [all-contributors](https://github.com/all-contributors/all-contributors) specification. Contributions of any kind welcome!
+```bash
+docker compose --profile debug run --rm airflow-cli bash
+```
 
-## Content Licensing
+Open pgAdmin logs:
 
-Texts and content available as [CC BY](https://creativecommons.org/licenses/by/3.0/de/).
+```bash
+docker compose logs -f pgadmin
+```
 
-Illustrations by {MARIA_MUSTERFRAU}, all rights reserved.
+Stop the stack:
 
-## Credits
+```bash
+docker compose down
+```
 
-<table>
-  <tr>
-    <td>
-      Made by  <a href="https://www.technologiestiftung-berlin.de/">
-        <br />
-        <br />
-        <img width="150" src="https://logos.citylab-berlin.org/logo-technologiestiftung-berlin-de.svg" />
-      </a>
-    </td>
-    <td>
-      Supported by <a href="https://www.berlin.de/">
-        <br />
-        <br />
-        <img width="150" src="https://logos.citylab-berlin.org/logo-berlin.svg" />
-      </a>
-    </td>
-  </tr>
-</table>
+Remove containers and volumes:
 
-## Related Projects
+```bash
+docker compose down -v
+```
+
+## Documentation
+
+- [docs/data-model.md](/Users/jonathanhaudenschild/Documents/Work/unternehmensdatenbank/docs/data-model.md:1)
+- [docs/core-queries.sql](/Users/jonathanhaudenschild/Documents/Work/unternehmensdatenbank/docs/core-queries.sql:1)
+
+## Notes
+
+- pgAdmin is preconfigured with a local server entry pointing at the `postgres` container.
+- Flyway is defined as a one-shot tool service. It does not run automatically with `docker compose up`.
+- Flyway connection settings come from the same `.env` values as the rest of the stack, so local credentials only need to be changed in one place.
+- The initial migration only creates a minimal `app.sources` table so the migration pipeline has a real baseline.
+- Add future schema changes as new immutable SQL files under [db/migrations](/Users/jonathanhaudenschild/Documents/Work/unternehmensdatenbank/db/migrations).
