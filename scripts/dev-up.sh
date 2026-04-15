@@ -16,8 +16,8 @@ docker compose up -d postgres
 echo "Running Flyway migrations..."
 docker compose --profile tools run --rm flyway
 
-echo "Starting Airflow..."
-docker compose up -d
+echo "Building and starting Airflow..."
+docker compose up -d --build
 
 cat <<'EOF'
 

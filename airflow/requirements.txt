@@ -1,0 +1,6 @@
+requests>=2.31.0
+pyproj>=3.6.0
+rapidfuzz>=3.9.0
+scipy>=1.13.0
+numpy>=1.26.0
+psycopg2-binary>=2.9.9

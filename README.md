@@ -75,6 +75,8 @@ docker compose up -d airflow-apiserver airflow-scheduler airflow-dag-processor a
 
 - Airflow UI/API: http://localhost:8080
 - pgAdmin: http://localhost:5051
+- Overpass API: http://localhost:12345/api/interpreter when started with `--profile geo`
+- Nominatim: http://localhost:8081/reverse when started with `--profile geocoding`
 - Airflow username: `airflow`
 - Airflow password: `airflow`
 - pgAdmin email: `admin@example.com`
@@ -115,6 +117,20 @@ Open pgAdmin logs:
 docker compose logs -f pgadmin
 ```
 
+Start local Overpass for Berlin:
+
+```bash
+docker compose --profile geo up -d overpass
+docker compose logs -f overpass
+```
+
+Start local Nominatim:
+
+```bash
+docker compose --profile geocoding up -d nominatim
+docker compose logs -f nominatim
+```
+
 Stop the stack:
 
 ```bash
@@ -131,10 +147,16 @@ docker compose down -v
 
 - [docs/data-model.md](/Users/jonathanhaudenschild/Documents/Work/unternehmensdatenbank/docs/data-model.md:1)
 - [docs/core-queries.sql](/Users/jonathanhaudenschild/Documents/Work/unternehmensdatenbank/docs/core-queries.sql:1)
+- [docs/geospatial.md](/Users/jonathanhaudenschild/Documents/Work/unternehmensdatenbank/docs/geospatial.md:1)
+- [docs/berlin-gewerbedaten-pipeline.md](/Users/jonathanhaudenschild/Documents/Work/unternehmensdatenbank/docs/berlin-gewerbedaten-pipeline.md:1)
 
 ## Notes
 
 - pgAdmin is preconfigured with a local server entry pointing at the `postgres` container.
+- Overpass and Nominatim are optional heavy services and are intentionally not part of the default `./scripts/dev-up.sh` startup path.
+- Airflow now builds from a local Dockerfile so the Berlin Gewerbedaten DAG dependencies are installed inside the scheduler containers.
+- The Berlin Gewerbedaten pipeline now streams to JSONL and loads Postgres in batches instead of holding the full dataset in memory.
+- Name enrichment is disabled by default and public Overpass fallback is disabled by default; enable them explicitly when you have local Overpass available.
 - Flyway is defined as a one-shot tool service. It does not run automatically with `docker compose up`.
 - Flyway connection settings come from the same `.env` values as the rest of the stack, so local credentials only need to be changed in one place.
 - The initial migration only creates a minimal `app.sources` table so the migration pipeline has a real baseline.

@@ -19,6 +19,7 @@ Important fields:
 - `company_name`: latest canonical company name
 - `normalized_name`: normalized search key generated with `public.normalize_company_name(...)`
 - `registration_number`: unique registry key when available
+- `postcode`, `city`, `district`, `locality`: location fields used for search and heuristic deduplication
 - `metadata`: system-level structured metadata
 - `extra_data`: flexible application-facing enrichment
 - `canonical_updated_at`: when canonical values were last resolved
