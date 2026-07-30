@@ -52,9 +52,13 @@ Important fields:
 - `company_name`: the current chosen display name
 - `normalized_name`: simplified name used for matching and search
 - `registration_number`: strongest legal identifier when we have one
+- `address`: current chosen address
+- `legal_form`: current chosen legal form
+- `established_at`: current chosen establishment date when we know it
+- `wz_code`: current chosen business classification code
+- `business_purpose`: canonical company description / purpose when we know it
 - `postcode`, `city`, `district`, `locality`: location fields for search and rough deduplication
 - `metadata`: technical/system metadata
-- `extra_data`: flexible JSON for source-specific or future fields
 - `canonical_updated_at`: when the winning values were last recalculated
 - `data_last_updated_at`: when business data last changed
 

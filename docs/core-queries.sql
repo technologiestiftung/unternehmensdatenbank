@@ -8,7 +8,7 @@ INSERT INTO public.companies (
   legal_form,
   business_purpose,
   address,
-  founded_at,
+  established_at,
   share_capital,
   registration_number,
   website_url,
@@ -245,7 +245,7 @@ VALUES (
   $2,
   $3,
   $4,
-  'founded_at',
+  'established_at',
   '2020-05-01',
   now(),
   0.99

@@ -817,26 +817,6 @@ def _company_metadata(record: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def _company_extra_data(record: dict[str, Any]) -> dict[str, Any]:
-    return {
-        "lat": record.get("lat"),
-        "lon": record.get("lon"),
-        "postcode": record.get("postcode"),
-        "city": record.get("city"),
-        "district": record.get("district"),
-        "locality": record.get("locality"),
-        "ihk_branch_id": record.get("ihk_branch_id"),
-        "ihk_branch_desc": record.get("ihk_branch_desc"),
-        "nace_id": record.get("nace_id"),
-        "nace_desc": record.get("nace_desc"),
-        "sector_id": record.get("sector_id"),
-        "sector": record.get("sector"),
-        "number_of_employees": record.get("number_of_employees"),
-        "business_age_years": record.get("business_age_years"),
-        "raw_source_record": record,
-    }
-
-
 def _has_resolved_name(record: dict[str, Any]) -> bool:
     return bool(record.get("name"))
 
@@ -867,8 +847,7 @@ def _upsert_company(cur: Any, record: dict[str, Any], company_name: str, *, comp
 
     address_text = _record_address_text(record)
     metadata = _company_metadata(record)
-    extra_data = _company_extra_data(record)
-    tags = ["berlin_gewerbedaten"]
+    wz_code = record.get("nace_id")
 
     if company_id:
         cur.execute(
@@ -879,17 +858,14 @@ def _upsert_company(cur: Any, record: dict[str, Any], company_name: str, *, comp
               normalized_name = CASE WHEN %s THEN public.normalize_company_name(%s) ELSE normalized_name END,
               legal_form = %s,
               address = %s,
+              wz_code = %s,
               postcode = %s,
               city = %s,
               district = %s,
               locality = %s,
-              tags = %s,
               metadata = %s,
-              extra_data = %s,
               canonical_updated_at = now(),
-              data_last_updated_at = now(),
-              lat = %s,
-              lon = %s
+              data_last_updated_at = now()
             WHERE id = %s
             RETURNING id
             """,
@@ -900,15 +876,12 @@ def _upsert_company(cur: Any, record: dict[str, Any], company_name: str, *, comp
                 company_name,
                 record.get("legal_form"),
                 address_text,
+                wz_code,
                 record.get("postcode"),
                 record.get("city"),
                 record.get("district"),
                 record.get("locality"),
-                tags,
                 Json(metadata),
-                Json(extra_data),
-                record.get("lat"),
-                record.get("lon"),
                 company_id,
             ),
         )
@@ -921,17 +894,14 @@ def _upsert_company(cur: Any, record: dict[str, Any], company_name: str, *, comp
           normalized_name,
           legal_form,
           address,
+          wz_code,
           postcode,
           city,
           district,
           locality,
-          tags,
           metadata,
-          extra_data,
           canonical_updated_at,
-          data_last_updated_at,
-          lat,
-          lon
+          data_last_updated_at
         )
         VALUES (
           %s,
@@ -944,11 +914,8 @@ def _upsert_company(cur: Any, record: dict[str, Any], company_name: str, *, comp
           %s,
           %s,
           %s,
-          %s,
           now(),
-          now(),
-          %s,
-          %s
+          now()
         )
         RETURNING id
         """,
@@ -957,15 +924,12 @@ def _upsert_company(cur: Any, record: dict[str, Any], company_name: str, *, comp
             company_name,
             record.get("legal_form"),
             address_text,
+            wz_code,
             record.get("postcode"),
             record.get("city"),
             record.get("district"),
             record.get("locality"),
-            tags,
             Json(metadata),
-            Json(extra_data),
-            record.get("lat"),
-            record.get("lon"),
         ),
     )
     return cur.fetchone()[0], True
