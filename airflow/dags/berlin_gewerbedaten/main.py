@@ -10,7 +10,9 @@ Postgres schema used by this repository.
 import json
 import logging
 import os
+import threading
 import time
+from concurrent.futures import Future, ThreadPoolExecutor
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -37,8 +39,10 @@ WFS_PARAMS: dict[str, str] = {
     "typeNames": "gewerbedaten:gewerbedaten",
     "outputFormat": "application/json",
     "srsName": "EPSG:25833",
-    "count": str(int(os.getenv("WFS_PAGE_SIZE", "500"))),
+    "count": str(int(os.getenv("WFS_PAGE_SIZE", "2000"))),
 }
+# Offset into the full WFS dataset — set to skip records already loaded
+WFS_START_INDEX = int(os.getenv("WFS_START_INDEX", "0"))
 
 PRIMARY_OVERPASS_URL = os.getenv(
     "OVERPASS_URL", "https://overpass-api.de/api/interpreter"
@@ -58,6 +62,8 @@ if ALLOW_PUBLIC_OVERPASS_FALLBACK:
 OVERPASS_RADIUS = int(os.getenv("OVERPASS_RADIUS", "80"))
 # Delay between Overpass calls (they ask for reasonable use)
 OVERPASS_DELAY_S = float(os.getenv("OVERPASS_DELAY_S", "1.5"))
+# Number of parallel threads for Overpass queries (local instance is safe to increase)
+OVERPASS_WORKERS = int(os.getenv("OVERPASS_WORKERS", "6"))
 # Minimum rapidfuzz token_set_ratio score to accept a POI name (0–100)
 NAME_MATCH_MIN_SCORE = int(os.getenv("NAME_MATCH_MIN_SCORE", "35"))
 SKIP_NAME_LOOKUP = os.getenv("SKIP_NAME_LOOKUP", "false").lower() == "true"
@@ -88,6 +94,9 @@ SKIP_ADDRESS_LOOKUP = (
 )
 
 OUTPUT_FILE = os.getenv("OUTPUT_FILE", str(DATA_DIR / "gewerbedaten.jsonl"))
+CHECKPOINT_FILE = os.getenv("CHECKPOINT_FILE", str(DATA_DIR / "gewerbedaten_checkpoint.json"))
+# Set to "true" to ignore any existing checkpoint and restart from scratch
+RESET_CHECKPOINT = os.getenv("RESET_CHECKPOINT", "false").lower() == "true"
 
 # Set to 0 to fetch everything
 MAX_RECORDS = int(os.getenv("MAX_RECORDS", "0"))
@@ -265,30 +274,38 @@ class AddressIndex:
 
 
 class JsonLinesWriter:
-    """Write records as JSON Lines to a temp file; atomically rename on clean exit."""
+    """Write records as JSON Lines.
 
-    def __init__(self, path: str) -> None:
+    In normal mode: writes to a .tmp file and atomically renames on clean exit.
+    In append mode: writes directly to the final file (used when resuming from
+    a checkpoint — the existing content is already valid).
+    """
+
+    def __init__(self, path: str, append: bool = False) -> None:
         self.path = path
         self._tmp_path = path + ".tmp"
+        self._append = append
         self._fh: Any | None = None
         self.count = 0
 
     def __enter__(self) -> "JsonLinesWriter":
         _ensure_parent_dir(self.path)
-        self._fh = open(self._tmp_path, "w", encoding="utf-8")
+        if self._append:
+            self._fh = open(self.path, "a", encoding="utf-8")
+        else:
+            self._fh = open(self._tmp_path, "w", encoding="utf-8")
         return self
 
     def __exit__(self, exc_type: Any, exc: Any, tb: Any) -> None:
         if self._fh is not None:
             self._fh.close()
             self._fh = None
-        if exc_type is None:
-            # Only publish the file when the write completed without error.
-            import os
-            os.replace(self._tmp_path, self.path)
-        else:
-            # Leave the .tmp file for debugging; do not overwrite last good output.
-            log.warning("JsonLinesWriter exiting with error — keeping %s, not replacing %s", self._tmp_path, self.path)
+        if not self._append:
+            if exc_type is None:
+                import os
+                os.replace(self._tmp_path, self.path)
+            else:
+                log.warning("JsonLinesWriter exiting with error — keeping %s, not replacing %s", self._tmp_path, self.path)
 
     def write(self, record: dict[str, Any]) -> None:
         assert self._fh is not None
@@ -328,10 +345,9 @@ def iter_output_records(path: str) -> Iterable[dict[str, Any]]:
 # ---------------------------------------------------------------------------
 # WFS pagination
 # ---------------------------------------------------------------------------
-def iter_features(session: requests.Session) -> Generator[dict, None, None]:
+def iter_features(session: requests.Session, start_index: int = 0) -> Generator[dict, None, None]:
     """Yield all features from the WFS endpoint, page by page."""
     params = dict(WFS_PARAMS)
-    start_index = 0
     total: int | None = None
     yielded = 0
 
@@ -433,9 +449,56 @@ _OSM_TYPE_DESC: dict[str, str] = {
 # Overpass API — fetch named POIs near a coordinate
 # ---------------------------------------------------------------------------
 _overpass_cache: dict[tuple[float, float], list[dict]] = {}
+_overpass_cache_lock = threading.Lock()
+_overpass_thread_local = threading.local()
+
+
+def _get_overpass_session() -> requests.Session:
+    """Return a per-thread requests.Session for Overpass queries."""
+    if not hasattr(_overpass_thread_local, "session"):
+        s = requests.Session()
+        s.headers.update({"Accept": "application/json"})
+        _overpass_thread_local.session = s
+    return _overpass_thread_local.session
 
 
 _BUSINESS_TAG_FILTER = '[~"^(shop|amenity|office|craft|tourism)$"~"."]'
+
+# German keywords drawn from IHK/NACE descriptions that indicate a business
+# likely to have an OSM shop/amenity/office/craft entry.  Records whose IHK
+# branch description contains none of these are skipped — querying Overpass
+# for consulting firms, marketing agencies, etc. wastes ~70% of calls.
+_OSM_LIKELY_KEYWORDS: frozenset[str] = frozenset([
+    "supermarkt", "lebensmittel", "bäckerei", "konditorei", "metzgerei",
+    "fleischerei", "getränk", "obst", "gemüse", "feinkost",
+    "restaurant", "gaststätte", "imbiss", "café", "kiosk", "bar", "kneipe",
+    "eissalon", "catering", "event-cater",
+    "friseur", "kosmetik", "schönheit", "optiker", "juwelier", "schmuck",
+    "apotheke", "arzt", "zahnarzt", "tierarzt", "gesundheit",
+    "bank", "sparkasse", "versicherung", "immobilien", "makler",
+    "rechtsanwalt", "notar", "steuerberater", "buchführung",
+    "hotel", "hostel", "pension", "beherbergung",
+    "fitnessstudio", "sport", "schwimm", "yoga", "kampfsport",
+    "schule", "bildung", "kita", "kindergarten", "nachhilfe",
+    "einzelhandel", "großhandel", "fachhandel",
+    "werkstatt", "kfz", "kraftfahrzeug", "fahrrad",
+    "reisebüro", "tourismus",
+    "wäscherei", "reinigung", "chemische reinigung",
+    "schneiderei", "textil", "bekleidung", "schuh",
+    "maler", "elektroinstallation", "sanitär", "klempner",
+    "blumen", "florist", "möbel", "elektronik", "bücher", "schreibwaren",
+    "tankstelle", "parkplatz", "post", "kurier",
+])
+
+
+def _ihk_likely_has_osm_presence(record: dict) -> bool:
+    """Return True if the IHK/NACE description suggests a physical business that
+    is likely to appear in OSM (retail, hospitality, healthcare, etc.)."""
+    for field in ("ihk_branch_desc", "nace_desc", "sector"):
+        val = (record.get(field) or "").lower()
+        if any(kw in val for kw in _OSM_LIKELY_KEYWORDS):
+            return True
+    return False
 
 
 def _overpass_query(lat: float, lon: float) -> str:
@@ -451,17 +514,20 @@ def _overpass_query(lat: float, lon: float) -> str:
     )
 
 
-def fetch_nearby_pois(
-    session: requests.Session, lat: float, lon: float
-) -> list[dict]:
-    """Return list of {{name, osm_type, tags}} for named OSM elements near (lat, lon)."""
+def fetch_nearby_pois(lat: float, lon: float) -> list[dict]:
+    """Return list of {{name, osm_type, tags}} for named OSM elements near (lat, lon).
+
+    Thread-safe: uses a per-thread requests.Session and a lock-protected cache.
+    """
     key = (round(lat, 4), round(lon, 4))
-    if key in _overpass_cache:
-        return _overpass_cache[key]
+    with _overpass_cache_lock:
+        if key in _overpass_cache:
+            return _overpass_cache[key]
 
     time.sleep(OVERPASS_DELAY_S)
     query = _overpass_query(lat, lon)
     result: list[dict] = []
+    session = _get_overpass_session()
 
     for url in OVERPASS_URLS:
         try:
@@ -502,7 +568,8 @@ def fetch_nearby_pois(
             PRIMARY_OVERPASS_URL,
         )
 
-    _overpass_cache[key] = result
+    with _overpass_cache_lock:
+        _overpass_cache[key] = result
     return result
 
 
@@ -1347,6 +1414,37 @@ def load_output_to_db(path: str = OUTPUT_FILE) -> dict[str, int]:
 
 
 # ---------------------------------------------------------------------------
+# Checkpoint — survive restarts without re-processing already-written records
+# ---------------------------------------------------------------------------
+
+def _read_checkpoint() -> dict:
+    """Return the saved checkpoint dict, or {} if none exists / RESET_CHECKPOINT is set."""
+    if RESET_CHECKPOINT:
+        return {}
+    try:
+        with open(CHECKPOINT_FILE, encoding="utf-8") as f:
+            return json.load(f)
+    except (FileNotFoundError, json.JSONDecodeError):
+        return {}
+
+
+def _write_checkpoint(wfs_index: int) -> None:
+    """Atomically persist the current WFS index so a restart can resume from here."""
+    tmp = CHECKPOINT_FILE + ".tmp"
+    _ensure_parent_dir(CHECKPOINT_FILE)
+    with open(tmp, "w", encoding="utf-8") as f:
+        json.dump({"wfs_index": wfs_index}, f)
+    os.replace(tmp, CHECKPOINT_FILE)
+
+
+def _delete_checkpoint() -> None:
+    try:
+        os.remove(CHECKPOINT_FILE)
+    except FileNotFoundError:
+        pass
+
+
+# ---------------------------------------------------------------------------
 # Main pipeline
 # ---------------------------------------------------------------------------
 
@@ -1354,6 +1452,15 @@ def run() -> None:
     """Fetch and export the source data to JSONL."""
     http = requests.Session()
     http.headers.update({"Accept": "application/json"})
+
+    # --- Step 0: resume from checkpoint if available ---
+    checkpoint = _read_checkpoint()
+    resume_index = checkpoint.get("wfs_index", WFS_START_INDEX)
+    resuming = resume_index > 0
+    if resuming:
+        log.info("Resuming from checkpoint: WFS index %d", resume_index)
+    else:
+        log.info("Starting fresh from WFS index %d", resume_index)
 
     # --- Step 1: build address index (downloaded once, cached locally) ---
     addr_index: AddressIndex | None = None
@@ -1364,42 +1471,78 @@ def run() -> None:
             log.warning("AddressIndex unavailable, addresses will be null: %s", exc)
 
     # --- Step 2: fetch Gewerbedaten and enrich ---
+    # Overpass queries are I/O-bound (HTTP to local Overpass); run them in
+    # parallel across OVERPASS_WORKERS threads.  We accumulate a batch of
+    # features, submit futures for all that need Overpass, then flush the
+    # batch in order so the JSONL output remains deterministic.
+    #
+    # Checkpoint is written after every batch so a restart resumes from the
+    # last completed batch rather than the beginning of the dataset.
+    _OVERPASS_BATCH = 200  # features buffered per flush cycle
+
     written = 0
-    with JsonLinesWriter(OUTPUT_FILE) as writer:
-        for feature in iter_features(http):
-            geom = feature.get("geometry") or {}
-            coords = geom.get("coordinates", [None, None])
-            x, y = coords[0], coords[1]
 
-            if x is not None and y is not None:
-                lon, lat = epsg25833_to_wgs84(x, y)
-            else:
-                lon, lat = None, None
-
+    def _flush_batch(
+        batch: list[tuple[dict, float | None, float | None, str | None, Future | None]],
+    ) -> int:
+        count = 0
+        for feature, lon, lat, address, fut in batch:
             name: str | None = None
             name_score: float = 0.0
-            address: str | None = None
-
-            if not SKIP_ADDRESS_LOOKUP and lon is not None and addr_index:
-                address = addr_index.nearest(lat, lon)
-
-            if not SKIP_NAME_LOOKUP and not SKIP_GEOCODE and lon is not None:
-                pois = fetch_nearby_pois(http, lat, lon)
+            if fut is not None:
+                pois = fut.result()
                 score_context = {
                     "ihk_branch_desc": feature.get("properties", {}).get("ihk_branch_desc"),
                     "nace_desc": feature.get("properties", {}).get("nace_desc"),
                     "sector": feature.get("properties", {}).get("branch_top_level_desc"),
                 }
                 name, name_score = best_name_match(pois, score_context)
-
             writer.write(build_record(feature, name, name_score, address, lon, lat))
-            written += 1
+            count += 1
+        return count
 
-            if written % 100 == 0:
-                log.info("Collected %d records so far …", written)
+    # Append to existing JSONL when resuming so already-written records are kept.
+    with JsonLinesWriter(OUTPUT_FILE, append=resuming) as writer:
+        with ThreadPoolExecutor(max_workers=OVERPASS_WORKERS) as pool:
+            batch: list[tuple[dict, float | None, float | None, str | None, Future | None]] = []
+
+            for feature in iter_features(http, start_index=resume_index):
+                geom = feature.get("geometry") or {}
+                coords = geom.get("coordinates", [None, None])
+                x, y = coords[0], coords[1]
+
+                if x is not None and y is not None:
+                    lon, lat = epsg25833_to_wgs84(x, y)
+                else:
+                    lon, lat = None, None
+
+                address: str | None = None
+                if not SKIP_ADDRESS_LOOKUP and lon is not None and addr_index:
+                    address = addr_index.nearest(lat, lon)
+
+                fut: Future | None = None
+                if not SKIP_NAME_LOOKUP and not SKIP_GEOCODE and lon is not None and _ihk_likely_has_osm_presence(feature.get("properties", {})):
+                    fut = pool.submit(fetch_nearby_pois, lat, lon)
+
+                batch.append((feature, lon, lat, address, fut))
+
+                if len(batch) >= _OVERPASS_BATCH:
+                    written += _flush_batch(batch)
+                    batch.clear()
+                    _write_checkpoint(resume_index + written)
+                    log.info("Collected %d records so far … (checkpoint saved)", written)
+
+            # flush remaining
+            if batch:
+                written += _flush_batch(batch)
 
     log.info("Saved %d records → %s", written, OUTPUT_FILE)
     log.info("Done. Total records: %d", written)
+
+    # All records written successfully — remove the checkpoint so the next
+    # scheduled run starts fresh.
+    _delete_checkpoint()
+    log.info("Checkpoint deleted — next run will start from scratch.")
 
 
 def fetch_and_load() -> None:

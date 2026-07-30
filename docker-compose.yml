@@ -15,14 +15,18 @@ x-airflow-common: &airflow-common
     AIRFLOW__CORE__EXECUTION_API_SERVER_URL: http://airflow-apiserver:8080/execution/
     AIRFLOW__API_AUTH__JWT_SECRET: ${AIRFLOW__API_AUTH__JWT_SECRET:-airflow_jwt_secret}
     AIRFLOW__API_AUTH__JWT_ISSUER: ${AIRFLOW__API_AUTH__JWT_ISSUER:-airflow}
+    AIRFLOW__EXECUTION_API__JWT_EXPIRATION_TIME: "86400"
     AIRFLOW__SCHEDULER__ENABLE_HEALTH_CHECK: "true"
     AIRFLOW_CONFIG: /opt/airflow/config/airflow.cfg
     AIRFLOW_DATA_DIR: /opt/airflow/data
     OUTPUT_FILE: /opt/airflow/data/gewerbedaten.jsonl
+    CHECKPOINT_FILE: /opt/airflow/data/gewerbedaten_checkpoint.json
+    RESET_CHECKPOINT: ${RESET_CHECKPOINT:-false}
     ADRESSEN_CACHE_FILE: /opt/airflow/data/adressen_cache.json
     PG_DSN: host=postgres port=5432 dbname=${APP_DB_NAME:-unternehmensdatenbank} user=${APP_DB_USER:-app} password=${APP_DB_PASSWORD:-app}
     MAX_RECORDS: ${MAX_RECORDS:-0}
-    WFS_PAGE_SIZE: ${WFS_PAGE_SIZE:-500}
+    WFS_PAGE_SIZE: ${WFS_PAGE_SIZE:-2000}
+    WFS_START_INDEX: ${WFS_START_INDEX:-0}
     SKIP_GEOCODE: ${SKIP_GEOCODE:-false}
     SKIP_NAME_LOOKUP: ${SKIP_NAME_LOOKUP:-true}
     ADRESSEN_MAX_DIST_M: ${ADRESSEN_MAX_DIST_M:-60}
@@ -30,6 +34,7 @@ x-airflow-common: &airflow-common
     ALLOW_PUBLIC_OVERPASS_FALLBACK: ${ALLOW_PUBLIC_OVERPASS_FALLBACK:-false}
     OVERPASS_RADIUS: ${OVERPASS_RADIUS:-80}
     OVERPASS_DELAY_S: ${OVERPASS_DELAY_S:-1.5}
+    OVERPASS_WORKERS: ${OVERPASS_WORKERS:-6}
     NAME_MATCH_MIN_SCORE: ${NAME_MATCH_MIN_SCORE:-35}
     NOMINATIM_URL: ${NOMINATIM_URL:-https://nominatim.openstreetmap.org/reverse}
     NOMINATIM_DELAY_S: ${NOMINATIM_DELAY_S:-2.0}

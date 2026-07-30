@@ -145,10 +145,10 @@ docker compose down -v
 
 ## Documentation
 
-- [docs/data-model.md](/Users/jonathanhaudenschild/Documents/Work/unternehmensdatenbank/docs/data-model.md:1)
-- [docs/core-queries.sql](/Users/jonathanhaudenschild/Documents/Work/unternehmensdatenbank/docs/core-queries.sql:1)
-- [docs/geospatial.md](/Users/jonathanhaudenschild/Documents/Work/unternehmensdatenbank/docs/geospatial.md:1)
-- [docs/berlin-gewerbedaten-pipeline.md](/Users/jonathanhaudenschild/Documents/Work/unternehmensdatenbank/docs/berlin-gewerbedaten-pipeline.md:1)
+- [Data model](docs/data-model.md)
+- [Core queries](docs/core-queries.sql)
+- [Geospatial services](docs/geospatial.md)
+- [Berlin Gewerbedaten pipeline](docs/berlin-gewerbedaten-pipeline.md)
 
 ## Notes
 
@@ -160,4 +160,4 @@ docker compose down -v
 - Flyway is defined as a one-shot tool service. It does not run automatically with `docker compose up`.
 - Flyway connection settings come from the same `.env` values as the rest of the stack, so local credentials only need to be changed in one place.
 - The initial migration only creates a minimal `app.sources` table so the migration pipeline has a real baseline.
-- Add future schema changes as new immutable SQL files under [db/migrations](/Users/jonathanhaudenschild/Documents/Work/unternehmensdatenbank/db/migrations).
+- Add future schema changes as new immutable SQL files under [db/migrations](db/migrations).
