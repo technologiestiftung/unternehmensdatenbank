@@ -6,6 +6,8 @@ import os
 from pathlib import Path
 from datetime import datetime, timezone
 from typing import Any
+from concurrent.futures import Future, ThreadPoolExecutor
+import time
 from urllib.parse import urlparse
 
 from mistral_http import MistralRateLimitError, require_mistral_api_key, run_websearch_prompt
@@ -30,6 +32,8 @@ SOURCE_TYPE = "web_search"
 ENABLED_FLAG = "ENABLE_MISTRAL_SEARCH_DISCOVERY"
 MISTRAL_DISCOVERY_MAX_RESULTS = int(os.getenv("MISTRAL_DISCOVERY_MAX_RESULTS", "5"))
 MISTRAL_PROGRESS_LOG_EVERY = int(os.getenv("MISTRAL_PROGRESS_LOG_EVERY", "10"))
+MISTRAL_CONCURRENCY = int(os.getenv("MISTRAL_CONCURRENCY", "4"))
+MISTRAL_SUBMIT_DELAY_S = float(os.getenv("MISTRAL_SUBMIT_DELAY_S", "0.1"))
 MISTRAL_CHECKPOINT_FILE = Path(
     os.getenv("MISTRAL_DISCOVERY_CHECKPOINT_FILE", "/opt/airflow/data/mistral_search_discovery_checkpoint.json")
 )
@@ -223,6 +227,30 @@ def _run_live_discovery(*, company_name: str, queries: dict[str, str], address: 
     return result
 
 
+def _submit_discovery_batch(companies: list[Any]) -> list[tuple[Any, Future]]:
+    max_workers = max(1, min(MISTRAL_CONCURRENCY, len(companies)))
+    executor = ThreadPoolExecutor(max_workers=max_workers, thread_name_prefix="mistral-discovery")
+    submitted: list[tuple[Any, Future]] = []
+    try:
+        for company in companies:
+            queries = build_search_queries(company)
+            future = executor.submit(
+                _run_live_discovery,
+                company_name=company.company_name,
+                queries=queries,
+                address=company.address,
+                registration_number=company.registration_number,
+            )
+            submitted.append((company, future))
+            if MISTRAL_SUBMIT_DELAY_S > 0:
+                time.sleep(MISTRAL_SUBMIT_DELAY_S)
+        executor.shutdown(wait=False)
+        return submitted
+    except Exception:
+        executor.shutdown(wait=False, cancel_futures=True)
+        raise
+
+
 def _ensure_checkpoint_parent() -> None:
     MISTRAL_CHECKPOINT_FILE.parent.mkdir(parents=True, exist_ok=True)
 
@@ -294,20 +322,17 @@ def run_mistral_search_discovery() -> None:
         hit_rate_limit = False
         last_completed_company_id = checkpoint_after_id
 
-        for index, company in enumerate(companies, start=1):
+        submitted = _submit_discovery_batch(companies)
+
+        for index, (company, future) in enumerate(submitted, start=1):
             try:
+                live_result = future.result()
                 with connection:
                     with connection.cursor() as cur:
                         payload = dump_preview_payload(company, SOURCE_KEY)
                         payload["tool"] = "mistral web_search"
                         payload["enabled"] = True
                         queries = build_search_queries(company)
-                        live_result = _run_live_discovery(
-                            company_name=company.company_name,
-                            queries=queries,
-                            address=company.address,
-                            registration_number=company.registration_number,
-                        )
                         payload["status"] = "fetched"
                         payload["primary_queries"] = queries
                         payload["result"] = live_result
@@ -414,6 +439,8 @@ def run_mistral_search_discovery() -> None:
                 failed += 1
                 hit_rate_limit = True
                 _save_checkpoint(last_completed_company_id, processed_count)
+                for _, pending_future in submitted[index:]:
+                    pending_future.cancel()
                 log.warning(
                     "Stopping Mistral discovery after rate limit at company %s. Resume will continue from checkpoint.",
                     company.id,
