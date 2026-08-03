@@ -1521,6 +1521,9 @@ def fetch_and_load() -> None:
 
 def _make_dag():  # noqa: ANN201
     """Return an Airflow DAG. Import-safe: no-op if Airflow is not installed."""
+    if os.getenv("ENABLE_BERLIN_GEWERBEDATEN_DAG", "false").lower() != "true":
+        log.info("Berlin Gewerbedaten DAG is disabled by default.")
+        return None
     try:
         from airflow import DAG
         from airflow.providers.standard.operators.python import PythonOperator

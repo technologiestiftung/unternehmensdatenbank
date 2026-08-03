@@ -73,7 +73,7 @@ docker compose up -d airflow-apiserver airflow-scheduler airflow-dag-processor a
 
 ## Access
 
-- Airflow UI/API: http://localhost:8080
+- Airflow UI/API: http://localhost:8082
 - pgAdmin: http://localhost:5051
 - Overpass API: http://localhost:12345/api/interpreter when started with `--profile geo`
 - Nominatim: http://localhost:8081/reverse when started with `--profile geocoding`
@@ -149,6 +149,7 @@ docker compose down -v
 - [Core queries](docs/core-queries.sql)
 - [Geospatial services](docs/geospatial.md)
 - [Berlin Gewerbedaten pipeline](docs/berlin-gewerbedaten-pipeline.md)
+- [Source enrichment DAGs](docs/source-enrichment-dags.md)
 
 ## Notes
 
@@ -157,6 +158,8 @@ docker compose down -v
 - Airflow now builds from a local Dockerfile so the Berlin Gewerbedaten DAG dependencies are installed inside the scheduler containers.
 - The Berlin Gewerbedaten pipeline now streams to JSONL and loads Postgres in batches instead of holding the full dataset in memory.
 - Name enrichment is disabled by default and public Overpass fallback is disabled by default; enable them explicitly when you have local Overpass available.
+- The Berlin Gewerbedaten DAG is disabled by default. The active direction is source-specific enrichment via Mistral search discovery, Kununu, and LinkedIn DAGs.
+- Active discovery providers in the repo are `mistral_search_discovery` and `claude_search_discovery`. Kununu and LinkedIn are treated as discovered URL fields, not separate runnable DAGs.
 - Flyway is defined as a one-shot tool service. It does not run automatically with `docker compose up`.
 - Flyway connection settings come from the same `.env` values as the rest of the stack, so local credentials only need to be changed in one place.
 - The initial migration only creates a minimal `app.sources` table so the migration pipeline has a real baseline.
