@@ -67,6 +67,20 @@ x-airflow-common: &airflow-common
     CLAUDE_DISCOVERY_MAX_RESULTS: ${CLAUDE_DISCOVERY_MAX_RESULTS:-5}
     CLAUDE_PROGRESS_LOG_EVERY: ${CLAUDE_PROGRESS_LOG_EVERY:-10}
     CLAUDE_DISCOVERY_CHECKPOINT_FILE: ${CLAUDE_DISCOVERY_CHECKPOINT_FILE:-/opt/airflow/data/claude_search_discovery_checkpoint.json}
+    ENABLE_OLLAMA_SEARCH_DISCOVERY: ${ENABLE_OLLAMA_SEARCH_DISCOVERY:-false}
+    OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-http://ollama:11434}
+    OLLAMA_MODEL: ${OLLAMA_MODEL:-qwen2.5:7b}
+    OLLAMA_HTTP_TIMEOUT_S: ${OLLAMA_HTTP_TIMEOUT_S:-120}
+    OLLAMA_HTTP_MAX_RETRIES: ${OLLAMA_HTTP_MAX_RETRIES:-3}
+    OLLAMA_REQUEST_DELAY_S: ${OLLAMA_REQUEST_DELAY_S:-0.0}
+    OLLAMA_RETRY_WAIT_S: ${OLLAMA_RETRY_WAIT_S:-5.0}
+    OLLAMA_PROGRESS_LOG_EVERY: ${OLLAMA_PROGRESS_LOG_EVERY:-10}
+    OLLAMA_DISCOVERY_CHECKPOINT_FILE: ${OLLAMA_DISCOVERY_CHECKPOINT_FILE:-/opt/airflow/data/ollama_search_discovery_checkpoint.json}
+    SEARXNG_BASE_URL: ${SEARXNG_BASE_URL:-http://searxng:8080}
+    SEARXNG_MAX_RESULTS: ${SEARXNG_MAX_RESULTS:-5}
+    SEARXNG_TIMEOUT_S: ${SEARXNG_TIMEOUT_S:-15}
+    SEARXNG_HTTP_MAX_RETRIES: ${SEARXNG_HTTP_MAX_RETRIES:-3}
+    SEARXNG_RETRY_WAIT_S: ${SEARXNG_RETRY_WAIT_S:-2.0}
   volumes:
     - ./airflow/dags:/opt/airflow/dags
     - ./airflow/logs:/opt/airflow/logs
@@ -267,8 +281,45 @@ services:
       - -connectRetries=60
       - migrate
 
+  searxng:
+    image: searxng/searxng:latest
+    profiles:
+      - llm
+    ports:
+      - "${SEARXNG_PORT:-8888}:8080"
+    volumes:
+      - ./searxng:/etc/searxng:rw
+    environment:
+      SEARXNG_SECRET: ${SEARXNG_SECRET:-changeme_update_this}
+    cap_drop:
+      - ALL
+    cap_add:
+      - CHOWN
+      - SETGID
+      - SETUID
+    restart: unless-stopped
+
+  ollama:
+    image: ollama/ollama:latest
+    profiles:
+      - llm
+    ports:
+      - "${OLLAMA_PORT:-11434}:11434"
+    volumes:
+      - ollama-models:/root/.ollama
+    restart: unless-stopped
+    # Uncomment to enable NVIDIA GPU:
+    # deploy:
+    #   resources:
+    #     reservations:
+    #       devices:
+    #         - driver: nvidia
+    #           count: all
+    #           capabilities: [gpu]
+
 volumes:
   postgres-data:
   pgadmin-data:
   overpass-db:
   nominatim-db:
+  ollama-models:

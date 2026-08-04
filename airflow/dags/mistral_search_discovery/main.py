@@ -10,7 +10,7 @@ from concurrent.futures import Future, ThreadPoolExecutor
 import time
 from urllib.parse import urlparse
 
-from mistral_http import MistralRateLimitError, require_mistral_api_key, run_websearch_prompt
+from .mistral_http import MistralRateLimitError, require_mistral_api_key, run_websearch_prompt
 from source_enrichment_common import (
     build_search_queries,
     dump_preview_payload,

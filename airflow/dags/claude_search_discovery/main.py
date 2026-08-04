@@ -7,7 +7,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from claude_http import ClaudeRateLimitError, require_anthropic_api_key, run_websearch_prompt
+from .claude_http import ClaudeRateLimitError, require_anthropic_api_key, run_websearch_prompt
 from source_enrichment_common import (
     build_search_queries,
     dump_preview_payload,
