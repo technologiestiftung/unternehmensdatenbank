@@ -221,6 +221,7 @@ def run_url_discovery() -> None:
 
                         if best:
                             if best["score"] >= AUTO_ACCEPT_SCORE:
+                                _website_conf = 1.0
                                 insert_text_observation(
                                     cur,
                                     company_id=company.id,
@@ -234,10 +235,11 @@ def run_url_discovery() -> None:
                                         "verified_by": "register_number_match",
                                         "register_number": (best.get("extracted") or {}).get("register_number"),
                                     },
-                                    confidence=1.0,
+                                    confidence=_website_conf,
                                 )
                             elif best["score"] >= 0:
                                 _uniq = name_uniqueness(company.company_name)
+                                _website_conf = round(0.35 + 0.30 * _uniq, 4)
                                 insert_text_observation(
                                     cur,
                                     company_id=company.id,
@@ -251,8 +253,56 @@ def run_url_discovery() -> None:
                                         "verified_by": "url_pattern",
                                         "name_uniqueness": round(_uniq, 3),
                                     },
-                                    confidence=round(0.35 + 0.30 * _uniq, 4),
+                                    confidence=_website_conf,
                                 )
+                            else:
+                                _website_conf = None
+
+                            # Store imprint-extracted fields with confidence
+                            # scaled from website confidence (we trust the imprint
+                            # as much as we trust we're on the right site).
+                            if _website_conf and _website_conf >= 0.35:
+                                _ext = best.get("extracted") or {}
+                                _field_conf = round(_website_conf * 0.95, 4)
+
+                                if _ext.get("phone"):
+                                    insert_text_observation(
+                                        cur,
+                                        company_id=company.id,
+                                        source_record_id=source_record_id,
+                                        source_id=source_id,
+                                        sync_run_id=sync_run_id,
+                                        field_name="phone",
+                                        value_text=_ext["phone"],
+                                        metadata={"source": "impressum", "imprint_url": best.get("imprint_url")},
+                                        confidence=_field_conf,
+                                    )
+
+                                if _ext.get("email"):
+                                    insert_text_observation(
+                                        cur,
+                                        company_id=company.id,
+                                        source_record_id=source_record_id,
+                                        source_id=source_id,
+                                        sync_run_id=sync_run_id,
+                                        field_name="email",
+                                        value_text=_ext["email"],
+                                        metadata={"source": "impressum", "imprint_url": best.get("imprint_url")},
+                                        confidence=_field_conf,
+                                    )
+
+                                for _ceo in _ext.get("ceo_names") or []:
+                                    insert_text_observation(
+                                        cur,
+                                        company_id=company.id,
+                                        source_record_id=source_record_id,
+                                        source_id=source_id,
+                                        sync_run_id=sync_run_id,
+                                        field_name="ceo_name_or_contact",
+                                        value_text=_ceo,
+                                        metadata={"source": "impressum", "imprint_url": best.get("imprint_url")},
+                                        confidence=round(_field_conf * 0.90, 4),
+                                    )
 
                 elapsed = time.monotonic() - t0
                 best_url = best["final_url"] if best else None
