@@ -428,6 +428,8 @@ def _make_dag():  # noqa: ANN201
     except ImportError:
         return None
 
+    from airflow.providers.standard.operators.trigger_dagrun import TriggerDagRunOperator
+
     with DAG(
         dag_id=SOURCE_KEY,
         description="Self-hosted company discovery via SearXNG search + Ollama LLM extraction",
@@ -436,10 +438,16 @@ def _make_dag():  # noqa: ANN201
         catchup=False,
         tags=["sources", "ollama", "searxng", "discovery", "local"],
     ) as dag:
-        PythonOperator(
+        discover = PythonOperator(
             task_id="run_ollama_search_discovery",
             python_callable=run_ollama_search_discovery,
         )
+        trigger_coordinator = TriggerDagRunOperator(
+            task_id="trigger_pipeline_coordinator",
+            trigger_dag_id="pipeline_coordinator",
+            wait_for_completion=False,
+        )
+        discover >> trigger_coordinator
     return dag
 
 

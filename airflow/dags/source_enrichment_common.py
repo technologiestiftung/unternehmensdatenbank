@@ -506,6 +506,73 @@ def fetch_companies_with_latest_text_observation(
         connection.close()
 
 
+def fetch_companies_for_llm_enrichment(
+    source_key: str,
+    *,
+    after_id: str | None = None,
+    limit: int = SOURCE_ENRICHMENT_BATCH_SIZE,
+    min_quality_score: float | None = None,
+    max_quality_score: float = 0.90,
+) -> list[CompanyCandidate]:
+    """
+    Like fetch_companies_without_source_after_id but additionally skips companies
+    whose data_quality_score is already at or above max_quality_score (default 0.90).
+    Use this for expensive LLM enrichment so fully-covered companies are not
+    re-processed. Set min_quality_score to prioritise the least-enriched companies.
+    """
+    connection = get_connection()
+    try:
+        with connection, connection.cursor() as cur:
+            id_clause = "AND c.id > %s" if after_id else ""
+            params: list = []
+            if after_id:
+                params.append(after_id)
+            params += [source_key, max_quality_score, limit * SOURCE_ENRICHMENT_SELECTION_WINDOW]
+            if min_quality_score is not None:
+                quality_clause = (
+                    "AND (c.data_quality_score IS NULL OR c.data_quality_score BETWEEN %s AND %s)"
+                )
+                params.insert(-1, min_quality_score)
+                params.insert(-1, max_quality_score)
+            else:
+                quality_clause = "AND (c.data_quality_score IS NULL OR c.data_quality_score < %s)"
+            cur.execute(
+                f"""
+                SELECT
+                  c.id,
+                  c.company_name,
+                  c.address,
+                  c.postcode,
+                  c.city,
+                  c.registration_number,
+                  c.legal_form,
+                  c.wz_code,
+                  c.business_purpose,
+                  c.metadata ->> 'branch_description' as branch_description
+                FROM public.companies c
+                WHERE true
+                  {id_clause}
+                  AND NOT EXISTS (
+                    SELECT 1
+                    FROM public.company_source_records csr
+                    JOIN public.sources s ON s.id = csr.source_id
+                    WHERE csr.company_id = c.id
+                      AND s.key = %s
+                      AND COALESCE(csr.source_payload ->> 'status', '') <> 'planned'
+                  )
+                  {quality_clause}
+                ORDER BY c.id ASC
+                LIMIT %s
+                """,
+                params,
+            )
+            return _rank_company_candidates(
+                [CompanyCandidate(*row) for row in cur.fetchall()], limit
+            )
+    finally:
+        connection.close()
+
+
 def build_search_queries(company: CompanyCandidate) -> dict[str, str]:
     exact_name = f'"{company.company_name}"'
     normalized = normalize_company_name_for_search(company.company_name)

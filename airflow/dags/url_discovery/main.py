@@ -9,10 +9,13 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from .candidate_generator import generate_candidates
-from .http_client import fetch_impressum, verify_url
-from .imprint_extractor import extract_from_html
-from .scorer import AUTO_ACCEPT_SCORE, MIN_STORE_SCORE, score_candidate
+import sys as _sys, os as _os
+_sys.path.insert(0, _os.path.dirname(_os.path.abspath(__file__)))
+
+from candidate_generator import generate_candidates
+from http_client import fetch_impressum, verify_url
+from imprint_extractor import extract_from_html
+from scorer import AUTO_ACCEPT_SCORE, MIN_STORE_SCORE, name_uniqueness, score_candidate
 from source_enrichment_common import (
     build_search_queries,
     dump_preview_payload,
@@ -234,6 +237,7 @@ def run_url_discovery() -> None:
                                     confidence=1.0,
                                 )
                             elif best["score"] >= 0:
+                                _uniq = name_uniqueness(company.company_name)
                                 insert_text_observation(
                                     cur,
                                     company_id=company.id,
@@ -242,8 +246,12 @@ def run_url_discovery() -> None:
                                     sync_run_id=sync_run_id,
                                     field_name="website",
                                     value_text=best["final_url"],
-                                    metadata={"score": best["score"], "verified_by": "url_pattern"},
-                                    confidence=0.5,
+                                    metadata={
+                                        "score": best["score"],
+                                        "verified_by": "url_pattern",
+                                        "name_uniqueness": round(_uniq, 3),
+                                    },
+                                    confidence=round(0.35 + 0.30 * _uniq, 4),
                                 )
 
                 elapsed = time.monotonic() - t0
@@ -301,6 +309,8 @@ def _make_dag():  # noqa: ANN201
     except ImportError:
         return None
 
+    from airflow.providers.standard.operators.trigger_dagrun import TriggerDagRunOperator
+
     with DAG(
         dag_id=SOURCE_KEY,
         description="Discover company websites via URL pattern matching and imprint verification",
@@ -309,10 +319,16 @@ def _make_dag():  # noqa: ANN201
         catchup=False,
         tags=["sources", "url", "discovery", "matching"],
     ) as dag:
-        PythonOperator(
+        discover = PythonOperator(
             task_id="run_url_discovery",
             python_callable=run_url_discovery,
         )
+        trigger_coordinator = TriggerDagRunOperator(
+            task_id="trigger_pipeline_coordinator",
+            trigger_dag_id="pipeline_coordinator",
+            wait_for_completion=False,
+        )
+        discover >> trigger_coordinator
     return dag
 
 

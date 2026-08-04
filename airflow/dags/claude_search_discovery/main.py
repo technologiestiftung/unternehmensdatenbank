@@ -7,7 +7,10 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from .claude_http import ClaudeRateLimitError, require_anthropic_api_key, run_websearch_prompt
+import sys as _sys, os as _os
+_sys.path.insert(0, _os.path.dirname(_os.path.abspath(__file__)))
+
+from claude_http import ClaudeRateLimitError, require_anthropic_api_key, run_websearch_prompt
 from source_enrichment_common import (
     build_search_queries,
     dump_preview_payload,
@@ -349,6 +352,8 @@ def _make_dag():  # noqa: ANN201
     except ImportError:
         return None
 
+    from airflow.providers.standard.operators.trigger_dagrun import TriggerDagRunOperator
+
     with DAG(
         dag_id=SOURCE_KEY,
         description="Use live Claude web search to discover company metadata and candidate URLs",
@@ -357,10 +362,16 @@ def _make_dag():  # noqa: ANN201
         catchup=False,
         tags=["sources", "claude", "discovery"],
     ) as dag:
-        PythonOperator(
+        discover = PythonOperator(
             task_id="prepare_claude_search_discovery",
             python_callable=run_claude_search_discovery,
         )
+        trigger_coordinator = TriggerDagRunOperator(
+            task_id="trigger_pipeline_coordinator",
+            trigger_dag_id="pipeline_coordinator",
+            wait_for_completion=False,
+        )
+        discover >> trigger_coordinator
     return dag
 
 

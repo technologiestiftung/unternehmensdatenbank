@@ -10,7 +10,10 @@ from concurrent.futures import Future, ThreadPoolExecutor
 import time
 from urllib.parse import urlparse
 
-from .mistral_http import MistralRateLimitError, require_mistral_api_key, run_websearch_prompt
+import sys as _sys, os as _os
+_sys.path.insert(0, _os.path.dirname(_os.path.abspath(__file__)))
+
+from mistral_http import MistralRateLimitError, require_mistral_api_key, run_websearch_prompt
 from source_enrichment_common import (
     build_search_queries,
     dump_preview_payload,
@@ -486,6 +489,8 @@ def _make_dag():  # noqa: ANN201
     except ImportError:
         return None
 
+    from airflow.providers.standard.operators.trigger_dagrun import TriggerDagRunOperator
+
     with DAG(
         dag_id=SOURCE_KEY,
         description="Use live Mistral web search to discover official, Kununu, and LinkedIn URLs",
@@ -494,10 +499,16 @@ def _make_dag():  # noqa: ANN201
         catchup=False,
         tags=["sources", "mistral", "discovery"],
     ) as dag:
-        PythonOperator(
+        discover = PythonOperator(
             task_id="prepare_mistral_search_discovery",
             python_callable=run_mistral_search_discovery,
         )
+        trigger_coordinator = TriggerDagRunOperator(
+            task_id="trigger_pipeline_coordinator",
+            trigger_dag_id="pipeline_coordinator",
+            wait_for_completion=False,
+        )
+        discover >> trigger_coordinator
     return dag
 
 

@@ -51,6 +51,14 @@ OUTPUT_COLUMNS = [
     "metadata_json",
 ]
 
+def _fix_encoding(text: str) -> str:
+    """Fix double-encoded text: UTF-8 bytes that were mis-read as CP1252 then re-encoded."""
+    try:
+        return text.encode("cp1252").decode("utf-8")
+    except (UnicodeEncodeError, UnicodeDecodeError):
+        return text
+
+
 DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 WZ_RE = re.compile(r"^\d{2}(?:\.\d{2}(?:\.\d)?)?$")
 LEGAL_SUFFIX_RE = re.compile(
@@ -140,7 +148,7 @@ def main() -> int:
     with input_path.open("r", encoding="utf-8-sig") as src, output_path.open(
         "w", encoding="utf-8", newline=""
     ) as dst:
-        header = next(csv.reader([src.readline().rstrip("\n")]))
+        header = next(csv.reader([_fix_encoding(src.readline().rstrip("\n"))]))
         if header[: len(HEADER_PREFIX)] != HEADER_PREFIX:
             raise ValueError("unexpected input header")
 
@@ -150,6 +158,7 @@ def main() -> int:
         for lineno, raw_line in enumerate(src, start=2):
             if not raw_line.strip():
                 continue
+            raw_line = _fix_encoding(raw_line)
 
             try:
                 row = parse_clean_csv_line(raw_line)
