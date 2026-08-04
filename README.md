@@ -1,166 +1,166 @@
 # Unternehmensdatenbank
 
-Local development scaffold for a Postgres-backed company data platform with Airflow for orchestration and Flyway for schema migrations.
+Local development scaffold for a Postgres-backed company data platform. The goal is to enrich a dataset of ~400k Berlin companies with structured fields (website, cluster, tech field, CEO contact, revenue, employee count) by running a cost-efficient waterfall of discovery pipelines.
 
 ## Stack
 
-- Postgres `16` for both Airflow metadata and the application database
-- Airflow `3.2.0` for local DAG development
-- Flyway `12` for SQL-first schema migrations
+| Component | Version | Role |
+|-----------|---------|------|
+| Postgres | 16 | App database + Airflow metadata (two separate DBs on one server) |
+| Airflow | 3.2.0 | Pipeline orchestration (Airflow 3 API) |
+| Flyway | 12 | Forward-only SQL migrations |
+| Python | 3.12 | DAG logic, psycopg2 for DB writes |
 
-## Why this setup
+## Data model
 
-- Airflow orchestrates syncs and workflows
-- Flyway owns schema changes
-- Postgres is split into two databases on the same local server:
-  - `airflow` for Airflow's metadata
-  - `unternehmensdatenbank` for the actual application schema
+The core pattern is **multi-source canonical resolution**: raw observations from each source are promoted to a single winning value per field per company.
 
-That separation keeps Airflow infrastructure state away from the domain data model.
-
-## Repository structure
-
-```text
-.
-├── airflow/
-│   ├── config/
-│   ├── dags/
-│   └── plugins/
-├── db/
-│   └── migrations/
-├── postgres/
-│   └── init/
-└── docker-compose.yml
 ```
+companies                             ← identity + pipeline metadata only
+  └─ company_source_records           ← one raw record per (source, external_id)
+       └─ company_field_observations  ← one row per field claim, with confidence
+            └─ company_canonical_field_sources  ← winning observation per field
+```
+
+**`companies`** holds register fields (name, legal form, address, WZ code, established_at) and `data_quality_score`. It does **not** store enriched values directly.
+
+**`company_field_observations`** stores every claim from every source. Each row has:
+- `field_name` — the logical field being claimed (e.g. `candidate_url`, `website`, `cluster`)
+- `value_text` / `value_number` / `value_date` / `value_jsonb`
+- `confidence` — 0.0–1.0, source- and name-uniqueness-aware
+- `is_canonical` — true on the single winning observation per (company, field)
+
+**`company_canonical_field_sources`** has one row per logical field per company, pointing at the winning observation. Written by `pipeline_coordinator`.
+
+**`v_companies_enriched`** — the view applications should query. Joins through the canonical table to expose `website_url`, `cluster`, `tech_field`, `revenue`, `employee_count` alongside identity fields, confidence scores, and winning source key.
+
+### Source priority (lower = more trusted)
+
+| Priority | Source |
+|----------|--------|
+| 10 | handelsregister |
+| 20 | url_discovery |
+| 30 | osm_discovery |
+| 50 | mistral_search_discovery, claude_search_discovery |
+| 60 | ollama_search_discovery |
+
+When multiple sources agree on the same value, each additional agreeing source adds +0.10 to the effective confidence (capped at 1.0).
+
+## Enrichment pipeline
+
+The pipeline is a **waterfall**: free sources run first over all companies; expensive LLM sources run only on companies with `data_quality_score < 0.50`.
+
+```
+url_discovery          (free, fast — URL pattern matching + imprint verification)
+       │
+       └─► pipeline_coordinator  ← auto-triggered on every source DAG completion
+
+osm_discovery          (free, local Overpass — Berlin geodata only)
+       │
+       └─► pipeline_coordinator
+
+ollama_search_discovery  (free, local LLM via Ollama + SearXNG web search)
+       │
+       └─► pipeline_coordinator
+
+mistral_search_discovery  (paid, best web search quality)
+       │
+       └─► pipeline_coordinator
+
+claude_search_discovery   (paid, used for structured field extraction)
+       │
+       └─► pipeline_coordinator
+```
+
+Every source DAG ends with a `TriggerDagRunOperator` that fires `pipeline_coordinator` automatically. The coordinator resolves canonical fields, recomputes `data_quality_score`, and logs field coverage.
+
+### `data_quality_score` field weights
+
+| Field | Weight |
+|-------|--------|
+| website | 0.30 |
+| cluster | 0.20 |
+| tech_field | 0.20 |
+| ceo_contact | 0.15 |
+| revenue | 0.10 |
+| employee_count | 0.05 |
+
+Companies with score < 0.50 are the priority LLM enrichment targets.
+
+## DAG directory
+
+See [`airflow/dags/README.md`](airflow/dags/README.md) for a full description of each DAG and shared module.
 
 ## Quickstart
 
-1. Create a local env file:
-
 ```bash
 cp .env.example .env
-```
-
-Or do the whole startup sequence in one command:
-
-```bash
 ./scripts/dev-up.sh
 ```
 
-2. Start Postgres:
+This starts Postgres, runs all Flyway migrations, builds the Airflow image, and brings up all Airflow services. Then open http://localhost:8080 (airflow / airflow), unpause the DAGs you want, and trigger them.
+
+To import a Northdata CSV export into the companies table:
 
 ```bash
-docker compose up -d postgres
+python scripts/prepare_company_import.py input.csv output.csv
 ```
 
-3. Run database migrations:
+## Common commands
 
 ```bash
+# Full stack startup in correct order
+./scripts/dev-up.sh
+
+# Run pending migrations
 docker compose --profile tools run --rm flyway
-```
 
-4. Initialize Airflow metadata and create the local admin user:
+# Check migration state
+docker compose --profile tools run --rm flyway info
 
-```bash
-docker compose up airflow-init
-```
+# Rebuild Airflow image (after changing Dockerfile or requirements.txt)
+docker compose build
 
-5. Start Airflow:
+# Open Airflow CLI shell
+docker compose --profile debug run --rm airflow-cli bash
 
-```bash
-docker compose up -d airflow-apiserver airflow-scheduler airflow-dag-processor airflow-triggerer
+# Stop stack
+docker compose down
+
+# Destroy volumes (wipes all data)
+docker compose down -v
+
+# Optional: local Overpass for Berlin geodata
+docker compose --profile geo up -d overpass
+
+# Optional: local Nominatim for geocoding
+docker compose --profile geocoding up -d nominatim
 ```
 
 ## Access
 
-- Airflow UI/API: http://localhost:8082
-- pgAdmin: http://localhost:5051
-- Overpass API: http://localhost:12345/api/interpreter when started with `--profile geo`
-- Nominatim: http://localhost:8081/reverse when started with `--profile geocoding`
-- Airflow username: `airflow`
-- Airflow password: `airflow`
-- pgAdmin email: `admin@example.com`
-- pgAdmin password: `admin`
-- Postgres host: `localhost`
-- Postgres port: `5433` by default, configurable via `POSTGRES_PORT`
-- App database: `unternehmensdatenbank`
+| Service | URL | Credentials |
+|---------|-----|-------------|
+| Airflow UI | http://localhost:8080 | airflow / airflow |
+| pgAdmin | http://localhost:5051 | admin@example.com / admin |
+| Postgres | localhost:5433 | app / app — db: unternehmensdatenbank |
+| SearXNG | http://localhost:8888 | — |
+| Overpass (optional) | http://localhost:12345/api/interpreter | — |
+| Nominatim (optional) | http://localhost:8081/reverse | — |
 
-## Common commands
+## Environment flags
 
-Start the full local stack in the safe order:
+All DAGs are disabled by default. Enable them in `.env`:
 
-```bash
-./scripts/dev-up.sh
+```
+ENABLE_URL_DISCOVERY=true
+ENABLE_OSM_DISCOVERY=true               # requires local Overpass (Berlin only)
+ENABLE_MISTRAL_SEARCH_DISCOVERY=true    # requires MISTRAL_API_KEY
+ENABLE_CLAUDE_SEARCH_DISCOVERY=true     # requires ANTHROPIC_API_KEY
+ENABLE_OLLAMA_SEARCH_DISCOVERY=true     # requires local Ollama + SearXNG
+ENABLE_BERLIN_GEWERBEDATEN_DAG=true     # legacy loader, off by default
 ```
 
-Run pending migrations:
+## Migrations
 
-```bash
-docker compose --profile tools run --rm flyway
-```
-
-Inspect Flyway migration state:
-
-```bash
-docker compose --profile tools run --rm flyway info
-```
-
-Open an Airflow CLI shell:
-
-```bash
-docker compose --profile debug run --rm airflow-cli bash
-```
-
-Open pgAdmin logs:
-
-```bash
-docker compose logs -f pgadmin
-```
-
-Start local Overpass for Berlin:
-
-```bash
-docker compose --profile geo up -d overpass
-docker compose logs -f overpass
-```
-
-Start local Nominatim:
-
-```bash
-docker compose --profile geocoding up -d nominatim
-docker compose logs -f nominatim
-```
-
-Stop the stack:
-
-```bash
-docker compose down
-```
-
-Remove containers and volumes:
-
-```bash
-docker compose down -v
-```
-
-## Documentation
-
-- [Data model](docs/data-model.md)
-- [Core queries](docs/core-queries.sql)
-- [Geospatial services](docs/geospatial.md)
-- [Berlin Gewerbedaten pipeline](docs/berlin-gewerbedaten-pipeline.md)
-- [Source enrichment DAGs](docs/source-enrichment-dags.md)
-
-## Notes
-
-- pgAdmin is preconfigured with a local server entry pointing at the `postgres` container.
-- Overpass and Nominatim are optional heavy services and are intentionally not part of the default `./scripts/dev-up.sh` startup path.
-- Airflow now builds from a local Dockerfile so the Berlin Gewerbedaten DAG dependencies are installed inside the scheduler containers.
-- The Berlin Gewerbedaten pipeline now streams to JSONL and loads Postgres in batches instead of holding the full dataset in memory.
-- Name enrichment is disabled by default and public Overpass fallback is disabled by default; enable them explicitly when you have local Overpass available.
-- The Berlin Gewerbedaten DAG is disabled by default. The active direction is source-specific enrichment via Mistral search discovery, Kununu, and LinkedIn DAGs.
-- Active discovery providers in the repo are `mistral_search_discovery` and `claude_search_discovery`. Kununu and LinkedIn are treated as discovered URL fields, not separate runnable DAGs.
-- Flyway is defined as a one-shot tool service. It does not run automatically with `docker compose up`.
-- Flyway connection settings come from the same `.env` values as the rest of the stack, so local credentials only need to be changed in one place.
-- The initial migration only creates a minimal `app.sources` table so the migration pipeline has a real baseline.
-- Add future schema changes as new immutable SQL files under [db/migrations](db/migrations).
+All schema changes go in `db/migrations/` as `V{N}__description.sql`. Migrations are **forward-only and immutable** once applied. Flyway runs as a one-shot Docker service and does not start automatically with `docker compose up`.
