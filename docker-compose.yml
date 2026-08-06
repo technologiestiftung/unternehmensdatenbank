@@ -97,6 +97,31 @@ x-airflow-common: &airflow-common
     OSM_DISCOVERY_PROGRESS_LOG_EVERY: ${OSM_DISCOVERY_PROGRESS_LOG_EVERY:-25}
     OSM_DISCOVERY_CHECKPOINT_FILE: ${OSM_DISCOVERY_CHECKPOINT_FILE:-/opt/airflow/data/osm_discovery_checkpoint.json}
     OSM_MIN_MATCH_SCORE: ${OSM_MIN_MATCH_SCORE:-0.65}
+    # Shared extraction model for the search-API providers. Deliberately NOT MISTRAL_MODEL,
+    # which is a reasoning model and would burn output tokens on a mechanical extraction.
+    EXTRACT_MODEL: ${EXTRACT_MODEL:-ministral-8b-latest}
+    EXTRACT_MAX_CHARS: ${EXTRACT_MAX_CHARS:-20000}
+    EXTRACT_HTTP_TIMEOUT_S: ${EXTRACT_HTTP_TIMEOUT_S:-90}
+    EXTRACT_HTTP_MAX_RETRIES: ${EXTRACT_HTTP_MAX_RETRIES:-3}
+    EXTRACT_RETRY_MAX_WAIT_S: ${EXTRACT_RETRY_MAX_WAIT_S:-30}
+    EXTRACT_PRICE_IN: ${EXTRACT_PRICE_IN:-0}
+    EXTRACT_PRICE_OUT: ${EXTRACT_PRICE_OUT:-0}
+    MISTRAL_API_BASE_URL: ${MISTRAL_API_BASE_URL:-https://api.mistral.ai/v1}
+    # Impressum probing: works around fetch_impressum returning homepages (0/8 register
+    # numbers found vs 3/8 when the explicit paths are probed).
+    IMPRINT_PROBE_ENABLED: ${IMPRINT_PROBE_ENABLED:-true}
+    IMPRINT_PROBE_PATHS: ${IMPRINT_PROBE_PATHS:-/impressum/,/impressum,/imprint,/impressum.html}
+    IMPRINT_PROBE_TIMEOUT_S: ${IMPRINT_PROBE_TIMEOUT_S:-12}
+    LLM_WEBSITE_CONF_CAP: ${LLM_WEBSITE_CONF_CAP:-0.34}
+    # Parallel Search MCP — free and anonymous, so the key is optional and only raises limits.
+    ENABLE_PARALLEL_SEARCH_DISCOVERY: ${ENABLE_PARALLEL_SEARCH_DISCOVERY:-false}
+    PARALLEL_API_KEY: ${PARALLEL_API_KEY:-}
+    PARALLEL_MCP_URL: ${PARALLEL_MCP_URL:-https://search.parallel.ai/mcp}
+    PARALLEL_MCP_TIMEOUT_S: ${PARALLEL_MCP_TIMEOUT_S:-120}
+    PARALLEL_QUOTA_GIVEUP_AFTER: ${PARALLEL_QUOTA_GIVEUP_AFTER:-3}
+    PARALLEL_MAX_CANDIDATES: ${PARALLEL_MAX_CANDIDATES:-5}
+    PARALLEL_PROGRESS_LOG_EVERY: ${PARALLEL_PROGRESS_LOG_EVERY:-10}
+    PARALLEL_DISCOVERY_CHECKPOINT_FILE: ${PARALLEL_DISCOVERY_CHECKPOINT_FILE:-/opt/airflow/data/parallel_search_discovery_checkpoint.json}
   volumes:
     - ./airflow/dags:/opt/airflow/dags
     - ./airflow/logs:/opt/airflow/logs
