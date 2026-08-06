@@ -75,6 +75,11 @@ CASES: list[tuple[str, str, int, bool]] = [
     # only substring containment can accept this.
     ("https://zebrabar.de", "Zebra Bar UG", 120, True),
     ("https://www.zeitgeist-shop.com", "Zeitgeist GmbH", 20, True),
+    # Own-site paths that resemble directory paths. Exa returned all of these for Zaunkontor
+    # GmbH; an earlier version tested the path before the host and would have refused them.
+    ("https://zaunkontor.eu/unternehmen/", "Zaunkontor GmbH", 120, True),
+    ("https://zaunkontor.eu/kontakt/", "Zaunkontor GmbH", 20, True),
+    ("https://zaunkontor.eu/firmen/", "Zaunkontor GmbH", 20, True),
     # --- accepted known miss ---------------------------------------------------------------
     # zffcn.com IS ZF Foxconn Chassis Modules GmbH's site, but the host shares no token with the
     # name, so it is refused. Recording no website beats recording a registry page: the escape

@@ -35,7 +35,13 @@ from mistral_extract import (
     extract_json,
     require_extract_api_key,
 )
-from search_common import SearchResponse, filter_hits, is_own_site_candidate, origin_url
+from search_common import (
+    SearchResponse,
+    filter_hits,
+    is_own_site_candidate,
+    origin_url,
+    own_site_verdict,
+)
 from source_enrichment_common import (
     build_search_queries,
     ensure_source,
@@ -339,17 +345,18 @@ def write_observations(
         # under that name competes to become the canonical website. `directory_url` is a name
         # the resolver does not consume — queryable evidence, out of contention. The SAME
         # predicate decides this and `best` above; using a looser one here was the bug.
-        is_own_site = is_own_site_candidate(
-            candidate["final_url"], company.company_name, candidate["score"], AUTO_ACCEPT_SCORE
-        )
+        verdict = own_site_verdict(candidate["final_url"], company.company_name)
         insert_text_observation(
             cur,
             **common,
-            field_name="candidate_url" if is_own_site else "directory_url",
+            field_name="candidate_url" if verdict == "own_site" else "directory_url",
             value_text=candidate["final_url"],
             metadata={
                 "provider": provider,
                 "score": candidate["score"],
+                # Why this URL did not qualify as the company's own site. A directory hit and a
+                # name mismatch are different provider failure modes; keep them apart.
+                "rejected_as": None if verdict == "own_site" else verdict,
                 "imprint_url": candidate["imprint_url"],
                 "register_number": (candidate["extracted"] or {}).get("register_number"),
                 "postcode": (candidate["extracted"] or {}).get("postcode"),

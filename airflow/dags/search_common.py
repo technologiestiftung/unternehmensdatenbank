@@ -112,9 +112,29 @@ def is_own_site_candidate(
     threshold, so they end with no canonical website rather than a wrong one. `score` stays in
     the signature: it drives candidate confidence and the caller passes it either way.
     """
-    if is_directory_host(url) or looks_like_company_listing(url):
-        return False
-    return host_matches_company(url, company_name)
+    return own_site_verdict(url, company_name) == "own_site"
+
+
+def own_site_verdict(url: str, company_name: str) -> str:
+    """`is_own_site_candidate` with the reason kept: "own_site" or why it was refused.
+
+    Recorded in the `directory_url` observation metadata as `rejected_as`, which is what makes
+    "why did this provider's URLs not qualify" answerable per provider — a directory hit and a
+    name mismatch are different failure modes and would otherwise be indistinguishable.
+
+    Order matters. A host carrying the company name wins over a listing-looking path, because
+    real company sites use those paths: Exa returned `zaunkontor.eu/unternehmen/` and
+    `zaunkontor.eu/kontakt/` for Zaunkontor GmbH. Testing the path first — as an earlier version
+    did — would refuse a company's own page on the strength of its URL structure alone, which is
+    the reverse of what `looks_like_company_listing` documents.
+    """
+    if is_directory_host(url):
+        return "directory_host"
+    if host_matches_company(url, company_name):
+        return "own_site"
+    if looks_like_company_listing(url):
+        return "company_listing"
+    return "host_name_mismatch"
 
 
 def origin_url(url: str) -> str:
