@@ -32,6 +32,10 @@ DIRECTORY_HOSTS = (
     "wer-zu-wem.", "handelsregister", "openregister.", "bundesanzeiger.", "unternehmensregister.",
     "near-place.", "onlinestreet.", "pedali.", "reparadius.", "fahrradreparatur.",
     "companyhouse.", "firmenwissen.", "moneyhouse.", "cylex.", "dasoertliche.", "11880.",
+    "creditsafe.", "bisnode.", "bvdinfo.", "genios.", "wlw.de", "europages.",
+    # Insolvency registries quote the HRB verbatim, so they score +100 like any registry:
+    # insolvenz-radar.de and insolvenzindex.de both became Zender Medical GmbH's website at 1.0.
+    "insolvenz", "unternehmensinsolvenz",
     "trustpilot.", "provenexpert.", "tracxn.", "crunchbase.", "dealroom.", "pitchbook.",
     "linkedin.com", "facebook.com", "instagram.com", "xing.com", "youtube.com", "twitter.com",
     "kununu.", "indeed.", "stepstone.", "wikipedia.org", "yelp.", "gelbeseiten.",
@@ -45,6 +49,72 @@ def is_directory_host(url: str) -> bool:
 
     host = (urlparse(url).hostname or "").lower()
     return bool(host) and any(marker in host for marker in DIRECTORY_HOSTS)
+
+
+#: Path segments used by company-listing pages. A blocklist of hosts always lags reality —
+#: `creditsafe.com` was absent from DIRECTORY_HOSTS and its
+#: `/business-index/de-de/company/wohnplan-...` page became Wohnplan GmbH & Co. KG's website at
+#: confidence 1.0, because a credit-registry page carries the real HRA and therefore scores +100
+#: every time. This is the host-independent signal that catches the next unknown registry.
+LISTING_PATH_MARKERS = (
+    "/business-index/", "/company/", "/companies/", "/firma/", "/firmen/",
+    "/branchenbuch/", "/anbieter/", "/eintrag/", "/handelsregister",
+    "/firmeninsolvenz/", "/insolvenz/",
+)
+
+
+def looks_like_company_listing(url: str) -> bool:
+    """True when the URL's PATH looks like one company's entry in a directory of many.
+
+    Only meaningful when the host does NOT carry the company name — a company's own site may
+    well have `/company/about`. Callers must apply it that way round; see the `own_site` filter
+    in the discovery DAGs, where it gates the score-based escape hatch only.
+    """
+    from urllib.parse import urlparse
+
+    path = (urlparse(url).path or "").lower()
+    return any(marker in path for marker in LISTING_PATH_MARKERS)
+
+
+def is_own_site_candidate(
+    url: str, company_name: str, score: int | None = None, auto_accept_score: int | None = None
+) -> bool:
+    """Could this URL be the company's OWN website, as opposed to a page about it?
+
+    Must gate BOTH the `website` observation and the `candidate_url`/`directory_url` split.
+    Splitting on `is_directory_host` alone left a hole: the resolver treats `candidate_url` as a
+    `website` alias at min confidence 0.35, so a candidate rejected as third-party still reached
+    the canonical website through the alias. Measured on 21 companies —
+    `heizoel24.de/heizoelpreise/.../osnabrueck-49086` was stored as `Ö. H. O. GmbH`'s
+    candidate_url at 0.4667 (a postcode match on a heating-oil price page, and the name yields no
+    usable tokens at all), which is above that threshold.
+
+    A register match earns the score-based escape hatch only for non-listing, non-directory URLs:
+    a company whose domain does not contain its name — `zffcn.com` for ZF Foxconn Chassis Modules
+    GmbH — can still prove itself, while registry pages cannot.
+    """
+    if is_directory_host(url):
+        return False
+    if host_matches_company(url, company_name):
+        return True
+    if score is None or auto_accept_score is None:
+        return False
+    return score >= auto_accept_score and not looks_like_company_listing(url)
+
+
+def origin_url(url: str) -> str:
+    """Reduce a URL to scheme://host — the company's *site*, not the page search surfaced.
+
+    Search returns whichever page ranked, so the winning candidate is often a subpage:
+    `zaunkontor.eu/impressum/` and `zweirad-liebig.de/about` were both stored as the company's
+    `website`. The exact page stays in the observation metadata.
+    """
+    from urllib.parse import urlparse
+
+    parts = urlparse(url)
+    if not parts.scheme or not parts.netloc:
+        return url
+    return f"{parts.scheme}://{parts.netloc}"
 
 
 @dataclass

@@ -34,7 +34,7 @@ from parallel_http import ParallelQuotaExhausted, ParallelRateLimitError, search
 
 from imprint_probe import best_imprint
 from mistral_extract import ExtractRateLimitError, as_confidence, as_str, extract_json, require_extract_api_key
-from search_common import filter_hits, host_matches_company, is_directory_host
+from search_common import filter_hits, is_own_site_candidate, origin_url
 from source_enrichment_common import (
     build_search_queries,
     ensure_source,
@@ -200,14 +200,15 @@ def _discover(company: Any) -> dict[str, Any]:
         # ABOUT the company, not that it IS the company's site.
         #
         # host_matches_company, by contrast, IS overridable by a register match — a company
-        # whose domain does not contain its name can still prove itself via the Impressum.
+        # whose domain does not contain its name can still prove itself via the Impressum. That
+        # escape hatch is what let creditsafe.com through, so is_own_site_candidate refuses it to
+        # company-listing paths. Use the SAME predicate for the candidate_url/directory_url split
+        # below — the resolver treats candidate_url as a website alias.
         own_site = [
             c
             for c in result["candidates"]
-            if not is_directory_host(c["final_url"])
-            and (
-                c["score"] >= AUTO_ACCEPT_SCORE
-                or host_matches_company(c["final_url"], company.company_name)
+            if is_own_site_candidate(
+                c["final_url"], company.company_name, c["score"], AUTO_ACCEPT_SCORE
             )
         ]
         result["best"] = own_site[0] if own_site else None
@@ -296,12 +297,15 @@ def _write_observations(cur: Any, *, company: Any, source_id: str, sync_run_id: 
         # `online-handelsregister...` register-matches by definition, giving candidate
         # confidence (100+50)/150 = 1.0, and it won canonical website for yt energie GmbH.
         # `directory_url` is a name the resolver does not consume — kept as queryable evidence,
-        # out of contention.
-        is_directory = is_directory_host(candidate["final_url"])
+        # out of contention. Anything that is not an own-site candidate goes there, not just
+        # known directory hosts: heizoel24.de is neither a directory nor Ö. H. O. GmbH's site.
+        is_own_site = is_own_site_candidate(
+            candidate["final_url"], company.company_name, candidate["score"], AUTO_ACCEPT_SCORE
+        )
         insert_text_observation(
             cur,
             **common,
-            field_name="directory_url" if is_directory else "candidate_url",
+            field_name="candidate_url" if is_own_site else "directory_url",
             value_text=candidate["final_url"],
             metadata={
                 "provider": PROVIDER,
@@ -326,8 +330,15 @@ def _write_observations(cur: Any, *, company: Any, source_id: str, sync_run_id: 
             cur,
             **common,
             field_name="website",
-            value_text=best["final_url"],
-            metadata={"provider": PROVIDER, "score": best_score, "verified_by": verified_by, **extra},
+            # The site, not the page search happened to rank. `matched_url` keeps that page.
+            value_text=origin_url(best["final_url"]),
+            metadata={
+                "provider": PROVIDER,
+                "score": best_score,
+                "verified_by": verified_by,
+                "matched_url": best["final_url"],
+                **extra,
+            },
             confidence=website_conf,
         )
 
