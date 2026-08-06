@@ -89,17 +89,32 @@ def is_own_site_candidate(
     candidate_url at 0.4667 (a postcode match on a heating-oil price page, and the name yields no
     usable tokens at all), which is above that threshold.
 
-    A register match earns the score-based escape hatch only for non-listing, non-directory URLs:
-    a company whose domain does not contain its name — `zffcn.com` for ZF Foxconn Chassis Modules
-    GmbH — can still prove itself, while registry pages cannot.
+    The host must carry the company name. There used to be an escape hatch — a register match
+    (score >= AUTO_ACCEPT_SCORE) could stand in for a host match, on the theory that a company
+    whose domain does not contain its name proves itself via the Impressum. Measured over 44
+    companies, that hatch produced **6 false positives and 0 true positives**:
+
+        creditsafe.com/business-index/...    -> Wohnplan GmbH & Co. KG   @ 1.0
+        creditsafe.com/business-index/...    -> Zender Germany GmbH      @ 1.0
+        insolvenz-radar.de/firmeninsolvenz/  -> Zender Medical GmbH      @ 1.0
+        insolvenzindex.de/insolvenz/...      -> Zender Medical GmbH      @ 1.0
+        online-handelsregister.de/...        -> yt energie GmbH          @ 1.0
+        ceginformacio.hu/cr3452210419        -> WSM Muensterland GmbH    @ 1.0
+
+    Every one is a page that quotes the register number because describing companies is its
+    business. Blocklists and listing-path markers each caught some and missed the next
+    (`/cr3452210419` looks like nothing in particular), because the hatch's premise is wrong:
+    a register match cannot distinguish "this company's site" from "a page about this company".
+
+    Known cost, accepted deliberately: a genuinely differently-branded domain is now refused —
+    `zffcn.com` is ZF Foxconn Chassis Modules GmbH's real site and scores 0 tokens against it.
+    Such companies still get a path-B website observation, capped below the resolver's 0.35
+    threshold, so they end with no canonical website rather than a wrong one. `score` stays in
+    the signature: it drives candidate confidence and the caller passes it either way.
     """
-    if is_directory_host(url):
+    if is_directory_host(url) or looks_like_company_listing(url):
         return False
-    if host_matches_company(url, company_name):
-        return True
-    if score is None or auto_accept_score is None:
-        return False
-    return score >= auto_accept_score and not looks_like_company_listing(url)
+    return host_matches_company(url, company_name)
 
 
 def origin_url(url: str) -> str:
@@ -197,7 +212,13 @@ def host_matches_company(url: str, company_name: str) -> bool:
     would have caught that domain.
 
     A company's own site almost always has its name in the domain, so require the host stem
-    to match: either equal to a name-derived slug, or containing two distinct name tokens.
+    to match: equal to a name-derived slug, containing two distinct name tokens, or — for a
+    single distinctive token — containing that token as a substring.
+
+    That last rule is why `zebrabar.de` counts as Zebra Bar UG's domain. "Bar" is too short to
+    be a token, leaving only {"zebra"}, which is neither equal to the stem "zebrabar" nor able
+    to satisfy a two-token test. Requiring 5+ characters keeps it from firing on fragments;
+    `insolvenz-radar.de` still fails for Zender Medical GmbH, as it must.
     """
     from urllib.parse import urlparse
 
@@ -211,4 +232,6 @@ def host_matches_company(url: str, company_name: str) -> bool:
     flat = stem.replace("-", "")
     if flat in {"".join(tokens), *tokens} or stem in tokens:
         return True
-    return sum(1 for t in set(tokens) if t in flat) >= 2
+    if sum(1 for t in set(tokens) if t in flat) >= 2:
+        return True
+    return any(len(t) >= 5 and t in flat for t in set(tokens))

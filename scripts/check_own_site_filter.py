@@ -60,14 +60,26 @@ CASES: list[tuple[str, str, int, bool]] = [
     ("https://www.wlw.de/de/firma/zender-germany-gmbh-1727703", "Zender Germany GmbH", 20, False),
     ("https://fahrradreparatur.org/osnabrueck/zweirad-liebig-gmbh",
      "Zweirad Liebig Verwaltungs GmbH", 20, False),
+    # Hungarian company-information site. Neither the host blocklist nor the listing-path
+    # markers caught this one — "/cr3452210419" looks like nothing in particular — which is what
+    # settled the question of whether a register match may substitute for a host match.
+    ("https://www.ceginformacio.hu/cr3452210419",
+     "WSM - Wach- und Sicherheitsdienst Muensterland GmbH", 120, False),
     # --- genuine company sites that must keep passing -------------------------------------
     ("https://zaunkontor.eu/impressum/", "Zaunkontor GmbH", 120, True),
     ("https://www.zweirad-liebig.de/about", "Zweirad Liebig GmbH & Co. KG", 120, True),
     ("https://www.zecharchitekten.de/impressum", "ZECH ARCHITEKTEN GmbH", 120, True),
     ("https://www.zenit-klettern.de/", "Zenit Klettern GmbH", 20, True),
-    # Differently-branded domain: the host carries no name token, so only the register match
-    # can save it. This is the case the score-based escape hatch exists for.
-    ("https://zffcn.com", "ZF Foxconn Chassis Modules GmbH", 120, True),
+    ("https://www.xl-media-capital.de/impressum/", "xl-media-capital GmbH", 120, True),
+    # Single distinctive token plus a suffix in the domain: "Bar" is too short to be a token, so
+    # only substring containment can accept this.
+    ("https://zebrabar.de", "Zebra Bar UG", 120, True),
+    ("https://www.zeitgeist-shop.com", "Zeitgeist GmbH", 20, True),
+    # --- accepted known miss ---------------------------------------------------------------
+    # zffcn.com IS ZF Foxconn Chassis Modules GmbH's site, but the host shares no token with the
+    # name, so it is refused. Recording no website beats recording a registry page: the escape
+    # hatch that would have admitted it returned 6 false positives and 0 true positives.
+    ("https://zffcn.com", "ZF Foxconn Chassis Modules GmbH", 120, False),
 ]
 
 
