@@ -1,16 +1,29 @@
+"""Discovery with no API bill: a local SearXNG for search, a local Ollama model for extraction.
+
+Airflow loads every DAG file as a top-level module, not as part of a package, so `from
+.ollama_http import ...` raises "attempted relative import with no known parent package" and the
+DAG never appears in the UI. Every other provider package in this folder puts its own directory
+on sys.path and imports by plain name; this one now does the same.
+
+DO NOT remove the word "airflow" from this docstring — DAG_DISCOVERY_SAFE_MODE skips any file
+lacking it.
+"""
 from __future__ import annotations
 
 import json
 import logging
 import os
+import sys as _sys
 import time
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
 
-from .ollama_http import OllamaUnavailableError, require_ollama, run_chat_prompt
-from .searxng_http import SearXNGUnavailableError, require_searxng, search as searxng_search
+_sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+
+from ollama_http import OllamaUnavailableError, require_ollama, run_chat_prompt  # noqa: E402
+from searxng_http import SearXNGUnavailableError, require_searxng, search as searxng_search  # noqa: E402
 from source_enrichment_common import (
     build_search_queries,
     dump_preview_payload,

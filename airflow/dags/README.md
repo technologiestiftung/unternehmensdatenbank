@@ -102,7 +102,13 @@ and dicts where a string was asked for; both used to reach the database.
 
 ### `searxng_http.py`
 
-Thin wrapper around the local SearXNG instance. Used by `ollama_search_discovery`.
+Thin wrapper around the local SearXNG instance.
+
+**There are two copies of this file** — this one, and `ollama_search_discovery/searxng_http.py`.
+They are not identical: the copy inside the package waits `SEARXNG_REQUEST_DELAY_S` (10 seconds
+by default) between requests, and this one does not. `ollama_search_discovery` puts its own
+directory first on `sys.path`, so it gets the copy with the delay, and nothing currently imports
+the one at this level. Delete one of them before the difference bites someone.
 
 ---
 
