@@ -221,9 +221,13 @@ ipython_config.py
 .airflow/
 airflow/logs/
 airflow/config/airflow.cfg
-airflow/data/*.json
-airflow/data/*.jsonl
-airflow/data/*.tmp
+# Everything under airflow/data, at ANY depth. These files carry managing-director names,
+# addresses and phone numbers scraped from Impressum pages — personal data that must never be
+# committed. The old rules were `airflow/data/*.jsonl` and friends, which match one level only,
+# so a subdirectory of measurement output or saved HTML was left exposed to `git add -A`.
+# README.md is kept so the directory documents itself.
+airflow/data/**
+!airflow/data/README.md
 airflow/dags/**/__pycache__/
 #   For a library or package, you might want to ignore these files since the code is
 #   intended to run in multiple environments; otherwise, check them in:
