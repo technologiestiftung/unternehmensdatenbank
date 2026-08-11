@@ -4,7 +4,7 @@ First measured on 10–11 August 2026, then re-measured on 11 August 2026 after 
 page led to. It is the answer, the numbers behind it, and how to reproduce them.
 
 **Short version:** for about 3 in 10 companies we find a website we can actually prove belongs
-to them. For about 1 in 6 we get an owner name we can prove — up from 1 in 14, after fixing the
+to them. For about 1 in 7 we get an owner name we can prove — up from 1 in 14, after fixing the
 code that reads names off the page. The Handelsregister number, which we assumed would help,
 makes things worse in *both* places it is used. The two Mistral models we compared are equally
 good, so use the cheap one.
@@ -71,14 +71,14 @@ at 0.34 confidence and never becomes the official answer on its own.
 
 ## Result 1: the register number makes discovery worse, in both places
 
-Route A only, since this route does not involve an AI at all. The owner column shows the number
-after the extraction fix described in Result 2; the number before it is in brackets.
+Route A only, since this route does not involve an AI at all. All three ran before the owner
+extraction fix in Result 2, so read the website column here and the owner column in Result 2.
 
 | Input | website (verified) | owner from Impressum | phone or email | search found nothing useful |
 |---|---|---|---|---|
-| **name + address only** | **29 / 100** | **17 / 100** (was 7) | 20 / 100 | 29 / 100 |
-| out of query, still scoring | 25 / 100 | 14 / 100 (was 5) | 16 / 100 | 29 / 100 |
-| with register number | 21 / 100 | 13 / 100 (was 3) | 14 / 100 | 17 / 100 |
+| **name + address only** | **29 / 100** | 7 / 100 | 20 / 100 | 29 / 100 |
+| out of query, still scoring | 25 / 100 | 5 / 100 | 16 / 100 | 29 / 100 |
+| with register number | 21 / 100 | 3 / 100 | 14 / 100 | 17 / 100 |
 
 ### The query effect: 21 → 25
 
@@ -119,7 +119,7 @@ number is out of the search query by default now
 (`SEARCH_QUERY_INCLUDE_REGISTER_NUMBER=false`). The −200 penalty is **not** fixed and is the
 next thing worth doing, because it is worth roughly the same 4 companies per 100.
 
-## Result 2: owner names, 7 per 100 → 17 per 100
+## Result 2: owner names, 7 per 100 → 15 per 100
 
 This was the weakest number in the first measurement, and the explanation first published here
 was wrong. It blamed Exa's `EXA_CONTENT_MODE=highlights` setting. That cannot be the cause: the
@@ -153,13 +153,32 @@ label, because German Impressums routinely put the label and the name in separat
 Result on those 31 saved pages: **19 now yield a name, up from 7.** Four of the remaining 12
 have no manager label anywhere on the page, so they were never findable this way.
 
+Then we re-ran the whole measurement for real, same 100 companies, to see what the pipeline
+actually reports rather than what re-parsing saved pages predicts:
+
+| | before the fix | after the fix |
+|---|---|---|
+| websites verified | 29 / 100 | 29 / 100 |
+| owner name from the Impressum | **7 / 100** | **15 / 100** |
+
+The website number is unchanged, which is the point — this fix only reads more off pages we had
+already accepted.
+
+Exa does not return identical results for identical queries, so the two runs did not verify
+exactly the same 29 sites. Restricting to the **27 companies where both runs verified the same
+website**, which removes search luck from the comparison entirely:
+
+- owner name before: 6
+- owner name after: 14
+- **8 gained, 0 lost**
+
 Precision was treated as more important than recall, because a wrong owner is worse than no
 owner — nothing downstream can tell the difference. Company names, leading acronyms, street
 names and single words are all rejected. `scripts/check_imprint_owner_extraction.py` is the
 regression gate: 19 cases, one per page layout found in the sample, with invented names.
 
 We confirmed the change touches nothing else: register number, VAT id, postcode, phone and
-email come back byte-identical on all 31 pages.
+email come back byte-identical on all 31 saved pages.
 
 ## Result 3: the two Mistral models are interchangeable
 
@@ -215,10 +234,10 @@ owner's name.
 |---|---|---|
 | Business URL | **29%** | High — we downloaded the page and matched its Impressum |
 | Business URL | 40% | Low — includes AI guesses we never checked |
-| Owner name | **17%** | High — read off a verified Impressum |
+| Owner name | **15%** | High — read off a verified Impressum |
 | Owner name | 31–34% | Low — mostly an AI reading a search snippet |
 
-Read the bold rows as the honest answer. **29% for websites, 17% for owner names.**
+Read the bold rows as the honest answer. **29% for websites, 15% for owner names.**
 
 The owner number can never exceed the website number on the trustworthy route, because we only
 read the Impressum of a site we already accepted. Raising website coverage raises both. The −200

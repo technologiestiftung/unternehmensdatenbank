@@ -80,11 +80,16 @@ docker compose --profile geocoding up -d nominatim # local Nominatim
 cp .env.example .env
 ```
 
-All DAGs are **disabled by default** via env flags. Enable them explicitly:
-- `ENABLE_MISTRAL_SEARCH_DISCOVERY=true`
-- `ENABLE_KUNUNU_ENRICHMENT=true`
-- `ENABLE_LINKEDIN_ENRICHMENT=true`
-- `ENABLE_BERLIN_GEWERBEDATEN_DAG=true` (legacy, disabled by default)
+All DAGs are **disabled by default** via env flags, checked at task runtime rather than at
+parse time. Enable the ones you want: `ENABLE_EXA_SEARCH_DISCOVERY`,
+`ENABLE_PARALLEL_SEARCH_DISCOVERY`, `ENABLE_BRAVE_SEARCH_DISCOVERY`,
+`ENABLE_MISTRAL_SEARCH_DISCOVERY`, `ENABLE_CLAUDE_SEARCH_DISCOVERY`,
+`ENABLE_OLLAMA_SEARCH_DISCOVERY`, `ENABLE_URL_DISCOVERY`, `ENABLE_OSM_DISCOVERY`,
+`ENABLE_BERLIN_GEWERBEDATEN_DAG` (legacy).
+
+`.env` is not regenerated from `.env.example` automatically and is missing many of its keys.
+That is usually harmless — `docker-compose.yml` supplies a default for every one of them — but
+a variable absent from **both** files cannot be changed by editing `.env` alone.
 
 ## Architecture: Data model
 
@@ -110,18 +115,46 @@ Source priority: lower `priority` integer wins during canonical resolution.
 
 ## Architecture: DAGs
 
-There are four DAGs, all in `airflow/dags/`:
+All in `airflow/dags/`, all `schedule=None`, all triggered by hand or by another DAG. Full
+detail per DAG is in [airflow/dags/README.md](airflow/dags/README.md).
 
-**Active (source enrichment):**
-- `mistral_search_discovery/main.py` — URL discovery via Mistral web search
-- `kununu_enrichment/main.py` — employer review data from Kununu
-- `linkedin_enrichment/main.py` — company profiles from LinkedIn
-- Shared helpers: `source_enrichment_common.py`
+**Search-provider discovery** — `exa_search_discovery`, `parallel_search_discovery`,
+`brave_search_discovery`. These three share `search_discovery_runner.py` verbatim: same model,
+same prompt, same scoring, only the search step differs. That is what makes "which provider is
+best" a fair question, so do not fork the flow to fit a provider.
 
-All three enrichment DAGs use `schedule=None` and currently scaffold search payloads without performing live remote calls. The next step is wiring live Mistral API calls, then consuming discovered URLs in the Kununu and LinkedIn DAGs.
+**LLM-hosted-search discovery** — `mistral_search_discovery`, `claude_search_discovery` use the
+provider's own server-side web search. `ollama_search_discovery` pairs a local SearXNG with a
+local model.
 
-**Legacy (disabled by default):**
-- `berlin_gewerbedaten/main.py` — fetches the Berlin Gewerbedaten WFS, enriches with addresses (KDTree spatial index over 500k Berlin address points) and OSM POI names (Overpass + rapidfuzz), writes JSONL, then loads into Postgres in batches of 250.
+**No-API discovery** — `url_discovery` guesses URLs from the company name and checks them.
+`osm_discovery` matches against a local Overpass (Berlin data only).
+
+**Coordinator** — `pipeline_coordinator` is the only thing that decides which observation wins a
+field. Source DAGs write observations and nothing else. Every source DAG triggers it on
+completion.
+
+**Legacy** — `berlin_gewerbedaten` fetches the Berlin Gewerbedaten WFS, enriches with addresses
+(KDTree over 500k Berlin address points) and OSM POI names (Overpass + rapidfuzz), writes JSONL,
+loads into Postgres in batches of 250. Disabled by default; does not chain into
+`pipeline_coordinator`.
+
+Two facts that have misled people repeatedly:
+
+- **`website_url` is a view column, not a table column.** V9 dropped it from `companies`.
+  Enriched fields live in `company_canonical_field_sources` and are read through
+  `public.v_companies_enriched`.
+- **A register number on a page proves the page is *about* a company, never that it *is* that
+  company's site.** Registry pages, insolvency trackers and directories all quote them.
+  `search_common.is_own_site_candidate` is the single predicate for that call; using a looser
+  one anywhere else is the recurring bug in this repo.
+
+## Looking at discovery results
+
+`public.v_discovery_results` (one row per company) and `public.v_discovery_scorecard` (one row
+per source, with coverage percentages) — migration V11. Browse them in pgAdmin. Read
+`website_verified_by` before trusting a row: `register_number_match` and `url_pattern` mean the
+page was downloaded and checked, `llm_snippet` means a model guessed and nothing was checked.
 
 ## Architecture: Migrations
 
@@ -136,10 +169,27 @@ scoring and prompt so the numbers describe production behaviour. Results and the
 [docs/website-and-owner-discovery-results.md](docs/website-and-owner-discovery-results.md).
 
 Headline, measured on 100 Osnabrück companies: a **verified** website for 29%, a verified owner
-name for 7%. Including the Handelsregister number in the search makes website discovery *worse*
-(21% vs 29%) because it pulls results toward register aggregators. `ministral-8b-latest` and
-`mistral-small-latest` are statistically indistinguishable at this task, so the cheap one wins.
-About 1,850 input tokens per business.
+name for 15%. Including the Handelsregister number in the search makes website discovery *worse*
+(21% vs 25% on identical scoring) because it pulls results toward register aggregators — so it
+is now left out by default. `ministral-8b-latest` and `mistral-small-latest` are statistically
+indistinguishable at this task, so the cheap one wins. About 1,850 input tokens per business.
+
+Two companion scripts, both free to run — no search API, no LLM:
+
+- `scripts/check_own_site_filter.py` — 21 real URLs with hand-checked verdicts, guarding
+  `is_own_site_candidate` against letting a directory page become a company's website.
+- `scripts/check_imprint_owner_extraction.py` — 19 Impressum layouts guarding owner-name
+  extraction. `scripts/collect_imprint_fixtures.py` rebuilds the page corpus it was written
+  from; its `shapes` output masks every letter and digit, so layouts can be studied without
+  exposing anyone's name.
+
+Run both after touching `search_common.py`, `imprint_probe.py` or
+`url_discovery/imprint_extractor.py`. Neither needs the database.
+
+**Git Bash caveat:** `docker compose exec -e PYTHONPATH=/opt/airflow/dags` fails under Git Bash,
+which rewrites the path into `C:/Program Files/Git/opt/airflow/dags` on the way into the
+container. The failure looks like an unrelated `ModuleNotFoundError`. Use PowerShell for these,
+or prefix with `MSYS_NO_PATHCONV=1`.
 
 `scripts/prepare_company_import.py` converts a Northdata-format CSV export into a clean CSV ready for bulk import into `public.companies`. Run it standalone:
 
