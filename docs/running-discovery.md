@@ -81,7 +81,16 @@ The `is_paused` column: `True` means it will not run.
 docker compose exec airflow-scheduler airflow dags trigger exa_search_discovery
 ```
 
-Or open http://localhost:8080 (`airflow` / `airflow`) and press the play button.
+Or open **http://localhost:8082** (`airflow` / `airflow`) and press the play button.
+
+> The port is `8082`, not `8080`. `docker ps` shows `8080/tcp` for the Airflow containers, but
+> that is the port *inside* the container; the host port comes from `AIRFLOW_PORT`. If another
+> Airflow project is running on this machine it will usually have taken 8080, and logging in
+> there fails with "invalid login" — different instance, different users. Confirm with:
+>
+> ```bash
+> docker compose ps --format "{{.Service}} {{.Ports}}"
+> ```
 
 **One run handles 50 companies**, set by `SOURCE_ENRICHMENT_BATCH_SIZE`. It picks companies it
 has not seen before, skipping any whose `data_quality_score` is already 0.90 or higher, so

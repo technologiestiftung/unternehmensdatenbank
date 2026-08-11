@@ -70,7 +70,10 @@ docker compose --profile geocoding up -d nominatim # local Nominatim
 
 ## Access
 
-- Airflow UI: http://localhost:8080 (user/pass: `airflow`/`airflow`)
+- Airflow UI: http://localhost:8082 (user/pass: `airflow`/`airflow`) — the port comes from
+  `AIRFLOW_PORT`, default `8082`. **Not 8080.** The container listens on 8080 internally, which
+  is what `docker ps` shows, and other Airflow projects on this machine take 8080 on the host —
+  logging in there gives "invalid login" because it is a different instance with different users.
 - pgAdmin: http://localhost:5051 (email: `admin@example.com`, pass: `admin`)
 - Postgres: `localhost:5433`, app DB: `unternehmensdatenbank`, user/pass: `app`/`app`
 
