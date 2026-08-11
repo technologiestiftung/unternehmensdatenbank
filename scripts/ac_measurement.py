@@ -401,18 +401,25 @@ def chat_json(model_ref: str, prompt: str) -> tuple[dict[str, Any], int, int]:
     )
 
 
-def run_stage2(reg_mode: str, model_ref: str) -> None:
+def run_stage2(reg_mode: str, model_ref: str, limit: int = 0) -> None:
     from mistral_extract import as_confidence, as_str
     from search_discovery_runner import EXTRACTION_PROMPT
 
     source = read_jsonl(stage1_path(reg_mode))
     if not source:
         raise SystemExit(f"no stage1 output for {reg_mode}; run stage1 first")
+    # A local model on CPU takes minutes per company where a hosted one takes seconds, so it
+    # needs a smaller sample to be measurable at all. The cut is the FRONT of the stage1 file,
+    # which is ordered by md5(id) — the same deterministic order every mode used — so a limited
+    # run is a prefix of the same sample and stays comparable, company for company, with the
+    # first N rows of any other model. Say the N when reporting it.
+    if limit:
+        source = source[:limit]
     path = stage2_path(reg_mode, model_ref)
     done = {row["company_id"] for row in read_jsonl(path)}
     pending = [r for r in source if r["company_id"] not in done]
-    log.info("stage2 %s / %s: %d cached companies, %d to extract",
-             reg_mode, model_ref, len(done), len(pending))
+    log.info("stage2 %s / %s: %d companies in scope, %d cached, %d to extract",
+             reg_mode, model_ref, len(source), len(done), len(pending))
 
     def extract(row: dict[str, Any]) -> dict[str, Any]:
         out = {"company_id": row["company_id"], "company_name": row.get("company_name"),
@@ -526,7 +533,10 @@ def run_report() -> None:
     print(f"{'reg mode':<14} {'model':<28} {'URL any':>8} {'owner any':>10} {'both':>7}")
     for reg_mode, model, rows in stage2_rows:
         by_id = {r["company_id"]: r for r in rows}
-        base = stage1.get(reg_mode) or []
+        # Only companies this model actually ran on. A model measured on a --limit subset would
+        # otherwise be divided by all 100 and look worse than it is, which is the kind of
+        # comparison this whole script exists to avoid.
+        base = [r for r in (stage1.get(reg_mode) or []) if r["company_id"] in by_id]
         n = len(base)
         url_any = owner_any = both = 0
         for record in base:
@@ -557,6 +567,8 @@ def main() -> None:
     p2 = sub.add_parser("stage2", help="extraction only, replayed over cached hits")
     p2.add_argument("--reg-mode", choices=REG_MODES, required=True)
     p2.add_argument("--model", required=True, help="e.g. mistral:ministral-8b-latest")
+    p2.add_argument("--limit", type=int, default=0,
+                    help="first N companies of the sample; 0 means all. For slow local models.")
 
     sub.add_parser("report", help="print the comparison")
 
@@ -564,7 +576,7 @@ def main() -> None:
     if args.command == "stage1":
         run_stage1(args.reg_mode, args.limit)
     elif args.command == "stage2":
-        run_stage2(args.reg_mode, args.model)
+        run_stage2(args.reg_mode, args.model, args.limit)
     else:
         run_report()
 
