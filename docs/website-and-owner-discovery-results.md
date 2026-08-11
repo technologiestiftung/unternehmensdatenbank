@@ -209,6 +209,41 @@ One practical note: `mistral-small` is rate-limited harder on our account. Our f
 60 of 100 companies to HTTP 429 errors before we added retry-with-backoff. If you compare
 models without retries, you are measuring rate limits, not quality.
 
+### A local model cannot do this job on this machine
+
+We wanted a non-Mistral comparison. Without an Anthropic key, the free option was Ollama, which
+runs a model on this machine with no API and no data leaving the building — attractive, because
+the text we send contains managing-director names. It does not work, and the reason is speed,
+not licensing.
+
+Measured on this machine, CPU only, no GPU:
+
+| Model | Result |
+|---|---|
+| `qwen2.5:7b` | 3 of the first 4 calls exceeded a 180-second timeout |
+| `qwen2.5:1.5b` | one call finished, in **433 seconds**, for a 2,050-token prompt |
+
+The throughput behind those numbers, from Ollama's own logs: **17.7 tokens per second** reading
+the prompt, **0.38 tokens per second** writing the answer.
+
+The job averages 1,850 input tokens per company. At 433 seconds each, the 14,443 Osnabrück
+companies would take about **72 days of continuous computing**. Mistral does the same 100
+companies in a few minutes.
+
+Quality was no better. The one call that completed returned `null` for the website, the owner
+and the industry, having spent 156 output tokens getting there — three times what Mistral spends
+returning actual values. The next call passed 268 generated tokens without finishing, so the
+small model does not reliably stop at the small JSON object it was asked for.
+
+**So what:** local inference is not an option here without a GPU, so the choice is between
+hosted providers. Among those, Mistral is EU-hosted, which matters because these prompts carry
+personal data. That is the reason to prefer it — the *quality* comparison against a non-Mistral
+hosted model is still untested, and needs a key we do not have.
+
+Reproduce with `docker compose --profile llm up -d ollama`, then
+`stage2 --model ollama:qwen2.5:1.5b --limit 5`. Expect it to take about half an hour and to
+tell you nothing you cannot read above.
+
 ## Result 4: how many tokens one business costs
 
 Per company, per extraction call:
@@ -322,6 +357,9 @@ measurable at all.
 
 - **Other search providers.** Only Exa had a working key. Parallel, Brave and Claude are
   implemented but unkeyed, so "which search provider is best" is still open.
+- **A non-Mistral hosted model.** The local-model route is closed on speed (Result 3), and
+  `ANTHROPIC_API_KEY` is empty. So "Mistral is good enough" rests on the two Mistral models
+  matching each other and on EU hosting, not on a measured comparison against another vendor.
 - **`EXA_CONTENT_MODE=text`.** It cannot affect the verified owner number — that was the
   mistake corrected in Result 2 — but it should raise route B's owner rate, at the cost of more
   input tokens per company. Worth measuring as a separate question.
