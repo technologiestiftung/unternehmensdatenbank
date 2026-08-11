@@ -118,7 +118,9 @@ Source priority: lower `priority` integer wins during canonical resolution.
 
 ## Architecture: DAGs
 
-All in `airflow/dags/`, all `schedule=None`, all triggered by hand or by another DAG. Full
+All in `airflow/dags/`, all `schedule=None` and triggered by hand or by another DAG — **except
+`berlin_gewerbedaten`, which is `@daily`**. That one runs by itself once its flag is `true` and
+it is unpaused; every other flag can be turned on with nothing happening until you trigger. Full
 detail per DAG is in [airflow/dags/README.md](airflow/dags/README.md).
 
 **Search-provider discovery** — `exa_search_discovery`, `parallel_search_discovery`,

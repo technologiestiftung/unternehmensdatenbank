@@ -1,7 +1,15 @@
 # DAGs
 
-Every DAG here uses `schedule=None`. They are triggered by hand, or by another DAG. Every source
-DAG triggers `pipeline_coordinator` when it finishes, via `TriggerDagRunOperator`.
+Every DAG here uses `schedule=None` **except `berlin_gewerbedaten`, which is `@daily`**. So all
+but that one run only when you trigger them. Every source DAG triggers `pipeline_coordinator`
+when it finishes, via `TriggerDagRunOperator`; the coordinator triggers nothing, so there is no
+chain beyond one step.
+
+Two independent locks stop a DAG running: its `ENABLE_*` env flag must be `true`, **and** it
+must be unpaused in Airflow. The flag is checked when the task runs, not when the file is
+parsed, so a disabled DAG still appears in the UI and fails with a clear message instead of
+vanishing. Turning a flag on is safe for everything except `berlin_gewerbedaten`, where the flag
+plus unpausing is enough to make it run by itself once a day.
 
 Schema changes belong in `db/migrations/`, not here.
 
@@ -218,5 +226,11 @@ Measured coverage and the method behind it:
 ### `berlin_gewerbedaten/`
 
 Fetches the Berlin Gewerbedaten WFS, enriches with addresses (KDTree over 500k address points)
-and OSM POI names (Overpass + rapidfuzz), writes JSONL, bulk-loads into Postgres. Disabled by
-default (`ENABLE_BERLIN_GEWERBEDATEN_DAG=false`). Does not chain into `pipeline_coordinator`.
+and OSM POI names (Overpass + rapidfuzz), writes JSONL, bulk-loads into Postgres. Does not chain
+into `pipeline_coordinator`.
+
+> **The only DAG here with a schedule.** It is `@daily`, not `schedule=None`. Set
+> `ENABLE_BERLIN_GEWERBEDATEN_DAG=true` and unpause it, and it runs every day on its own,
+> downloading the Berlin dataset and writing into `companies`. Every other flag in `.env` can be
+> turned on without anything happening until you press trigger. This one cannot. Leave it
+> `false` unless you actually want Berlin data.
