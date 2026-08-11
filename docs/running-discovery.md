@@ -114,6 +114,61 @@ observations into answers. You do not need to trigger it.
 
 ---
 
+## 2b. Do they interfere with each other? No. What order should you run them in?
+
+### They are independent
+
+Each DAG keeps its own record of which companies it has handled: its own source key, its own
+checkpoint file, its own observations. Running `exa_search_discovery` does not stop
+`parallel_search_discovery` from running on the same company, and neither overwrites the other.
+
+They meet in one place only: `pipeline_coordinator`, which picks a winner per field. Two sources
+that independently produce the same value give that value **+0.10 confidence**, capped at 1.0.
+Ties are broken by source priority, lower number first. So running more sources is never
+destructive; the worst case is that you paid for a claim that lost.
+
+### Recommended order
+
+1. **`url_discovery`** — free. Guesses URLs from the company name and checks them. Run this on
+   everything first.
+2. **`exa_search_discovery`** — the paid one that all published numbers came from. About
+   $0.014 per company.
+3. **A second search provider** if you want the agreement bonus, or to compare providers.
+
+### The order does NOT save you money, and here is why
+
+There is a cost guard in `fetch_companies_for_llm_enrichment`: paid sources skip any company
+whose `data_quality_score` has already reached **0.90**. The idea is that once a company is
+nearly complete, there is no point paying to look again.
+
+**That guard can never fire.** The score is a weighted sum of six fields:
+
+| Field | Weight | Does anything write it today? |
+|---|---|---|
+| `website` | 0.30 | yes |
+| `cluster` | 0.20 | yes |
+| `tech_field` | 0.20 | yes |
+| `ceo_contact` | 0.15 | yes |
+| `revenue` | 0.10 | **no** |
+| `employee_count` | 0.05 | **no** |
+
+Nothing in the pipeline produces revenue or employee counts, so the ceiling is **0.85**, and
+0.85 is below 0.90. Measured on the current database: the best-scoring company sits at 0.700 and
+**zero** companies are above the threshold.
+
+So a paid DAG will re-process a company that already has a perfectly good website, found for
+free by `url_discovery` an hour earlier. Running the cheap ones first buys you coverage, not
+savings.
+
+Two ways to fix it, neither done yet:
+
+- lower the threshold to 0.60, so a company with a website plus an industry is left alone; or
+- select on "has no canonical website yet" instead of on the quality score, which is what you
+  actually mean when the goal is finding websites.
+
+Until then, if you want to stop paying to re-find websites you already have, restrict the batch
+by hand before running a paid DAG, or accept the duplication.
+
 ## 3. Where the results are
 
 ### The two views to use
