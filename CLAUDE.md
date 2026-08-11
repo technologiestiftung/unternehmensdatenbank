@@ -149,12 +149,22 @@ Two facts that have misled people repeatedly:
   `search_common.is_own_site_candidate` is the single predicate for that call; using a looser
   one anywhere else is the recurring bug in this repo.
 
-## Looking at discovery results
+## Running discovery and looking at the results
 
-`public.v_discovery_results` (one row per company) and `public.v_discovery_scorecard` (one row
-per source, with coverage percentages) — migration V11. Browse them in pgAdmin. Read
-`website_verified_by` before trusting a row: `register_number_match` and `url_pattern` mean the
-page was downloaded and checked, `llm_snippet` means a model guessed and nothing was checked.
+Runbook: [docs/running-discovery.md](docs/running-discovery.md) — which DAGs are runnable with
+the current keys, the enable-flag + unpause + trigger sequence, and the SQL for each common
+question.
+
+Results live in `public.v_discovery_results` (one row per company) and
+`public.v_discovery_scorecard` (one row per source, with coverage percentages) — migration V11.
+Read `website_verified_by` before trusting a row: `register_number_match` and `url_pattern` mean
+the page was downloaded and checked, `llm_snippet` means a model guessed and nothing was
+checked.
+
+A DAG needs **two** switches to run: its `ENABLE_*` env flag set to `true` (checked at task
+runtime, so a missing flag fails the task rather than hiding the DAG) **and** unpausing in
+Airflow. One run processes `SOURCE_ENRICHMENT_BATCH_SIZE` companies (default 50) and checkpoints
+to `airflow/data/<dag_id>_checkpoint.json`, so re-triggering continues rather than restarting.
 
 ## Architecture: Migrations
 
