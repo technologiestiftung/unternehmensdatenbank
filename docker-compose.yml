@@ -158,6 +158,9 @@ x-airflow-common: &airflow-common
     - ./airflow/config:/opt/airflow/config
     - ./airflow/plugins:/opt/airflow/plugins
     - ./airflow/data:/opt/airflow/data
+    # Read-only so an ad-hoc measurement script can import the DAG modules it measures,
+    # without the dag-processor ever parsing it as a DAG.
+    - ./scripts:/opt/airflow/scripts:ro
   user: "${AIRFLOW_UID:-50000}:0"
   depends_on: &airflow-common-depends-on
     postgres:

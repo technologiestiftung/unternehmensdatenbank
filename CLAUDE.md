@@ -2,6 +2,24 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+## How to write the docs in this repo
+
+Every `.md` file here is written for a smart 18-year-old who knows how to code but has never
+seen this project, German company registers, or Airflow. Follow these rules when you add or
+edit documentation:
+
+1. Explain the thing before you use its name. "Impressum — the legal contact page every German
+   business website must have" comes before you start saying "the Impressum".
+2. Short sentences. One idea each. If a sentence needs a comma to survive, split it.
+3. Say what actually happens, not what the code is called. "The score drops by 200" beats
+   "a penalty is applied".
+4. Numbers over adjectives. Not "coverage is low" — "we find a website for 29 out of 100".
+5. Always answer "so what". After a fact, say what it means for the person reading.
+6. No unexplained jargon: canonical, observation, resolver, confidence, checkpoint. Each of
+   these is a made-up word in this codebase. Define it the first time it appears in a file.
+7. Keep the honest caveat. If a number came from 100 companies, say so, and say what that
+   means for trusting it.
+
 ## What this is
 
 Local development scaffold for a Postgres-backed company data platform. Airflow orchestrates data pipelines. Flyway owns all schema migrations. Two Postgres databases share one server: `airflow` (Airflow metadata) and `unternehmensdatenbank` (application data).
@@ -109,7 +127,19 @@ All three enrichment DAGs use `schedule=None` and currently scaffold search payl
 
 All schema changes go in `db/migrations/` as `V{N}__description.sql`. Migrations are forward-only and immutable once applied. Flyway runs as a one-shot Docker service (`--profile tools`); it does not run automatically with `docker compose up`. Run migrations before starting Airflow workers whenever schema changes land.
 
-## Utility script
+## Utility scripts
+
+`scripts/ac_measurement.py` measures what the pipeline can actually find when it only has a
+company name and address: website, owner name, and tokens spent per business. It writes nothing
+to the database, caches each stage so re-runs are free, and reuses the DAGs' own filtering,
+scoring and prompt so the numbers describe production behaviour. Results and the method are in
+[docs/website-and-owner-discovery-results.md](docs/website-and-owner-discovery-results.md).
+
+Headline, measured on 100 Osnabrück companies: a **verified** website for 29%, a verified owner
+name for 7%. Including the Handelsregister number in the search makes website discovery *worse*
+(21% vs 29%) because it pulls results toward register aggregators. `ministral-8b-latest` and
+`mistral-small-latest` are statistically indistinguishable at this task, so the cheap one wins.
+About 1,850 input tokens per business.
 
 `scripts/prepare_company_import.py` converts a Northdata-format CSV export into a clean CSV ready for bulk import into `public.companies`. Run it standalone:
 
