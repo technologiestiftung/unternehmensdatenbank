@@ -20,6 +20,10 @@ auto-accept solely on a register-number match. `--reg-mode name_address` blanks 
 on the way in, so both effects disappear together; `with_reg` leaves production untouched.
 Running both on the same companies is what shows the register number's actual worth.
 
+That pair alone cannot say WHICH of the two uses mattered, because name_address turns off
+both. `scorer_only` turns off only the query and is the mode a production change would
+actually ship. Compare all three before changing production.
+
 Writes NOTHING to the database. Observations, checkpoints and canonical resolution are the
 DAGs' business; a measurement that also mutated state could not be re-run.
 
@@ -50,6 +54,7 @@ import os
 import sys
 import time
 from concurrent.futures import ThreadPoolExecutor
+from functools import partial
 from pathlib import Path
 from typing import Any
 
@@ -73,7 +78,22 @@ MAX_CANDIDATES = int(os.getenv("AC_MAX_CANDIDATES", "5"))
 STAGE1_WORKERS = int(os.getenv("AC_STAGE1_WORKERS", "4"))
 STAGE2_WORKERS = int(os.getenv("AC_STAGE2_WORKERS", "2"))
 ATTEMPTS = int(os.getenv("AC_EXTRACT_ATTEMPTS", "5"))
-REG_MODES = ("name_address", "with_reg")
+
+#: How the Handelsregister number — the ID a German company gets in the commercial register,
+#: like "HRB 217094" — is allowed to be used. It has two independent jobs, and the first two
+#: modes here change both at once, which is why the third exists.
+#:
+#:   name_address  blanked on the way in. Out of the search query AND out of the scorer, so the
+#:                 system truly knows only the name and the address. What the AC asked for.
+#:   with_reg      production as it stands: in the query and in the scorer.
+#:   scorer_only   out of the query, still available to the scorer. Never measured before, and
+#:                 the setting most likely to be right — name_address beat with_reg 29 to 21,
+#:                 but because it disabled both uses at once, that result cannot say whether
+#:                 the query or the scoring caused the gain. This mode separates them.
+REG_MODES = ("name_address", "with_reg", "scorer_only")
+
+#: Modes where the register number is kept off the search query.
+_QUERY_WITHOUT_REG = ("name_address", "scorer_only")
 
 #: `--model` values are `<backend>:<model>`. Ollama speaks the OpenAI shape on /v1, so one
 #: request builder covers all three backends — which is the point: a difference in the
@@ -83,8 +103,13 @@ BACKENDS = {
         os.getenv("MISTRAL_API_BASE_URL", "https://api.mistral.ai/v1"),
         lambda: os.getenv("MISTRAL_API_KEY", ""),
     ),
+    # `ollama` is a sibling compose service (profile `llm`), so from inside the Airflow
+    # containers it is reachable by service name. host.docker.internal would only be right for
+    # an Ollama running on the Windows/macOS host — set OLLAMA_OPENAI_BASE_URL for that.
+    # Note the /v1 suffix: OLLAMA_BASE_URL in docker-compose points at Ollama's native API,
+    # this one at its OpenAI-compatible one, which is what gives us `usage` token counts.
     "ollama": (
-        os.getenv("OLLAMA_OPENAI_BASE_URL", "http://host.docker.internal:11434/v1"),
+        os.getenv("OLLAMA_OPENAI_BASE_URL", "http://ollama:11434/v1"),
         lambda: "ollama",  # any non-empty string; Ollama ignores the bearer token
     ),
 }
@@ -177,7 +202,7 @@ def load_sample(limit: int) -> list[Any]:
 # --------------------------------------------------------------------------------------
 
 
-def search_and_verify(company: Any) -> dict[str, Any]:
+def search_and_verify(company: Any, reg_mode: str = "with_reg") -> dict[str, Any]:
     from exa_search_discovery.exa_http import search as exa_search
     from imprint_probe import best_imprint
     from mistral_extract import as_str
@@ -187,7 +212,12 @@ def search_and_verify(company: Any) -> dict[str, Any]:
     from url_discovery.http_client import verify_url
     from url_discovery.scorer import AUTO_ACCEPT_SCORE, name_uniqueness, score_candidate
 
-    queries = build_search_queries(company)
+    # In name_address the field is already None, so the flag is redundant there but harmless.
+    # In scorer_only the field is still set — this is the only thing keeping it out of the
+    # query while score_candidate below can still use it.
+    queries = build_search_queries(
+        company, include_registration_number=reg_mode not in _QUERY_WITHOUT_REG
+    )
     address = _company_address(company)
     started = time.monotonic()
 
@@ -230,7 +260,7 @@ def search_and_verify(company: Any) -> dict[str, Any]:
     best = own_site[0] if own_site else None
 
     path_a: dict[str, Any] = {"website": None, "confidence": None, "verified_by": None,
-                              "ceo_names": [], "phone": None, "email": None}
+                              "imprint_url": None, "ceo_names": [], "phone": None, "email": None}
     if best and best["score"] >= 0:
         extracted = best["extracted"] or {}
         if best["score"] >= AUTO_ACCEPT_SCORE:
@@ -242,6 +272,9 @@ def search_and_verify(company: Any) -> dict[str, Any]:
             "website": origin_url(best["final_url"]),
             "confidence": confidence,
             "verified_by": verified_by,
+            # Kept so owner-extraction work can re-read the exact page that was parsed,
+            # instead of guessing the Impressum path again from the origin.
+            "imprint_url": best["imprint_url"],
             # Production only writes these when the website cleared 0.35, so mirror that:
             # owner coverage from the Impressum is bounded by website coverage.
             "ceo_names": [n for n in (extracted.get("ceo_names") or []) if as_str(n)]
@@ -285,18 +318,19 @@ def run_stage1(reg_mode: str, limit: int) -> None:
         return
 
     total = len(pending)
+    run = partial(_safe_stage1, reg_mode=reg_mode)
     with ThreadPoolExecutor(max_workers=STAGE1_WORKERS) as pool:
         for index, (company, result) in enumerate(
-            zip(pending, pool.map(_safe_stage1, pending)), start=1
+            zip(pending, pool.map(run, pending)), start=1
         ):
             append_jsonl(path, result)
             log.info("[%d/%d] %s -> %s", index, total, company.company_name[:45],
                      (result.get("path_a") or {}).get("website") or result.get("error") or "nothing")
 
 
-def _safe_stage1(company: Any) -> dict[str, Any]:
+def _safe_stage1(company: Any, reg_mode: str) -> dict[str, Any]:
     try:
-        return search_and_verify(company)
+        return search_and_verify(company, reg_mode)
     except Exception as exc:  # noqa: BLE001
         log.warning("stage1 failed for %s: %s", company.id, exc)
         return {

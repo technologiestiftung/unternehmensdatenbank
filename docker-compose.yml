@@ -69,6 +69,9 @@ x-airflow-common: &airflow-common
     CLAUDE_DISCOVERY_CHECKPOINT_FILE: ${CLAUDE_DISCOVERY_CHECKPOINT_FILE:-/opt/airflow/data/claude_search_discovery_checkpoint.json}
     ENABLE_OLLAMA_SEARCH_DISCOVERY: ${ENABLE_OLLAMA_SEARCH_DISCOVERY:-false}
     OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-http://ollama:11434}
+    # OpenAI-compatible endpoint on the same server. It returns token counts, the native API
+    # does not, so ac_measurement.py uses this one to compare a local model against Mistral.
+    OLLAMA_OPENAI_BASE_URL: ${OLLAMA_OPENAI_BASE_URL:-http://ollama:11434/v1}
     OLLAMA_MODEL: ${OLLAMA_MODEL:-qwen2.5:7b}
     OLLAMA_HTTP_TIMEOUT_S: ${OLLAMA_HTTP_TIMEOUT_S:-120}
     OLLAMA_HTTP_MAX_RETRIES: ${OLLAMA_HTTP_MAX_RETRIES:-3}
@@ -113,6 +116,9 @@ x-airflow-common: &airflow-common
     IMPRINT_PROBE_PATHS: ${IMPRINT_PROBE_PATHS:-/impressum/,/impressum,/imprint,/impressum.html}
     IMPRINT_PROBE_TIMEOUT_S: ${IMPRINT_PROBE_TIMEOUT_S:-12}
     LLM_WEBSITE_CONF_CAP: ${LLM_WEBSITE_CONF_CAP:-0.34}
+    # Off: the register number in the query pulls results toward aggregators and directories.
+    # Measured 21 vs 25 provable websites per 100 companies. Scorer use is unaffected.
+    SEARCH_QUERY_INCLUDE_REGISTER_NUMBER: ${SEARCH_QUERY_INCLUDE_REGISTER_NUMBER:-false}
     # Parallel Search MCP — free and anonymous, so the key is optional and only raises limits.
     ENABLE_PARALLEL_SEARCH_DISCOVERY: ${ENABLE_PARALLEL_SEARCH_DISCOVERY:-false}
     PARALLEL_API_KEY: ${PARALLEL_API_KEY:-}
