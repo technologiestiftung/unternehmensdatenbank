@@ -14,6 +14,16 @@ OSM_OVERPASS_URL = os.getenv("OSM_OVERPASS_URL", "https://overpass-api.de/api/in
 OSM_DISCOVERY_TIMEOUT_S = float(os.getenv("OSM_DISCOVERY_TIMEOUT_S", "30"))
 OSM_DISCOVERY_REQUEST_DELAY_S = float(os.getenv("OSM_DISCOVERY_REQUEST_DELAY_S", "1.0"))
 
+#: Overpass refuses anonymous clients. Without this header `overpass-api.de` answers **406 Not
+#: Acceptable** to every single request and `overpass.kumi.systems` answers 429 with the text
+#: "Please include a meaningful User-Agent string". Both come back through `raise_for_status()`
+#: as a generic request failure, which the DAG logs as "Overpass query failed" per company — so
+#: the symptom was a run that finished cleanly having matched nothing at all. Measured: with the
+#: header, a query for "Sparkasse" inside Osnabrück returns 23 objects; without it, 0.
+OVERPASS_USER_AGENT = os.getenv(
+    "OVERPASS_USER_AGENT", "unternehmensdatenbank-research/1.0 (+https://ts.berlin)"
+)
+
 _LEGAL_SUFFIX_RE = re.compile(
     r"\b(?:GmbH\s*&\s*Co\.?\s*KG[aA]?|GmbH\s*&\s*Co\.?|GmbH|AG\s*&\s*Co\.?\s*KG"
     r"|KGaA|AG|KG|OHG|GbR|PartGmbB|PartG|UG\s*\(haftungsbeschränkt\)|UG"
@@ -103,6 +113,7 @@ def search_company(
         resp = requests.post(
             OSM_OVERPASS_URL,
             data={"data": query},
+            headers={"User-Agent": OVERPASS_USER_AGENT},
             timeout=OSM_DISCOVERY_TIMEOUT_S + 5,
         )
         if resp.status_code == 429:
