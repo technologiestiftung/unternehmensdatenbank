@@ -287,3 +287,7 @@ cython_debug/
 # Generated enrichment/benchmark artifacts. These contain business-owner
 # names (personal data) — never commit them.
 output/
+
+# Claude Code's local state: machine-specific settings, and `worktrees/` which holds whole
+# checkouts of this repo. Committing it would nest a second copy of the project inside itself.
+.claude/
