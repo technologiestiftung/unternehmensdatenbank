@@ -46,13 +46,28 @@ TLDS: tuple[str, ...] = tuple(
 )
 
 #: Hard cap on guesses per company. Guesses are ordered best-first, so the cap cuts the tail,
-#: which is where the bad guesses live.
+#: which is where the bad guesses live. 24 = roughly 6 name shapes x 4 TLDs.
 #:
-#: 32, raised from 24 when the umlaut spellings arrived. 24 was already roughly 6 name shapes x 4
-#: TLDs, so it truncated mid-way through the `.eu` group — appending two more spellings under that
-#: cap would have generated them and then discarded every one unseen. A guess costs one DNS lookup
-#: and DNS answers 45 of them a second, so 32 is about 0.7 s per company.
-MAX_CANDIDATES = int(os.getenv("COMBINED_URL_MAX_CANDIDATES", "32"))
+#: Raise it to 32 if you switch `UMLAUT_VARIANTS` on, or the extra spellings are generated and then
+#: truncated away unseen.
+MAX_CANDIDATES = int(os.getenv("COMBINED_URL_MAX_CANDIDATES", "24"))
+
+#: Whether to guess the other two spellings of an umlaut — `muller.de` and `müller.de` alongside
+#: `mueller.de`. **Off, because it was measured and it found nothing.**
+#:
+#: The hypothesis was good and the arithmetic behind it still is: 4,016 of the 14,443 names (28%)
+#: carry an umlaut, and all three spellings are live registrations, so one spelling probes a third of
+#: the namespace. But on 100 companies, 27 of them with umlauts, the variants produced **5 fetched
+#: pages out of 144 and not one winner** — 4 disqualified outright, and `otag.de` for "ÖTAG
+#: Öltanklagerverwaltungs-" short of evidence, which is the only near-miss in the set. The cost was
+#: 2,426 guesses instead of 2,004 and eight more pages for the judge to read at ~15 s each.
+#:
+#: Kept rather than deleted because 0 of 27 is a small sample and the code is written and guarded;
+#: turn it on with a bigger run to settle it. What is NOT behind this flag is the *verification*
+#: half — `host_stem` decoding punycode, and `search_common.host_matches_company` accepting both
+#: spellings. That is a correctness fix regardless: a search provider handing us `müller.de` for
+#: "Müller GmbH" was previously refused for not carrying the company's name.
+UMLAUT_VARIANTS = os.getenv("COMBINED_URL_UMLAUT_VARIANTS", "false").lower() == "true"
 
 #: Hard cap on how many *live* domains we bother fetching pages from. Fetching is the slow part,
 #: so this one number decides how long a run takes.
@@ -470,6 +485,8 @@ def generate_candidates(company_name: str, city: str | None = None) -> list[Cand
     spellings = name_word_spellings(company_name)
     if not spellings or not spellings[0][1]:
         return []
+    if not UMLAUT_VARIANTS:
+        spellings = spellings[:1]
 
     # The top-level domain is the OUTER loop, then the spelling, then the name shape. Every `.de`
     # guess is tried before any `.com` guess, because these are German companies: in the

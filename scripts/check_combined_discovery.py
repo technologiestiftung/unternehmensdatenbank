@@ -136,6 +136,17 @@ check(
     3,
 )
 
+# The variant GENERATION is off by default — measured on 100 companies it produced 5 fetched pages
+# and no winner. Both states are guarded, so switching it on for a bigger sample does not mean
+# re-deriving any of this. The verification half further down is always on.
+check(
+    "default off: an umlaut name guesses only the transliterated spelling",
+    [h for h in hosts("Bäckerei Schäfer GmbH") if "backerei" in h or h.startswith("xn--")],
+    [],
+)
+check("and the default is off", up.UMLAUT_VARIANTS, False)
+
+up.UMLAUT_VARIANTS = True  # the rest of this block tests the capability, not the default
 umlaut_hosts = hosts("Bäckerei Schäfer GmbH")
 check_true("the transliterated domain is guessed", "baeckerei-schaefer.de" in umlaut_hosts)
 check_true("the dropped-umlaut domain is guessed", "backerei-schafer.de" in umlaut_hosts)
@@ -156,7 +167,11 @@ check(
     "full_name+umlaut_dropped",
 )
 
-# The host has to land in the same alphabet as the name, or none of the above counts for anything.
+up.UMLAUT_VARIANTS = False  # back to the shipped default before anything else runs
+
+# The verification half, which is ALWAYS on and is a correctness fix in its own right: a search
+# provider handing us `müller.de` for "Müller GmbH" was previously refused for not carrying the
+# company's name. The host has to land in the same alphabet as the name for any of that to work.
 check("punycode decodes and transliterates", up.host_stem("xn--mller-kva.de"), "mueller")
 check("a dropped-umlaut host is left as it is", up.host_stem("muller.de"), "muller")
 check("an ordinary host is unchanged", up.host_stem("https://www.zweirad-liebig.de/x"), "zweiradliebig")
