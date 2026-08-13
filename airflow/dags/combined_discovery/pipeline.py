@@ -148,14 +148,21 @@ def _host_is_exact_name(url: str, company_name: str) -> bool:
     """True when the domain IS the name rather than merely containing it.
 
     `zweirad-liebig.de` for "Zweirad Liebig GmbH" is exact. `liebig-shop.de` is not.
+
+    Checked against every spelling of the name, so `muller.de` and `xn--mller-kva.de` count as
+    exactly as `mueller.de` does for "Müller GmbH". `host_stem` decodes punycode and transliterates,
+    which is what puts the domain and the name in the same alphabet.
     """
-    host = (urlparse(url).hostname or "").lower().removeprefix("www.")
-    stem = host.split(".")[0].replace("-", "")
-    words = url_patterns.name_words(company_name)
-    if not words:
+    stem = url_patterns.host_stem(url)
+    if not stem:
         return False
-    core = [w for w in words if not url_patterns.is_low_signal(w)] or words
-    return stem in {"".join(words), "".join(core)}
+    for _spelling, words in url_patterns.name_word_spellings(company_name):
+        if not words:
+            continue
+        core = [w for w in words if not url_patterns.is_low_signal(w)] or words
+        if stem in {"".join(words), "".join(core)}:
+            return True
+    return False
 
 
 def _page_evidence(

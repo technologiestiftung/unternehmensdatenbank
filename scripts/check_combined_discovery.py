@@ -105,6 +105,68 @@ check_true(
 check("a name that yields nothing yields no guesses", hosts("GmbH"), [])
 
 # ---------------------------------------------------------------------------------------
+# Umlaut spellings
+#
+# 4,016 of the 14,443 company names (28%) carry an umlaut or ß, and a German business may have
+# registered any of three spellings of it. All three resolve in reality: mueller.de, muller.de and
+# müller.de (which DNS carries as xn--mller-kva.de). Generating one of them probed a third of the
+# namespace; generating three without teaching the NAME CHECK about them would have found real
+# domains and then refused every one for "not carrying the company's name".
+# ---------------------------------------------------------------------------------------
+
+spellings = dict(up.name_word_spellings("Müller Straßenbau AG"))
+check("the transliterated spelling is still first", spellings[""], ["mueller", "strassenbau"])
+check("the dropped umlaut is offered", spellings[up.SPELLING_DROPPED], ["muller", "strassenbau"])
+check("and the umlaut kept as itself", spellings[up.SPELLING_IDN], ["müller", "strassenbau"])
+
+# 72% of the table has no umlaut. Those names must produce exactly one spelling — otherwise every
+# company pays for a feature only some of them need.
+check("a name without an umlaut yields one spelling", len(up.name_word_spellings("Zweirad Liebig GmbH")), 1)
+
+# ß is the exception, and deliberately so. DENIC permits `straßen.de`, but Python's built-in `idna`
+# codec is IDNA2003, whose nameprep step maps ß to ss — so `straßen.de`.encode("idna") returns
+# `strassen.de`, exactly the spelling the transliteration already produced. Chasing the real
+# `xn--straen-3ya.de` needs the IDNA2008 library, for a form German businesses rarely register when
+# `ss` is available. So a ß-only name yields ONE spelling, and the third variant collapses harmlessly
+# onto the first rather than costing a lookup.
+check("a ß-only name yields one spelling", len(up.name_word_spellings("Straßen GmbH")), 1)
+check(
+    "and a name with both gets all three",
+    len(up.name_word_spellings("Müller Straßenbau AG")),
+    3,
+)
+
+umlaut_hosts = hosts("Bäckerei Schäfer GmbH")
+check_true("the transliterated domain is guessed", "baeckerei-schaefer.de" in umlaut_hosts)
+check_true("the dropped-umlaut domain is guessed", "backerei-schafer.de" in umlaut_hosts)
+check_true(
+    "the umlaut domain is guessed, punycode-encoded for DNS",
+    any(h.startswith("xn--") for h in umlaut_hosts),
+)
+# An umlaut domain is a .de registry feature. Encoding them for every TLD only spends lookups.
+check(
+    "punycode is only tried on .de",
+    [h for h in umlaut_hosts if h.startswith("xn--") and not h.endswith(".de")],
+    [],
+)
+# The spelling travels to the output so its yield is measurable rather than assumed.
+check(
+    "the winning pattern names the spelling",
+    patterns("Bäckerei Schäfer GmbH").get("backerei-schafer.de"),
+    "full_name+umlaut_dropped",
+)
+
+# The host has to land in the same alphabet as the name, or none of the above counts for anything.
+check("punycode decodes and transliterates", up.host_stem("xn--mller-kva.de"), "mueller")
+check("a dropped-umlaut host is left as it is", up.host_stem("muller.de"), "muller")
+check("an ordinary host is unchanged", up.host_stem("https://www.zweirad-liebig.de/x"), "zweiradliebig")
+for host in ("https://mueller.de", "https://muller.de", "https://xn--mller-kva.de"):
+    check(f"{host} fully covers the name", up.name_coverage(host, "Müller GmbH"), 1.0)
+# And the loosening must not leak: a different company is still a different company.
+check("a different name is still not covered", up.name_coverage("https://schmidt.de", "Müller GmbH"), 0.0)
+
+
+# ---------------------------------------------------------------------------------------
 # Parked-domain detection
 # ---------------------------------------------------------------------------------------
 

@@ -46,8 +46,13 @@ TLDS: tuple[str, ...] = tuple(
 )
 
 #: Hard cap on guesses per company. Guesses are ordered best-first, so the cap cuts the tail,
-#: which is where the bad guesses live. 24 = roughly 6 name shapes x 4 TLDs.
-MAX_CANDIDATES = int(os.getenv("COMBINED_URL_MAX_CANDIDATES", "24"))
+#: which is where the bad guesses live.
+#:
+#: 32, raised from 24 when the umlaut spellings arrived. 24 was already roughly 6 name shapes x 4
+#: TLDs, so it truncated mid-way through the `.eu` group — appending two more spellings under that
+#: cap would have generated them and then discarded every one unseen. A guess costs one DNS lookup
+#: and DNS answers 45 of them a second, so 32 is about 0.7 s per company.
+MAX_CANDIDATES = int(os.getenv("COMBINED_URL_MAX_CANDIDATES", "32"))
 
 #: Hard cap on how many *live* domains we bother fetching pages from. Fetching is the slow part,
 #: so this one number decides how long a run takes.
@@ -218,15 +223,107 @@ def name_words(company_name: str) -> list[str]:
     return words
 
 
+#: The three ways a German business writes an umlaut in its own domain name, and the label each one
+#: carries into the output so its yield can be measured instead of assumed.
+SPELLING_TRANSLITERATED = ""
+SPELLING_DROPPED = "umlaut_dropped"
+SPELLING_IDN = "idn"
+
+#: ä -> a rather than ae. The second real spelling: `muller.de` alongside `mueller.de`.
+_UMLAUTS_DROPPED = (("ä", "a"), ("ö", "o"), ("ü", "u"), ("ß", "ss"))
+
+_HAS_UMLAUT_RE = re.compile(r"[äöüÄÖÜß]")
+
+
+def _normalize_with(text: str, table: tuple[tuple[str, str], ...], keep: str = "") -> str:
+    """`normalize` with a different umlaut table, and optionally umlauts left in place."""
+    for src, dst in table:
+        text = text.replace(src, dst).replace(src.upper(), dst)
+    text = text.lower()
+    return re.sub(rf"[^a-z0-9{keep}]+", " ", text).strip()
+
+
+def name_word_spellings(company_name: str) -> list[tuple[str, list[str]]]:
+    """Every spelling of the name a German business might have registered, best-known first.
+
+    Returns (label, words) pairs. One pair for a name with no umlaut in it, which is 72% of this
+    table — nothing changes for those.
+
+    Why three. Measured over the 14,443 companies, **4,016 names (28%) carry an umlaut or ß**, and
+    all three spellings of them are live registrations: `mueller.de`, `muller.de` and `müller.de`
+    (which DNS sees as `xn--mller-kva.de`) all resolve, as do the three forms of `bäckerei`,
+    `schäfer`, `grün` and `küche`. Generating only the `ae/oe/ue` transliteration therefore probed
+    one third of the plausible namespace for more than a quarter of the companies.
+
+    **ß is the exception.** A name whose only special character is ß gets one spelling, not three.
+    DENIC does permit `straßen.de`, but Python's built-in `idna` codec is IDNA2003 and its nameprep
+    step maps ß to ss, so `"straßen.de".encode("idna")` returns `strassen.de` — the spelling the
+    transliteration already produced. Reaching the real `xn--straen-3ya.de` needs the IDNA2008
+    library, for a form German businesses seldom register while `ss` is available. The variant
+    therefore collapses onto the first rather than costing a lookup.
+    """
+    stripped = LEGAL_SUFFIX_RE.sub(" ", company_name)
+    out = [(SPELLING_TRANSLITERATED, name_words(company_name))]
+    if not _HAS_UMLAUT_RE.search(company_name):
+        return out
+
+    dropped = [w for w in _normalize_with(stripped, _UMLAUTS_DROPPED).split() if len(w) > 1]
+    if dropped and dropped != out[0][1]:
+        out.append((SPELLING_DROPPED, dropped))
+
+    # The umlaut kept as itself. `.de` permits these, and `generate_candidates` punycode-encodes
+    # the host, because that is the form DNS and the eventual URL need.
+    kept = [
+        w
+        for w in _normalize_with(stripped, (("ß", "ss"),), keep="äöü").split()
+        if len(w) > 1
+    ]
+    if kept and kept not in [words for _, words in out]:
+        out.append((SPELLING_IDN, kept))
+    return out
+
+
+def to_ascii_host(host: str) -> str:
+    """A hostname DNS can be asked about: `müller.de` -> `xn--mller-kva.de`.
+
+    Returns the input unchanged when it is already ASCII or cannot be encoded — an over-long or
+    empty label makes Python's `idna` codec raise rather than return a failure, and a guessed name
+    produces both.
+    """
+    if host.isascii():
+        return host
+    try:
+        return host.encode("idna").decode("ascii")
+    except (UnicodeError, ValueError):
+        return host
+
+
+def from_ascii_host(host: str) -> str:
+    """The reverse: `xn--mller-kva.de` -> `müller.de`. Unchanged when it is not punycode."""
+    if "xn--" not in host:
+        return host
+    try:
+        return host.encode("ascii").decode("idna")
+    except (UnicodeError, ValueError):
+        return host
+
+
 def host_stem(url_or_host: str) -> str:
-    """The distinctive piece of a web address: `https://www.zweirad-liebig.de/x` -> `zweiradliebig`."""
+    """The distinctive piece of a web address: `https://www.zweirad-liebig.de/x` -> `zweiradliebig`.
+
+    Punycode is decoded and then transliterated, so `xn--mller-kva.de` comes back as `mueller` —
+    the same string `name_words` produces for "Müller GmbH". Without this the IDN candidates this
+    module now generates would every one be refused for not carrying the company's name, which is
+    the opposite of the reason they were generated.
+    """
     from urllib.parse import urlparse
 
     host = url_or_host
     if "//" in host:
         host = urlparse(host).hostname or ""
-    host = host.lower().removeprefix("www.")
-    return host.split(".")[0].replace("-", "")
+    host = from_ascii_host(host.lower()).removeprefix("www.")
+    stem = host.split(".")[0].replace("-", "")
+    return normalize(stem).replace(" ", "")
 
 
 def is_generic_stem(stem: str, common: set[str] | frozenset[str] = frozenset()) -> bool:
@@ -253,14 +350,21 @@ def name_coverage(url_or_host: str, company_name: str) -> float:
     This is the honest version of "does the domain match the name". `theagency.de` carries one
     word out of "The Living Proof Agency GmbH" and looked like a match to every rule that only
     checked whether *a* name word was present. Coverage says 0.33.
+
+    Scored against every spelling of the name and the best one wins, because a company that writes
+    itself "Müller" may own `muller.de`. Comparing only the `ae/oe/ue` form scored that domain 0.00
+    and had it refused as not carrying the company's name.
     """
     stem = host_stem(url_or_host)
     if not stem:
         return 0.0
-    words = {w for w in name_words(company_name) if len(w) >= 3 and not is_low_signal(w)}
-    if not words:
-        return 0.0
-    return sum(1 for w in words if w in stem) / len(words)
+    best = 0.0
+    for _spelling, spelled in name_word_spellings(company_name):
+        words = {w for w in spelled if len(w) >= 3 and not is_low_signal(w)}
+        if not words:
+            continue
+        best = max(best, sum(1 for w in words if w in stem) / len(words))
+    return best
 
 
 def _stems(words: list[str]) -> list[tuple[str, str]]:
@@ -345,16 +449,8 @@ class Candidate:
     rank: int
 
 
-def generate_candidates(company_name: str, city: str | None = None) -> list[Candidate]:
-    """Guessed URLs for a company, best guess first.
-
-    `city` adds `<name>-<city>.de`, which is how tradespeople and franchise branches name
-    their sites. It is tried last because it is the least likely shape.
-    """
-    words = name_words(company_name)
-    if not words:
-        return []
-
+def _shapes_for(words: list[str], city: str | None) -> list[tuple[str, str]]:
+    """The name shapes for one spelling of the name, including the city forms."""
     shapes = _stems(words)
     if city:
         city_slug = normalize(city).replace(" ", "")
@@ -362,23 +458,52 @@ def generate_candidates(company_name: str, city: str | None = None) -> list[Cand
         if city_slug and len(city_slug) >= 3:
             shapes.append((f"{'-'.join(core)}-{city_slug}", "name_city"))
             shapes.append((f"{core[0]}-{city_slug}", "first_word_city"))
+    return shapes
 
-    # The top-level domain is the OUTER loop, the name shape the inner one. Every `.de` guess
-    # is tried before any `.com` guess, because these are German companies: in the 100-company
-    # Osnabrück sample, every website found sat on a `.de` domain. The other way round —
-    # shape-major — spends the probe budget on `firma-name.com`, which a domain reseller owns,
+
+def generate_candidates(company_name: str, city: str | None = None) -> list[Candidate]:
+    """Guessed URLs for a company, best guess first.
+
+    `city` adds `<name>-<city>.de`, which is how tradespeople and franchise branches name
+    their sites. It is tried last because it is the least likely shape.
+    """
+    spellings = name_word_spellings(company_name)
+    if not spellings or not spellings[0][1]:
+        return []
+
+    # The top-level domain is the OUTER loop, then the spelling, then the name shape. Every `.de`
+    # guess is tried before any `.com` guess, because these are German companies: in the
+    # 100-company Osnabrück sample, every website found sat on a `.de` domain. The other way round
+    # — shape-major — spends the probe budget on `firma-name.com`, which a domain reseller owns,
     # before reaching `firma.de`, which the company owns.
+    #
+    # The spelling sits inside the TLD loop rather than outside it for the same reason: a company's
+    # `muller.de` is a better guess than its own `mueller.com`.
     out: list[Candidate] = []
     seen_hosts: set[str] = set()
     for tld in TLDS:
-        for slug, why in shapes:
-            host = f"{slug}.{tld}"
-            if host in seen_hosts:
+        for spelling, words in spellings:
+            # An umlaut kept as itself is a `.de` registry feature. `muller.com` is reached by the
+            # dropped spelling, so encoding umlauts for every TLD would only spend lookups.
+            if spelling == SPELLING_IDN and tld != "de":
                 continue
-            seen_hosts.add(host)
-            out.append(Candidate(url=f"https://{host}", host=host, pattern=why, rank=len(out)))
-            if len(out) >= MAX_CANDIDATES:
-                return out
+            for slug, why in _shapes_for(words, city):
+                host = to_ascii_host(f"{slug}.{tld}")
+                if host in seen_hosts:
+                    continue
+                seen_hosts.add(host)
+                out.append(
+                    Candidate(
+                        url=f"https://{host}",
+                        host=host,
+                        # The spelling travels to the output CSV, so "did the umlaut variants ever
+                        # find anything" is answerable without re-running.
+                        pattern=f"{why}+{spelling}" if spelling else why,
+                        rank=len(out),
+                    )
+                )
+                if len(out) >= MAX_CANDIDATES:
+                    return out
     return out
 
 

@@ -221,6 +221,28 @@ def filter_hits(hits: list[SearchHit], company_name: str) -> tuple[list[SearchHi
     return kept, len(hits) - len(kept)
 
 
+def _host_stem_in_name_alphabet(host: str) -> str:
+    """A host's first label, written the way `name_tokens` writes a company name.
+
+    Two transforms, both unambiguous and both host-side:
+
+    1. Punycode back to letters. DNS carries `müller.de` as `xn--mller-kva.de`, which matches no
+       company name ever written.
+    2. The same `ae/oe/ue` transliteration `name_tokens` applies, so a decoded `müller` lands on
+       `mueller`. A host that was already `muller` is left alone and matches the dropped spelling.
+    """
+    host = host.removeprefix("www.")
+    if "xn--" in host:
+        try:
+            host = host.encode("ascii").decode("idna")
+        except (UnicodeError, ValueError):
+            pass
+    stem = host.split(".")[0]
+    for src, dst in (("ä", "ae"), ("ö", "oe"), ("ü", "ue"), ("ß", "ss")):
+        stem = stem.replace(src, dst)
+    return stem
+
+
 def host_matches_company(url: str, company_name: str) -> bool:
     """Does the URL's HOST carry the company name, i.e. is this plausibly its own domain?
 
@@ -242,16 +264,37 @@ def host_matches_company(url: str, company_name: str) -> bool:
     """
     from urllib.parse import urlparse
 
-    tokens = name_tokens(company_name)
-    if not tokens:
+    # Both spellings of an umlaut, and only here. A German business writing itself "Müller" may own
+    # `mueller.de`, `muller.de` or `müller.de`, and DNS sees the third as `xn--mller-kva.de`.
+    # Measured: 4,016 of the 14,443 companies (28%) have an umlaut in the name, and all three forms
+    # are live registrations, so comparing against the `ae/oe/ue` spelling alone refused two thirds
+    # of a company's own plausible domains as "not carrying the company name".
+    #
+    # Deliberately NOT done inside `name_tokens`, which also feeds `hit_is_about_company`. There it
+    # would mean a page merely mentioning "Muller" counts as being about Müller GmbH — a looser
+    # claim about text, which is not what this fixes. The extra spelling belongs to the HOST check.
+    # Token ORDER matters below — `"".join(tokens)` reconstructs the name as a domain would write it
+    # — so each spelling keeps its own ordered list, and only the membership tests use a set.
+    token_lists = [name_tokens(company_name)]
+    dropped_name = company_name
+    for src, dst in (("ä", "a"), ("ö", "o"), ("ü", "u"), ("Ä", "A"), ("Ö", "O"), ("Ü", "U")):
+        dropped_name = dropped_name.replace(src, dst)
+    if dropped_name != company_name:
+        token_lists.append(name_tokens(dropped_name))
+    every_token = {t for tokens in token_lists for t in tokens}
+    if not every_token:
         return False
+
     host = (urlparse(url).hostname or "").lower()
     if not host:
         return False
-    stem = host.removeprefix("www.").split(".")[0]
+    stem = _host_stem_in_name_alphabet(host)
     flat = stem.replace("-", "")
-    if flat in {"".join(tokens), *tokens} or stem in tokens:
+
+    if flat in {"".join(tokens) for tokens in token_lists} or flat in every_token:
         return True
-    if sum(1 for t in set(tokens) if t in flat) >= 2:
+    if stem in every_token:
         return True
-    return any(len(t) >= 5 and t in flat for t in set(tokens))
+    if sum(1 for t in every_token if t in flat) >= 2:
+        return True
+    return any(len(t) >= 5 and t in flat for t in every_token)
