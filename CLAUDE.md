@@ -127,10 +127,11 @@ python scripts/run_combined_discovery.py report --limit 100
 python scripts/run_combined_discovery.py csv --limit 100
 ```
 
-Measured on 100 Osnabrück companies (2026-08-12): a website for **38** before the judge, **11**
-after, and about **6** once the judge's rejections started binding. The judge **removes false
-positives and finds almost nothing new** — 31 demotions, 1 promotion. Which of those numbers is
-honest is **unknown** until ~35 pages are labelled by hand. Vault: `Combined Discovery`.
+Measured on 100 Osnabrück companies (2026-08-13): a website for **38** before the judge and **6**
+after — and all 6 land in the `high` band, 5 proven by a register number on the page. The judge
+**removes false positives and finds almost nothing new** — 32 demotions, 1 promotion. Treat 6% as
+the honest free-method figure and the earlier 36% as mostly false positives. For comparison, the
+paid search path measured **29% verified** on 100 companies. Vault: `Combined Discovery`.
 
 Scores are frozen into `results.jsonl` at run time, and `report`/`csv` read stored values — a
 scoring change never applies retroactively, so re-run before believing a comparison.
