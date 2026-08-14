@@ -100,6 +100,24 @@ OSM_STRONG_MATCH = "osm_match_strong"
 #: owes NOTHING to guessing the name — which is why it is allowed to lift the name-mismatch
 #: refusal below, and why it is only ever emitted for a strong name+address match.
 OSM_EMAIL_DOMAIN = "osm_email_domain"
+#: The Impressum prints the phone number OpenStreetMap holds for this business. Like
+#: OSM_EMAIL_DOMAIN, its value is that it owes nothing to guessing the name: somebody stood in front
+#: of the shop and typed the number in, and the page prints the same number.
+PHONE_MATCHES_OSM = "phone_matches_osm"
+#: The Impressum's own email address is at the domain being tested — `info@stallkamp.de` on
+#: stallkamp.de. Weak by design: nearly every real company site does this, so it says the page is a
+#: genuine business site without saying WHICH business. Same class of fact as IMPRINT_FOUND.
+IMPRINT_EMAIL_ON_DOMAIN = "imprint_email_at_this_domain"
+#: A German VAT identification number appears on the page. Also the "real business site" class —
+#: a company quoting somebody else's VAT number is rare, but so is it proving anything about whose
+#: site this is.
+VAT_ID_FOUND = "vat_id_found"
+#: The page's own structured data — the schema.org JSON block search engines read — names this
+#: company, or gives this company's postcode. Stronger in kind than the same fact found in the page
+#: text: this is the site stating who it belongs to as data, in the place a site puts that claim for
+#: machines to read, rather than a string that happened to appear somewhere in the markup.
+JSONLD_NAME_MATCH = "jsonld_org_name_match"
+JSONLD_POSTCODE_MATCH = "jsonld_postcode_match"
 REDIRECT_OFF_HOST = "redirected_to_other_host"
 AGREE_TWO = "two_methods_agree"
 AGREE_THREE = "three_methods_agree"
@@ -149,6 +167,12 @@ WEIGHTS: dict[str, float] = {
     CITY_ON_PAGE: 0.04,
     # The page writes the company's name out in full.
     NAME_ON_PAGE: 0.10,
+    # The same claim, but made in the page's structured data. Priced slightly above NAME_ON_PAGE
+    # because of where it is: a name in the page text can be a customer reference, a supplier list or
+    # a news item, while the schema.org block is where a site says who IT is. Priced only slightly
+    # above, because it is still the page talking about itself and anybody can write anything there.
+    JSONLD_NAME_MATCH: float(os.getenv("COMBINED_W_JSONLD_NAME_MATCH", "0.12")),
+    JSONLD_POSTCODE_MATCH: float(os.getenv("COMBINED_W_JSONLD_POSTCODE_MATCH", "0.08")),
     # The domain is the name, not merely contains it: `zweirad-liebig.de` for Zweirad Liebig.
     HOST_EXACT: 0.08,
     # The opposite: the domain is one word out of the name, or its initials. `judentum.de` was
@@ -166,6 +190,16 @@ WEIGHTS: dict[str, float] = {
     # The mapped business's own email address is at this domain. Worth about what a strong map
     # match is worth: somebody stood in front of the shop and typed its contact details in.
     OSM_EMAIL_DOMAIN: float(os.getenv("COMBINED_W_OSM_EMAIL_DOMAIN", "0.15")),
+    # The page prints the phone number the map holds for this business. Two independent records of
+    # the same company agreeing on a contact detail, so worth as much as the name on the page —
+    # and unlike the name, a phone number is not a word anybody could have guessed.
+    PHONE_MATCHES_OSM: float(os.getenv("COMBINED_W_PHONE_MATCHES_OSM", "0.10")),
+    # The last two are the "this is a real business site" class, the same class as IMPRINT_FOUND,
+    # and they are priced like it. Neither says which company the site belongs to, so neither is in
+    # `_VERIFYING_EVIDENCE` and neither can carry a row past the cap on its own. They only ever
+    # refine a row that already has a fact naming the company.
+    IMPRINT_EMAIL_ON_DOMAIN: float(os.getenv("COMBINED_W_IMPRINT_EMAIL_ON_DOMAIN", "0.06")),
+    VAT_ID_FOUND: float(os.getenv("COMBINED_W_VAT_ID_FOUND", "0.04")),
     # The guessed domain forwards somewhere else. Often legitimate (a parent company), often
     # not (an expired domain resold). Small penalty, never fatal.
     REDIRECT_OFF_HOST: -0.05,
@@ -212,7 +246,24 @@ NOT_OWN_SITE_CAP = float(os.getenv("COMBINED_NOT_OWN_SITE_CAP", "0.34"))
 #: Ceiling. Certainty is not on the menu.
 MAX_CONFIDENCE = 0.99
 
-#: Evidence that only exists because a page was downloaded and read.
+#: Evidence that ties the downloaded page to THIS company. Nothing else can lift `UNVERIFIED_CAP`.
+#:
+#: Read the three that are here as one sentence: the page prints this company's register number,
+#: or its postcode, or its name. Each is a fact about *this* company that a page belonging to
+#: somebody else has no reason to carry.
+#:
+#: `IMPRINT_FOUND` used to be in this set and was removed on 2026-08-14, because it is not that kind
+#: of fact. Every German business website must publish an Impressum, so finding one says the page is
+#: *a* business — never *which* business. The cost was measurable: 190 candidate URLs reached the
+#: promotable band on `base + host_is_exact_name + imprint_found` alone, with nothing on the page
+#: naming the company, and the language model then had to read all 190 and throw them out one at a
+#: time. `flora.com`, `herten.de`, `selbstbau.com` and `hasekurier.de` were all in that set. Taking
+#: the cap-lift away refuses them for free, and re-scoring the stored 1,000-company run showed the
+#: promotable candidates unchanged at 49 with an identical `verified_by` breakdown — the winners
+#: were never resting on this.
+#:
+#: `IMPRINT_FOUND` keeps its +0.08 weight. An Impressum is still mild evidence that a page is a real
+#: business site; it just cannot carry a row past the bar by itself.
 #:
 #: `LLM_OWN_SITE` is missing from this set on purpose, and that omission is load-bearing. A model
 #: reading a page technically means the page was downloaded — but "the model was convinced" is not
@@ -220,8 +271,11 @@ MAX_CONFIDENCE = 0.99
 #: no Impressum, no name and no address be promoted on the model's word alone, which is exactly
 #: the arrangement this pipeline is built to avoid. Set COMBINED_LLM_VERIFIES=true to change that
 #: once there are measured numbers saying the model deserves it.
+#: The two structured-data facts are here for the same reason as their page-text equivalents: they
+#: name this company. `jsonld_org_name_match` is the site declaring its own name, and
+#: `jsonld_postcode_match` its own postcode, in the block search engines read.
 _VERIFYING_EVIDENCE = frozenset(
-    {REGISTER_MATCH, POSTCODE_MATCH, NAME_ON_PAGE, IMPRINT_FOUND}
+    {REGISTER_MATCH, POSTCODE_MATCH, NAME_ON_PAGE, JSONLD_NAME_MATCH, JSONLD_POSTCODE_MATCH}
     | ({LLM_OWN_SITE} if os.getenv("COMBINED_LLM_VERIFIES", "false").lower() == "true" else set())
 )
 
@@ -236,6 +290,58 @@ def register_digits(text: str | None) -> str:
     """
     match = re.search(r"\d+", text or "")
     return match.group(0) if match else ""
+
+
+#: Which of the five German court registers an entry belongs to. Uppercased for comparison, so
+#: `GnR` and `GNR` are one thing.
+_REGISTER_PREFIX_RE = re.compile(r"\b(HRA|HRB|VR|GnR|PR)\b", re.IGNORECASE)
+
+
+def register_parts(text: str | None) -> tuple[str, str]:
+    """Which register, and which number. `"Amtsgericht Osnabrück HRB 213220"` -> `("HRB", "213220")`.
+
+    The register matters as much as the number, because the five registers number independently: an
+    association can be `VR 213220` while a company is `HRB 213220`, and those are not the same entity.
+    Comparing digits alone would call that a match.
+
+    The prefix comes back `""` when the string does not name a register — plenty of rows in
+    `public.companies` hold a bare number — and callers then have to fall back to comparing digits.
+    """
+    prefix = _REGISTER_PREFIX_RE.search(text or "")
+    return (prefix.group(1).upper() if prefix else ""), register_digits(text)
+
+
+def standing_disqualifiers(evidence: set[str] | list[str]) -> set[str]:
+    """Which refusals in this evidence set actually still stand.
+
+    A disqualifier can be lifted by other evidence in the same set — see `_LIFTED_BY` — so "is
+    `HOST_NAME_MISMATCH` present" is not the same question as "is this row refused". Public because
+    `pipeline` has to ask it too: a page whose refusal has been lifted is a page the judge should
+    still be shown, and a gate that read the raw evidence would silently skip it.
+    """
+    present = set(evidence)
+    return {
+        name
+        for name in _DISQUALIFIERS
+        if name in present and not (present & _LIFTED_BY.get(name, frozenset()))
+    }
+
+
+def register_number_is_on_page(digits: str, text: str) -> bool:
+    """Do these digits appear in the downloaded text as a number of their own?
+
+    Here for the same reason as `register_digits`, and now three callers depend on agreeing:
+    `pipeline.py` reads the register number off a page that has no findable Impressum,
+    `llm_judge.py` checks a number the model handed back, and this module decides what the
+    resulting evidence is worth. One shared answer to "is it on the page" keeps them consistent.
+
+    Word boundaries matter, and only digit boundaries count: "882" must not be found inside
+    "172907" or a phone number, or a company with a short register number would match half the
+    internet. Letters either side are fine — "HRB213220" carries the number.
+    """
+    if not digits or not text:
+        return False
+    return re.search(rf"(?<!\d){re.escape(digits)}(?!\d)", text) is not None
 
 #: The model's two ways of saying "this page is not this company's". Both cap; neither disqualifies.
 _NOT_OWN_SITE = frozenset({LLM_UNRELATED, LLM_ABOUT_COMPANY})
@@ -261,12 +367,25 @@ _DISQUALIFIERS = {
 #:    OpenStreetMap holds this business's own email address, and a business's mail domain does not
 #:    have to look like its name. `stallkamp.de` would survive the name test; plenty do not.
 #:
+#: 3. **Structured data naming the company** answers the name objection in the same way an email
+#:    domain does — it owes nothing to guessing the domain. The page states, in the block search
+#:    engines read, which organisation it belongs to. Measured over 1,000 companies: 3 pages refused
+#:    for their domain declared the company in their JSON-LD — `5am-agua.com`, `thebigbash.de`, and
+#:    `gmh-gruppe.de`, which names both "Georgsmarienhütte Holding" and "GMH Recycling GmbH".
+#:
+#:    That last one shows the limit of it: a group's site naming a subsidiary is genuinely arguable,
+#:    and this lift does not settle it. Lifting the refusal only puts the row back in the running —
+#:    it still has to clear 0.35, and because `JSONLD_NAME_MATCH` is one of the judge's identity
+#:    markers the model gets to read the page and object. `pipeline._page_evidence` also refuses to
+#:    emit this evidence for a page whose PATH looks like a directory listing, since a listing's
+#:    structured data names the company it is listing.
+#:
 #: `DIRECTORY_HOST` and `REGISTER_MISMATCH` appear in neither list and never will. A register
 #: number on a directory page proves the page is ABOUT the company, never that it IS its site, and
 #: a business whose mapped email sits at a directory is a mapping error rather than a website.
 _LIFTED_BY: dict[str, frozenset[str]] = {
     GENERIC_HOST: frozenset({REGISTER_MATCH}),
-    HOST_NAME_MISMATCH: frozenset({OSM_EMAIL_DOMAIN}),
+    HOST_NAME_MISMATCH: frozenset({OSM_EMAIL_DOMAIN, JSONLD_NAME_MATCH}),
 }
 
 BANDS = (

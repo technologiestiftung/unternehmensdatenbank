@@ -31,6 +31,8 @@ from urllib.parse import urlparse
 
 import requests
 
+from combined_discovery import page_cache
+
 log = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------------------
@@ -625,13 +627,44 @@ def _worth_retrying(error_name: str) -> bool:
     return error_name in {"SSLError", "ConnectionError", "TooManyRedirects"}
 
 
+def _probe_from_record(url: str, record: dict) -> Probe:
+    """Rebuild a Probe from a cached HTTP result.
+
+    `parked` and `redirected_off_host` are recomputed rather than stored, so a change to
+    `PARKED_MARKERS` or to the redirect rule applies to cached pages too. Only the HTTP facts —
+    final url, status, body — come from the cache. See `page_cache` for why.
+    """
+    html = record.get("html") or ""
+    status = int(record.get("status_code") or 0)
+    if not status:
+        return Probe(url=url, final_url=url, status_code=0, error=record.get("error"))
+    final_url = record.get("final_url") or url
+    guessed_host = (urlparse(url).hostname or "").removeprefix("www.")
+    final_host = (urlparse(final_url).hostname or "").removeprefix("www.")
+    return Probe(
+        url=url,
+        final_url=final_url,
+        status_code=status,
+        html=html,
+        parked=looks_parked(html),
+        redirected_off_host=bool(final_host) and final_host != guessed_host,
+    )
+
+
 def probe(url: str) -> Probe | None:
     """Fetch a guessed URL, trying `www.` and plain `http` when that could help.
 
     A GET, not a HEAD. HEAD is cheaper but returns no body, and the body is what tells a real
     site from a parked one. Since the DNS pre-check already removed the domains that do not
     exist, the number of GETs here is small.
+
+    Served from `page_cache` when one is configured, including the failures: a host that did not
+    answer is worth remembering, or every replay would pay the full timeout for it again.
     """
+    cached = page_cache.get("probe", url)
+    if cached is not None:
+        return _probe_from_record(url, cached)
+
     last_error: str | None = None
     for attempt in _attempts(url):
         try:
@@ -654,6 +687,15 @@ def probe(url: str) -> Probe | None:
 
         response.encoding = response.apparent_encoding or "utf-8"
         html = response.text
+        page_cache.put(
+            "probe",
+            url,
+            {
+                "final_url": str(response.url),
+                "status_code": response.status_code,
+                "html": html,
+            },
+        )
         guessed_host = (urlparse(url).hostname or "").removeprefix("www.")
         final_host = (urlparse(str(response.url)).hostname or "").removeprefix("www.")
         return Probe(
@@ -664,6 +706,7 @@ def probe(url: str) -> Probe | None:
             parked=looks_parked(html),
             redirected_off_host=bool(final_host) and final_host != guessed_host,
         )
+    page_cache.put("probe", url, {"status_code": 0, "error": last_error})
     return Probe(url=url, final_url=url, status_code=0, error=last_error)
 
 

@@ -59,16 +59,22 @@ def _quality(extracted: dict[str, Any]) -> tuple[int, int, int]:
     )
 
 
-def best_imprint(base_url: str) -> tuple[str, str, dict[str, Any]] | None:
+def best_imprint(
+    base_url: str, homepage: str | None = None
+) -> tuple[str, str, dict[str, Any]] | None:
     """Return (html, imprint_url, extracted) for the most informative Impressum page found.
 
     None when nothing could be fetched at all. Never raises on network problems — a candidate
     that cannot be reached is simply not verifiable.
+
+    `homepage` is the already-downloaded HTML of `base_url`, if the caller has it. Handing it over
+    saves one GET per candidate; see `http_client.fetch_impressum`. Callers who do not have it pass
+    nothing and the behaviour is unchanged.
     """
     best: tuple[tuple[int, int, int], str, str, dict[str, Any]] | None = None
 
     try:
-        got = fetch_impressum(base_url)
+        got = fetch_impressum(base_url, homepage=homepage)
     except Exception as exc:  # noqa: BLE001
         log.debug("fetch_impressum failed for %s: %s", base_url, type(exc).__name__)
         got = None

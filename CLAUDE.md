@@ -7,39 +7,39 @@ Guidance for Claude Code (claude.ai/code) working in this repository.
 This file is a map, deliberately short. The depth is in two places:
 
 - **In the repo:** [docs/running-discovery.md](docs/running-discovery.md) (runbook),
+  [docs/combined-discovery-verification.md](docs/combined-discovery-verification.md) (how a page is
+  judged to belong to a company, and the measurement behind every rule),
   [docs/data-model.md](docs/data-model.md), [docs/core-queries.sql](docs/core-queries.sql),
   [airflow/dags/README.md](airflow/dags/README.md), and the module docstrings — which are long on
   purpose and are the real documentation.
 - **In the maintainer's Obsidian vault** at `C:\Users\TuPhan\TSB_Projects_vaults\unternhemensdatenbank`
-  (local, not checked in): `Unternehmensdatenbank` is the index; `Confidence and Resolution`,
-  `Data Model`, `Discovery DAGs`, `Combined Discovery`, `Local Model Setup`,
-  `Search Provider Comparison`, `Local Dev Runbook`, `Repo Conventions and Gotchas`. These hold
-  the measured numbers and the *why*. Read them when available; the code always wins a
-  disagreement.
+  (local, not checked in): `Unternehmensdatenbank` is the index, then `Confidence and Resolution`,
+  `Data Model`, `Discovery DAGs`, `Combined Discovery`, `Local Model Setup`, `Search Provider
+  Comparison`, `Local Dev Runbook`, `Repo Conventions and Gotchas`. Read them when available; the
+  code always wins a disagreement.
 
 ## How to write the docs in this repo
 
 Every `.md` here is for a smart 18-year-old who codes but has never seen this project, German
 company registers, or Airflow.
 
-1. Explain a thing before using its name. "Impressum — the legal contact page every German
-   business website must have" comes before you start saying "the Impressum".
+1. Explain a thing before using its name. "Impressum — the legal contact page every German business
+   website must have" comes before you start saying "the Impressum".
 2. Short sentences, one idea each. If a sentence needs a comma to survive, split it.
-3. Say what happens, not what the code is called. "The score drops by 200" beats "a penalty is
-   applied".
+3. Say what happens, not what the code is called. "The score drops by 200" beats "a penalty is applied".
 4. Numbers, not adjectives. Not "coverage is low" — "we find a website for 29 out of 100".
 5. Answer "so what" after every fact.
-6. Define the invented words the first time each file uses them: canonical, observation, resolver,
-   confidence, checkpoint.
+6. Define the invented words on first use in each file: canonical, observation, resolver, confidence,
+   checkpoint.
 7. Keep the honest caveat. If a number came from 100 companies, say so.
 
 ## What this is
 
-Local development scaffold for a Postgres-backed German company-data platform. Airflow
-orchestrates, Flyway owns all schema, Python DAGs write to Postgres with psycopg2. Two databases
-share one server: `airflow` (metadata) and `unternehmensdatenbank` (application data).
-`public.companies` holds 14,443 companies from a Northdata export of the Osnabrück region, mostly
-name + address. The work is filling in the missing fields cheaply and traceably.
+Local development scaffold for a Postgres-backed German company-data platform. Airflow orchestrates,
+Flyway owns all schema, Python DAGs write to Postgres with psycopg2. Two databases share one server:
+`airflow` (metadata) and `unternehmensdatenbank` (application data). `public.companies` holds 14,443
+companies from a Northdata export of the Osnabrück region, mostly name + address. The work is filling
+in the missing fields cheaply and traceably.
 
 Stack: Postgres 16 (port 5433), Airflow 3.2.0 (Airflow 3 API — `airflow.providers.standard`, not
 `airflow.operators`), Flyway 12, Python DAGs.
@@ -109,9 +109,8 @@ unpaused. Per-DAG detail in `airflow/dags/README.md`.
   a local Overpass (Berlin data only).
 - **Coordinator** — `pipeline_coordinator` is the only thing that decides which observation wins a
   field. Source DAGs write observations and nothing else, then trigger it.
-- **Legacy** — `berlin_gewerbedaten` fetches the Berlin Gewerbedaten WFS, enriches with addresses
-  and OSM POI names, writes JSONL, loads in batches of 250. Disabled; does not chain into the
-  coordinator.
+- **Legacy** — `berlin_gewerbedaten` fetches the Berlin Gewerbedaten WFS, enriches with addresses and
+  OSM POI names, writes JSONL, loads in batches of 250. Disabled; never chains into the coordinator.
 
 ## Combined discovery — a script, not a DAG
 
@@ -122,43 +121,45 @@ confused: **`llm` searches** (SearXNG, CAPTCHA-blocked on this network, finds no
 
 ```powershell
 $env:OLLAMA_MODEL = "qwen3.5:4b"   # required on the host; the default qwen2.5:7b is not pulled
-python scripts/run_combined_discovery.py run --limit 100 --stages url,osm,judge
-python scripts/run_combined_discovery.py report --limit 100
-python scripts/run_combined_discovery.py csv --limit 100
+python scripts/run_combined_discovery.py run --limit 1000 --stages url,osm,judge
+python scripts/run_combined_discovery.py report --limit 1000   # then: csv | labels | labels-report
 ```
 
-Measured on 100 Osnabrück companies (2026-08-13): a website for **38** before the judge and **6**
-after — and all 6 land in the `high` band, 5 proven by a register number on the page. The judge
-**removes false positives and finds almost nothing new** — 32 demotions, 1 promotion. Treat 6% as
-the honest free-method figure and the earlier 36% as mostly false positives. For comparison, the
-paid search path measured **29% verified** on 100 companies. Vault: `Combined Discovery`.
+Measured on 1,000 Osnabrück companies (2026-08-14): a website for **53 (5.3%)** — 52 `high`, 38 proven
+by a register number on the page. The paid search path measured **29% verified** on 100 companies, and
+that gap is *not* a verification problem: for 665 of the 954 companies with no website we had already
+downloaded a page and refused it. Only **289 never yielded a live page at all.**
 
-Scores are frozen into `results.jsonl` at run time, and `report`/`csv` read stored values — a
-scoring change never applies retroactively, so re-run before believing a comparison.
+Read [docs/combined-discovery-verification.md](docs/combined-discovery-verification.md) before
+changing `confidence.py`, the judge gate, or anything that reads a page. In short:
 
-The judge emits *evidence flags*, never a score, and its limits are enforced in code rather than
-asked for in the prompt: it is not counted as a "method", its register numbers are verified against
-the page before they count, it can never produce a register *mismatch*, and it cannot promote a
-page on its own — but its rejection **caps** the score at 0.34, because a plain penalty let 5 of 11
-promoted websites be pages it had explicitly rejected. `scripts/check_combined_discovery.py` guards
-all of it.
+1. A pre-filter for the judge is a **veto only** — cheap evidence may cancel a model call, never
+   replace one. Its value is its rejections, and they land on convincing-looking rows.
+2. Counting lost *discoveries* hides lost *rejections*. `scripts/replay_judge_gate.py` fails on both.
+3. **Scoring** changes replay offline from `results.jsonl`; **extraction** changes need the pages —
+   that is `COMBINED_PAGE_CACHE_DIR`. Warm, the median company costs 0.8 s: the run is model-bound.
+4. `report` counts what happened; only `labels-report` says whether it was **right**.
 
 Local model setup — native Windows Ollama with `OLLAMA_IGPU_ENABLE=1`, which is **74× faster** than
 the Docker one because the host had paged the WSL2 VM's memory to disk: vault `Local Model Setup`.
 
-## Three facts that have misled people repeatedly
+## Four facts that have misled people repeatedly
 
 - **`website_url` is a view column, not a table column.** V9 dropped it from `companies`. Enriched
   fields live in `company_canonical_field_sources` and are read through `public.v_companies_enriched`.
 - **A register number on a page proves the page is *about* a company, never that it *is* that
   company's site.** Registry pages, insolvency trackers and directories all quote them.
-  `search_common.is_own_site_candidate` is the single predicate for that call; using a looser one
-  anywhere else is the recurring bug in this repo. The same trap reappeared in combined discovery's
-  judge, where a directory scored 0.805 until the award was suppressed.
+  `search_common.is_own_site_candidate` is the single predicate for that call; a looser one anywhere
+  else is the recurring bug here. It reappeared in the judge, where a directory scored 0.805.
 - **Never grow a list of bad domains or words.** Genericness is *measured* from the data —
   `name_frequency.common_words` counts company names, `common_email_domains` counts mapped
   businesses. The most common email domain in Osnabrück is `osnanet.de`, a local ISP no
   hand-written list would ever contain.
+- **"A real business site" is not "THAT company's site."** Every German business site has an
+  Impressum, a VAT number and a contact email at its own domain, so none of them identifies one
+  company. That class of evidence may add score but must stay out of
+  `confidence._VERIFYING_EVIDENCE`, or it lifts the 0.34 cap and promotes pages naming nobody — which
+  is how 190 wrong websites got promoted and then removed by a model one at a time.
 
 ## Migrations
 
@@ -168,25 +169,27 @@ once applied. Flyway is a one-shot service under `--profile tools`; it does **no
 
 ## Utility scripts
 
-`scripts/ac_measurement.py` measures what the pipeline finds from a name and address alone,
-writing nothing to the database and caching every stage. Results and method:
-[docs/website-and-owner-discovery-results.md](docs/website-and-owner-discovery-results.md).
-Headline on 100 Osnabrück companies: a **verified** website for 29%, a verified owner for 15%.
-Including the Handelsregister number in the search makes discovery *worse* (21% vs 25%) because it
-pulls results toward register aggregators, so it is left out. `ministral-8b-latest` and
-`mistral-small-latest` are indistinguishable here, so the cheap one wins. ~1,850 input tokens per
-business.
+`scripts/ac_measurement.py` measures what the pipeline finds from a name and address alone, writing
+nothing to the database and caching every stage. Method, model comparison and full numbers:
+[docs/website-and-owner-discovery-results.md](docs/website-and-owner-discovery-results.md). On 100
+companies: a **verified** website for 29%, an owner for 15%, ~1,850 input tokens each. Adding the
+Handelsregister number makes it *worse* (21% vs 25%) — it pulls results toward register aggregators.
 
 Three guard scripts, all free — no API, no model, no database, no network:
 
 - `scripts/check_own_site_filter.py` — 21 real URLs, guarding `is_own_site_candidate`
 - `scripts/check_imprint_owner_extraction.py` — 19 Impressum layouts guarding owner extraction
-  (`scripts/collect_imprint_fixtures.py` rebuilds the corpus; its `shapes` output masks every
-  letter and digit so layouts can be studied without exposing anyone's name)
-- `scripts/check_combined_discovery.py` — URL guessing, the confidence ladder, and the judge's limits
+  (`scripts/collect_imprint_fixtures.py` rebuilds the corpus; its `shapes` output masks every letter
+  and digit so layouts can be studied without exposing anyone's name)
+- `scripts/check_combined_discovery.py` — URL guessing, the confidence ladder, the judge's limits and
+  gate, what `_page_evidence` takes off a page, postcodes, and JSON-LD including malformed shapes
 
 Run them after touching `search_common.py`, `imprint_probe.py`,
 `url_discovery/imprint_extractor.py`, or anything in `combined_discovery/`.
+
+`scripts/replay_judge_gate.py` belongs with them: equally free, and the only way to check a gate or
+scoring change against real data without a full run. It re-runs the real gate (imported, never
+restated) over `results.jsonl` and fails if the change loses a discovery **or a demotion**.
 
 `scripts/prepare_company_import.py input.csv output.csv` converts a Northdata CSV export into a
 clean import, repairing rows whose quoted `Gegenstand` field contains commas.

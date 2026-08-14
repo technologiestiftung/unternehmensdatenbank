@@ -5,9 +5,52 @@ from typing import Any
 
 from bs4 import BeautifulSoup
 
-HRB_RE = re.compile(r"\b(HR[AB])\s*[.:\s]?\s*(\d+)\b", re.IGNORECASE)
+#: A German court-register entry, of any of the five registers that exist.
+#:
+#: `HRA`/`HRB` (Handelsregister) is what a GmbH or an OHG has, and for a long time it was the only
+#: thing matched here. The others are not exotic: an `e. V.` gets a `VR` number (Vereinsregister), a
+#: cooperative `eG` gets `GnR`, and a `Partnerschaft mbB` gets `PR`. Missing them cost real results —
+#: "CF-Selbsthilfe Osnabrück e. V." prints `VR 2217` on its Impressum, and because nothing here could
+#: read it the page had no hard proof and was decided by a language model instead, which got it wrong.
+#:
+#: `-Nr.` is optional because both "HRB 12345" and "HRB-Nr. 12345" are written. The separator class
+#: deliberately excludes `-`, so "VR-Bank" cannot be read as a `VR` number.
+REGISTER_RE = re.compile(
+    r"\b(HRA|HRB|VR|GnR|PR)\s*(?:-?\s*Nr\.?)?\s*[.:\s]?\s*(\d+)\b", re.IGNORECASE
+)
+
+#: The old name, kept because it reads as "the Handelsregister pattern" in older call sites.
+HRB_RE = REGISTER_RE
 VAT_RE = re.compile(r"\bDE\s*(\d{9})\b")
-POSTCODE_RE = re.compile(r"\b(\d{5})\b")
+
+#: A German postcode in a German postal address: five digits followed by a place name.
+#:
+#: The place name is the whole point. This used to be a bare `\b(\d{5})\b`, which returned the first
+#: five-digit run anywhere on the page — a price ("12500 EUR"), an article number, a year range, a
+#: fragment of a phone number. That mattered more than a wrong field usually does, because a postcode
+#: agreeing with the company's counts as evidence that the page belongs to that company and lifts the
+#: 0.34 confidence cap. A coincidence was enough to promote a website.
+#:
+#: `\s+` rather than a literal space: after HTML is flattened to text the postcode and the town
+#: routinely end up on separate lines. `[A-ZÄÖÜ]` because German place names are capitalised, and the
+#: umlauts have to be listed explicitly — `[A-Z]` does not contain `Ö`. The trailing character class
+#: carries the hyphen and the full stop for "Bad Rothenfelde" and "St. Wendel".
+#:
+#: `(?<![\d-])` keeps "1-49074" out while still allowing the "D-" of "D-49074 Osnabrück", which is
+#: matched by the optional country prefix instead.
+POSTCODE_RE = re.compile(
+    r"(?<![\d-])(?:[A-Z]{1,3}-)?(\d{5})\s+([A-ZÄÖÜ][A-Za-zÄÖÜäöüß.\-]+)"
+)
+
+#: A short all-capitals word after a number is a unit or a currency, not a town: "12500 EUR",
+#: "10115 KG". Towns written in capitals do occur in address blocks — "49074 OSNABRÜCK" — so the
+#: rule is length-limited rather than a ban on capitals.
+#:
+#: This does not catch everything, and the honest limit is worth stating: "12500 Euro" still looks
+#: like an address to this regex. It only ever matters for a company whose own postcode is 12500,
+#: because the only question asked of the result is whether the page carries THIS company's
+#: postcode — so a spurious number that matches nothing costs nothing.
+_UNIT_NOT_A_TOWN = re.compile(r"^[A-ZÄÖÜ]{1,3}$")
 
 PHONE_RE = re.compile(
     r"(?:Tel(?:efon)?\.?|Phone|Fon|Ruf|Telephone|Call)\s*[.:\s]\s*([\+\d][\d\s\(\)\/\-\.]{6,25})",
@@ -101,11 +144,33 @@ _MIN_NAME_WORDS = 2
 _MAX_NAME_WORDS = 4
 
 
+#: How the five register prefixes are written once normalised. `GnR` keeps its lowercase `n`,
+#: which is the official spelling.
+_REGISTER_CASE = {"HRA": "HRA", "HRB": "HRB", "VR": "VR", "GNR": "GnR", "PR": "PR"}
+
+
+def extract_register_numbers(text: str) -> list[str]:
+    """Every court-register entry on the page, in order: `["HRB 213220", "VR 2217"]`.
+
+    All of them, because a page routinely carries more than one and taking the first was producing
+    false mismatches. A group's Impressum lists every subsidiary; a page names its own register entry
+    and then its parent's. Measured over 1,000 companies: of 91 candidates rejected for printing "a
+    different company's register number", 2 were printing ours as well — Felix Schoeller's page
+    carries `16630` and `5121`, and only the second was being read.
+    """
+    found: list[str] = []
+    for match in REGISTER_RE.finditer(text):
+        prefix = _REGISTER_CASE.get(match.group(1).upper(), match.group(1).upper())
+        entry = f"{prefix} {match.group(2)}"
+        if entry not in found:
+            found.append(entry)
+    return found
+
+
 def extract_register_number(text: str) -> str | None:
-    m = HRB_RE.search(text)
-    if m:
-        return f"{m.group(1).upper()} {m.group(2)}"
-    return None
+    """The first court-register entry, or None. `extract_register_numbers` is the better question."""
+    found = extract_register_numbers(text)
+    return found[0] if found else None
 
 
 def extract_vat_id(text: str) -> str | None:
@@ -115,9 +180,35 @@ def extract_vat_id(text: str) -> str | None:
     return None
 
 
+def extract_postcodes(text: str) -> list[str]:
+    """Every postcode that appears in a postal address, in the order they appear.
+
+    All of them, not just the first: an Impressum often prints a street address and a separate
+    postal or billing address, and there is no way to tell from the page which one a company
+    register happens to hold. A caller comparing against a known postcode should check the whole
+    list — matching only the first throws away a correct match for a formatting accident.
+
+    German postcodes run from 01067 to 99998, so a leading "00" is not one. That check costs nothing
+    and removes a class of five-digit numbers that happen to be followed by a capitalised word.
+    """
+    seen: list[str] = []
+    for match in POSTCODE_RE.finditer(text):
+        code, town = match.group(1), match.group(2)
+        if code.startswith("00") or code in seen:
+            continue
+        if _UNIT_NOT_A_TOWN.match(town):
+            continue
+        seen.append(code)
+    return seen
+
+
 def extract_postcode(text: str) -> str | None:
-    m = POSTCODE_RE.search(text)
-    return m.group(1) if m else None
+    """The first postcode in a postal address, or None.
+
+    Kept for the callers that want one value. `extract_postcodes` is the better question to ask.
+    """
+    found = extract_postcodes(text)
+    return found[0] if found else None
 
 
 def extract_phone(text: str) -> str | None:
@@ -264,10 +355,19 @@ def page_text(html: str) -> str:
 def extract_from_html(html: str) -> dict[str, Any]:
     text = page_text(html)
 
+    postcodes = extract_postcodes(text)
+    registers = extract_register_numbers(text)
+
     return {
-        "register_number": extract_register_number(text),
+        # `register_number` is the first one and stays for callers that want a single value;
+        # `register_numbers` is all of them, because a page can carry several companies' entries.
+        "register_number": registers[0] if registers else None,
+        "register_numbers": registers,
         "vat_id":          extract_vat_id(text),
-        "postcode":        extract_postcode(text),
+        # `postcode` is the first one and stays for callers that want a single value; `postcodes`
+        # is all of them, because an Impressum can carry a street address and a postal address.
+        "postcode":        postcodes[0] if postcodes else None,
+        "postcodes":       postcodes,
         "phone":           extract_phone(text),
         "email":           extract_email(text),
         "ceo_names":       extract_ceo_names(text),

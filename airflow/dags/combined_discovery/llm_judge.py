@@ -57,7 +57,6 @@ from __future__ import annotations
 
 import logging
 import os
-import re
 import time
 from dataclasses import dataclass
 from typing import Any
@@ -212,12 +211,11 @@ def _number_is_on_page(digits: str, text: str) -> bool:
     The model is told the company's register number, so it can hand it straight back whether the
     page carries it or not. This is the check that makes its transcription worth trusting.
 
-    Word boundaries matter: "882" must not be found inside "172907" or a phone number, or a
-    company with a short register number would match half the internet.
+    Delegates to `confidence.register_number_is_on_page`, which `pipeline.py` also uses to read a
+    register number off a page directly. The two must agree: if this check were stricter than the
+    pipeline's, the model would be refused credit for a number the pipeline had already accepted.
     """
-    if not digits or not text:
-        return False
-    return re.search(rf"(?<!\d){re.escape(digits)}(?!\d)", text) is not None
+    return conf.register_number_is_on_page(digits, text)
 
 
 def judge(

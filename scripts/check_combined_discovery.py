@@ -1,9 +1,19 @@
-"""Guard the two hand-written parts of combined discovery: URL guessing and confidence.
+"""Guard the hand-written parts of combined discovery: what it reads, and what that is worth.
 
 Free to run. No search API, no language model, no database, no network — every case here is a
-string in, a value out. Run it after touching `url_patterns.py` or `confidence.py`:
+string in, a value out. Run it after touching `url_patterns.py`, `confidence.py`,
+`structured_data.py`, `pipeline._page_evidence`, the judge gate, or `imprint_extractor`:
 
     python scripts/check_combined_discovery.py
+
+Six things are guarded, and the last three are where wrong answers have actually come from:
+
+    URL guessing        which domains get generated, and which are refused
+    confidence          what each piece of evidence is worth, and what cannot be promoted
+    the judge's trust   a number the model hands back must be on the page
+    the judge gate      which pages are worth a model call at all
+    page reading        what `_page_evidence` takes from a page — and refuses to take
+    extraction          postcodes and structured data, including the malformed shapes
 
 Same idea as `scripts/check_own_site_filter.py`: the rules these two modules encode are
 judgement calls that look arbitrary six months later, so each case says what it is protecting
@@ -20,7 +30,10 @@ sys.path.insert(0, str(REPO_ROOT / "airflow" / "dags"))
 from combined_discovery import confidence as conf  # noqa: E402
 from combined_discovery import llm_judge as lj  # noqa: E402
 from combined_discovery import name_frequency as nf  # noqa: E402
+from combined_discovery import pipeline as pl  # noqa: E402
+from combined_discovery import structured_data as sd  # noqa: E402
 from combined_discovery import url_patterns as up  # noqa: E402
+from url_discovery import imprint_extractor as ie  # noqa: E402
 
 failures: list[str] = []
 
@@ -266,12 +279,18 @@ bare_guess = conf.score(
 check_true("a guess with no page evidence is not promotable", not bare_guess.promotable)
 
 # Two methods that share no inputs beyond the name reaching the same host is real evidence.
+#
+# All three rows below carry NAME_ON_PAGE, and that is not decoration. Since 2026-08-14 an Impressum
+# no longer lifts UNVERIFIED_CAP, so without a fact naming this company every one of these rows would
+# sit at 0.34 and the arithmetic being tested here would be invisible under the cap.
 alone = conf.score(
-    methods=[conf.METHOD_OSM], evidence={conf.IMPRINT_FOUND}, name_uniqueness=0.5
+    methods=[conf.METHOD_OSM],
+    evidence={conf.IMPRINT_FOUND, conf.NAME_ON_PAGE},
+    name_uniqueness=0.5,
 )
 together = conf.score(
     methods=[conf.METHOD_OSM, conf.METHOD_URL_PATTERN],
-    evidence={conf.IMPRINT_FOUND, conf.AGREE_TWO},
+    evidence={conf.IMPRINT_FOUND, conf.NAME_ON_PAGE, conf.AGREE_TWO},
     name_uniqueness=0.5,
 )
 check_true("agreement raises confidence", together.value > alone.value)
@@ -280,7 +299,7 @@ check("agreement is named as the reason", together.verified_by, "method_agreemen
 # Three-way agreement replaces the two-way bonus rather than stacking with it.
 three = conf.score(
     methods=[conf.METHOD_OSM, conf.METHOD_URL_PATTERN, conf.METHOD_LOCAL_LLM],
-    evidence={conf.IMPRINT_FOUND, conf.AGREE_TWO, conf.AGREE_THREE},
+    evidence={conf.IMPRINT_FOUND, conf.NAME_ON_PAGE, conf.AGREE_TWO, conf.AGREE_THREE},
     name_uniqueness=0.5,
 )
 check(
@@ -436,7 +455,25 @@ email_site = conf.score(
     evidence={conf.HOST_NAME_MISMATCH, conf.OSM_EMAIL_DOMAIN, conf.OSM_STRONG_MATCH, conf.IMPRINT_FOUND},
 )
 check("an email domain survives the name check", email_site.disqualified_because, None)
-check_true("and can be promoted", email_site.promotable)
+
+# Surviving the name check is not the same as clearing the bar, and this pair records a real change
+# of behaviour on 2026-08-14. This row used to reach 0.83 — `high` — on the strength of a map entry
+# and the existence of an Impressum, with nothing on the page about this company at all. Now that an
+# Impressum no longer lifts UNVERIFIED_CAP it stops at 0.34. The map entry gets the domain past the
+# name refusal; the PAGE still has to confirm whose it is.
+check("but an email-domain page that names nobody caps", email_site.value, conf.UNVERIFIED_CAP)
+check_true("so a map entry alone cannot promote it", not email_site.promotable)
+email_confirmed = conf.score(
+    methods=[conf.METHOD_OSM],
+    evidence={
+        conf.HOST_NAME_MISMATCH,
+        conf.OSM_EMAIL_DOMAIN,
+        conf.OSM_STRONG_MATCH,
+        conf.IMPRINT_FOUND,
+        conf.NAME_ON_PAGE,
+    },
+)
+check_true("and once the page names the company, it can", email_confirmed.promotable)
 
 # It lifts that refusal and nothing else. A business mapped with an email at a directory is a
 # mapping mistake, not a website.
@@ -797,6 +834,460 @@ check(
 check_true(
     "the judge is not one of the proposing methods",
     conf.METHOD_LOCAL_LLM not in lj._VERDICT_FLAGS.values(),
+)
+
+# ---------------------------------------------------------------------------------------
+# Which pages the judge is shown
+# ---------------------------------------------------------------------------------------
+#
+# The gate decides where about two thirds of the stage's runtime goes. It has exactly one shape and
+# the shape is the safety argument: cheap evidence may CANCEL a model call, and may never stand in
+# for one. There is no rule anywhere that skips the judge because a candidate looks convincing — the
+# judge's main product is its rejections, and those land on convincing-looking candidates.
+
+
+def _entry(evidence: set[str], text: str = "some page text") -> "pl.UrlAnswer":
+    return pl.UrlAnswer(url="https://zweirad-liebig.de", evidence=set(evidence), page_text=text)
+
+
+check_true(
+    "a page naming the company is judged",
+    pl._worth_judging(_entry({conf.NAME_ON_PAGE})),
+)
+check_true(
+    "a page carrying the company's city is judged",
+    pl._worth_judging(_entry({conf.CITY_ON_PAGE})),
+)
+check_true(
+    "a page carrying the company's postcode is judged",
+    pl._worth_judging(_entry({conf.POSTCODE_MATCH})),
+)
+check_true(
+    "structured data naming the company is enough to be judged",
+    pl._worth_judging(_entry({conf.JSONLD_NAME_MATCH})),
+)
+# Measured 2026-08-14 over the stored 1,000-company run: 510 of 767 model calls went to pages with
+# none of these, and every one of them came back `unrelated`. Not one website was ever rescued from
+# such a page.
+check_true(
+    "a page that says nothing about this company is NOT judged",
+    not pl._worth_judging(_entry({conf.IMPRINT_FOUND, conf.HOST_EXACT})),
+)
+check_true(
+    "an Impressum alone does not earn a model call",
+    not pl._worth_judging(_entry({conf.IMPRINT_FOUND})),
+)
+check_true(
+    "nothing downloaded means nothing to read",
+    not pl._worth_judging(_entry({conf.NAME_ON_PAGE}, text="")),
+)
+# Already settled, in both directions: proven pages and disqualified pages are both a waste of a
+# call. These were in the gate before the identity rule was added and must stay.
+check_true(
+    "a proven page is not re-litigated",
+    not pl._worth_judging(_entry({conf.NAME_ON_PAGE, conf.REGISTER_MATCH})),
+)
+check_true(
+    "a page with somebody else's register number is not judged",
+    not pl._worth_judging(_entry({conf.NAME_ON_PAGE, conf.REGISTER_MISMATCH})),
+)
+check_true(
+    "a directory is not judged",
+    not pl._worth_judging(_entry({conf.NAME_ON_PAGE, conf.DIRECTORY_HOST})),
+)
+check_true(
+    "a host that does not carry the name is not judged",
+    not pl._worth_judging(_entry({conf.NAME_ON_PAGE, conf.HOST_NAME_MISMATCH})),
+)
+# The rule that makes the whole gate safe. If any of these could reach the promotable band without a
+# fact naming the company, skipping the model call would let a wrong website through — which is
+# exactly what happened while IMPRINT_FOUND was still treated as verification.
+for _soft in (conf.IMPRINT_FOUND, conf.HOST_EXACT, conf.VAT_ID_FOUND, conf.IMPRINT_EMAIL_ON_DOMAIN):
+    check_true(
+        f"{_soft} cannot promote a page on its own",
+        not conf.score(
+            methods=[conf.METHOD_URL_PATTERN], evidence={_soft}, name_uniqueness=1.0
+        ).promotable,
+    )
+check_true(
+    "not even all of them together can",
+    not conf.score(
+        methods=[conf.METHOD_OSM],
+        evidence={
+            conf.IMPRINT_FOUND,
+            conf.HOST_EXACT,
+            conf.VAT_ID_FOUND,
+            conf.IMPRINT_EMAIL_ON_DOMAIN,
+            conf.OSM_STRONG_MATCH,
+        },
+        name_uniqueness=1.0,
+    ).promotable,
+)
+check_true(
+    "one fact naming the company changes that",
+    conf.score(
+        methods=[conf.METHOD_OSM],
+        evidence={conf.IMPRINT_FOUND, conf.HOST_EXACT, conf.OSM_STRONG_MATCH, conf.NAME_ON_PAGE},
+        name_uniqueness=1.0,
+    ).promotable,
+)
+
+# ---------------------------------------------------------------------------------------
+# Postcodes: a five-digit number is not an address
+# ---------------------------------------------------------------------------------------
+#
+# This used to be the first five-digit run anywhere on the page. A postcode agreeing with the
+# company's is treated as verification and lifts the confidence cap, so a price or an article number
+# was enough to promote a website.
+
+check("a postcode with its town is found", ie.extract_postcodes("Musterstr. 1\n49074 Osnabrück"), ["49074"])
+check("the country prefix is allowed", ie.extract_postcodes("D-49074 Osnabrück"), ["49074"])
+check("a two-word town works", ie.extract_postcodes("49214 Bad Rothenfelde"), ["49214"])
+check("an abbreviated town works", ie.extract_postcodes("66606 St. Wendel"), ["66606"])
+check("a town in capitals works", ie.extract_postcodes("49074 OSNABRÜCK"), ["49074"])
+check("a price is not an address", ie.extract_postcodes("Preis: 12500 EUR"), [])
+check("an article number is not an address", ie.extract_postcodes("Artikel 49074 bestellen"), [])
+check("a phone number is not an address", ie.extract_postcodes("Tel. 0541 1234567"), [])
+check("00xxx is not a German postcode", ie.extract_postcodes("00123 Nowhere"), [])
+check(
+    "both addresses on an Impressum are returned",
+    ie.extract_postcodes("49074 Osnabrück\nPostfach 49009 Osnabrück"),
+    ["49074", "49009"],
+)
+check("the single-value helper still answers", ie.extract_postcode("49074 Osnabrück"), "49074")
+check("and returns None when there is no address", ie.extract_postcode("nothing here"), None)
+
+# ---------------------------------------------------------------------------------------
+# Structured data: the business card a page publishes for search engines
+# ---------------------------------------------------------------------------------------
+#
+# Every one of these shapes is real. The parser must never raise: broken JSON-LD is common, and a
+# page with a broken block has to behave exactly like a page with none.
+
+_LD = '<script type="application/ld+json">%s</script>'
+
+check(
+    "a plain business is read",
+    sd.names(_LD % '{"@type":"LocalBusiness","name":"Zweirad Liebig GmbH","address":{"postalCode":"49074"}}'),
+    ["Zweirad Liebig GmbH"],
+)
+check(
+    "the postcode comes out too",
+    sd.postcodes(_LD % '{"@type":"LocalBusiness","name":"X GmbH","address":{"postalCode":"49074"}}'),
+    ["49074"],
+)
+# `@graph` is how most content-management plugins publish it, with the business buried among a
+# WebSite and a WebPage node.
+check(
+    "a business inside @graph is found",
+    sd.names(
+        _LD
+        % '{"@graph":[{"@type":"WebSite","name":"Startseite"},{"@type":"Dentist","name":"Neue Zähne GmbH","telephone":"+49 541 1"}]}'
+    ),
+    ["Neue Zähne GmbH"],
+)
+# Several hundred schema.org subtypes describe a local business. Matching on the keys a node has
+# rather than on a list of type names is what makes `Dentist` and `Bakery` work without naming them.
+check(
+    "an unlisted subtype still counts",
+    sd.names(_LD % '{"@type":"Bakery","name":"Bäckerei Meyer","vatID":"DE123456789"}'),
+    ["Bäckerei Meyer"],
+)
+check(
+    "a type given as a list works",
+    sd.names(_LD % '{"@type":["Organization","Store"],"name":"Laden GmbH","email":"a@b.de"}'),
+    ["Laden GmbH"],
+)
+check(
+    "the legal name is collected as well",
+    sd.names(_LD % '{"@type":"Organization","name":"Meyer","legalName":"Meyer Verwaltungs GmbH","email":"a@b.de"}'),
+    ["Meyer", "Meyer Verwaltungs GmbH"],
+)
+check(
+    "a product is not a business",
+    sd.names(_LD % '{"@type":"Product","name":"Fahrrad XL","offers":{"price":"499"}}'),
+    [],
+)
+check("malformed JSON is silent", sd.names(_LD % '{"@type":"Organization","name": }'), [])
+check("an empty block is silent", sd.names(_LD % "   "), [])
+check("no block at all is silent", sd.names("<html><body>nichts</body></html>"), [])
+check("empty input is silent", sd.names(""), [])
+# Wrappers used to stop old browsers executing the block. All four styles occur.
+for _label, _wrapped in [
+    ("//<![CDATA[", '//<![CDATA[\n{"@type":"Organization","name":"W GmbH","telephone":"1"}\n//]]>'),
+    ("/* <![CDATA[ */", '/* <![CDATA[ */{"@type":"Organization","name":"W GmbH","telephone":"1"}/* ]]> */'),
+    ("bare CDATA", '<![CDATA[{"@type":"Organization","name":"W GmbH","telephone":"1"}]]>'),
+    ("an HTML comment", '<!--{"@type":"Organization","name":"W GmbH","telephone":"1"}-->'),
+]:
+    check(f"a block wrapped in {_label} is read", sd.names(_LD % _wrapped), ["W GmbH"])
+# Two JSON documents concatenated, or a PHP notice printed after the JSON, is a very common breakage.
+check(
+    "trailing junk after the JSON is tolerated",
+    sd.names(_LD % '{"@type":"Organization","name":"J GmbH","telephone":"1"}<br/>Notice: undefined'),
+    ["J GmbH"],
+)
+
+# ---------------------------------------------------------------------------------------
+# Reading a page: what the rules take from it, and what they refuse to take
+# ---------------------------------------------------------------------------------------
+
+
+class _PageCompany:
+    """The fields `pipeline._page_evidence` reads."""
+
+    def __init__(self) -> None:
+        self.company_name = "Zweirad Liebig GmbH"
+        self.address = "Musterstr. 1, 49074 Osnabrück"
+        self.city = "Osnabrück"
+        self.postcode = "49074"
+        self.registration_number = "Amtsgericht Osnabrück HRB 213220"
+
+
+_OWN_HOST = "https://zweirad-liebig.de"
+
+
+def _evidence(html: str, extracted: dict | None = None) -> set[str]:
+    got, _seen, _text = pl._page_evidence(_OWN_HOST, _PageCompany(), html=html, extracted=extracted)
+    return got
+
+
+# The register number is often printed in a page footer while the Impressum itself cannot be found —
+# the link is an image, or it is behind JavaScript. Reading it with a regex is free; the model used
+# to be the only route to it, and the judge gate no longer shows it pages like this.
+check_true(
+    "a register number in the page text is read without a model",
+    conf.REGISTER_MATCH
+    in _evidence("<html>Zweirad Liebig GmbH, Osnabrück. Handelsregister HRB 213220</html>"),
+)
+# Digit boundaries: a short register number must not be found inside a longer number.
+check_true(
+    "a register number inside a longer number does not count",
+    conf.REGISTER_MATCH not in _evidence("<html>Zweirad Liebig GmbH Osnabrück Nr 9213220456</html>"),
+)
+# Precedence. A number found on the Impressum is the better source, and a MISMATCH found there must
+# not be argued away by some other number elsewhere on the page — pages quote other companies.
+_mismatch = {"register_number": "HRB 999999", "postcode": None, "postcodes": [], "text_snippet": ""}
+_got = _evidence("<html>Zweirad Liebig GmbH Osnabrück HRB 213220</html>", _mismatch)
+check_true("an Impressum mismatch stands", conf.REGISTER_MISMATCH in _got)
+check_true("and is not overturned by the page text", conf.REGISTER_MATCH not in _got)
+
+# A register number proves a page is ABOUT a company, never that it IS that company's site. What
+# makes reading it off the page safe is that `_page_evidence` returns early unless the HOST carries
+# the company's name. This is the repo's most repeated bug, so it is checked rather than trusted.
+_directory, _, _ = pl._page_evidence(
+    "https://www.northdata.de/Zweirad+Liebig,+Osnabrück/HRB+213220",
+    _PageCompany(),
+    html="<html>Zweirad Liebig GmbH, Osnabrück, HRB 213220</html>",
+    extracted=None,
+)
+check("a directory gets no evidence beyond being a directory", _directory, {conf.DIRECTORY_HOST})
+_other_host, _, _ = pl._page_evidence(
+    "https://irgendwas-anderes.de",
+    _PageCompany(),
+    html="<html>Zweirad Liebig GmbH, Osnabrück, HRB 213220</html>",
+    extracted=None,
+)
+check("a host that does not carry the name gets nothing either", _other_host, {conf.HOST_NAME_MISMATCH})
+
+# Structured data reaches the score. The name in the JSON-LD is the company's registered name written
+# differently — matched on distinctive words, because comparing the strings exactly would fail on
+# every German legal-form abbreviation.
+_jsonld = _evidence(
+    _LD % '{"@type":"Bakery","name":"Zweirad Liebig Gesellschaft mbH","address":{"postalCode":"49074"}}'
+)
+check_true("a JSON-LD name match becomes evidence", conf.JSONLD_NAME_MATCH in _jsonld)
+check_true("so does a JSON-LD postcode match", conf.JSONLD_POSTCODE_MATCH in _jsonld)
+check_true(
+    "somebody else's business card is not a match",
+    conf.JSONLD_NAME_MATCH
+    not in _evidence(_LD % '{"@type":"Organization","name":"Ganz Andere Firma AG","telephone":"1"}'),
+)
+
+# Fields that were being extracted and thrown away. All three are the "this is a real business site"
+# class — none of them says WHICH business, so none may lift the cap.
+_fields = {
+    "register_number": None,
+    "postcode": "49074",
+    "postcodes": ["49074"],
+    "vat_id": "DE123456789",
+    "email": "info@zweirad-liebig.de",
+    "phone": "0541 7607780",
+    "text_snippet": "",
+}
+_with_fields = _evidence("<html>x</html>", _fields)
+check_true("a VAT id on the page counts", conf.VAT_ID_FOUND in _with_fields)
+check_true("an Impressum email at the same domain counts", conf.IMPRINT_EMAIL_ON_DOMAIN in _with_fields)
+check_true(
+    "an Impressum email elsewhere does not",
+    conf.IMPRINT_EMAIL_ON_DOMAIN
+    not in _evidence("<html>x</html>", {**_fields, "email": "kontakt@ganz-woanders.de"}),
+)
+check_true("both postcodes are compared, not just the first",
+    conf.POSTCODE_MATCH in _evidence("<html>x</html>", {**_fields, "postcodes": ["12345", "49074"]}))
+
+# Phone numbers are written every possible way, and the parts that differ are at the front.
+check_true("the same number written two ways matches", pl._same_phone("+49 541 7607780", "0541/760 77 80"))
+check_true("brackets and spacing do not matter", pl._same_phone("(0541) 7607780", "+49 541 7607780"))
+check_true("a different number does not match", not pl._same_phone("0541 7607780", "0541 7607781"))
+check_true("a number too short to identify a line does not match", not pl._same_phone("12345", "+49 541 12345"))
+check_true("a missing number does not match", not pl._same_phone(None, "+49 541 7607780"))
+
+# ---------------------------------------------------------------------------------------
+# All five German court registers, and every number on the page
+# ---------------------------------------------------------------------------------------
+#
+# Only HRA/HRB used to be read. An `e. V.` has a `VR` number, a cooperative `eG` a `GnR`, a
+# `Partnerschaft mbB` a `PR` — and missing them cost a real website: CF-Selbsthilfe Osnabrück e. V.
+# prints `VR 2217` on its Impressum, so the page carried hard proof that nothing could read, and the
+# decision was left to a language model that got it wrong.
+
+check("a Handelsregister entry is read", ie.extract_register_numbers("Amtsgericht Osnabrück HRB 213220"), ["HRB 213220"])
+check("an association's register entry is read", ie.extract_register_numbers("Vereinsregister VR 2217"), ["VR 2217"])
+check("a cooperative's is read", ie.extract_register_numbers("Genossenschaftsregister GnR 155"), ["GnR 155"])
+check("a partnership's is read", ie.extract_register_numbers("Partnerschaftsregister PR 712"), ["PR 712"])
+check("the -Nr. form is read", ie.extract_register_numbers("HRB-Nr. 12345"), ["HRB 12345"])
+check("lower case is read and normalised", ie.extract_register_numbers("hrb 12345"), ["HRB 12345"])
+# "VR-Bank" is one of the most common German bank names. The separator class excludes the hyphen so
+# it cannot be read as a register number.
+check("VR-Bank is not a register number", ie.extract_register_numbers("VR-Bank Osnabrück eG"), [])
+check(
+    "every entry on the page comes back, in order",
+    ie.extract_register_numbers("HRB 16630 ... und HRB 5121 ... sowie VR 2217"),
+    ["HRB 16630", "HRB 5121", "VR 2217"],
+)
+check("a repeated entry appears once", ie.extract_register_numbers("HRB 999 HRB 999"), ["HRB 999"])
+check("the single-value helper still answers", ie.extract_register_number("HRB 213220"), "HRB 213220")
+check("and returns None when there is none", ie.extract_register_number("nothing here"), None)
+
+# Which register, not just which number — the five registers number independently.
+check("the register and the number are separated", conf.register_parts("Amtsgericht Osnabrück HRB 213220"), ("HRB", "213220"))
+check("an association's is too", conf.register_parts("VR 2217"), ("VR", "2217"))
+check("a bare number has no register", conf.register_parts("213220"), ("", "213220"))
+check("nothing in, nothing out", conf.register_parts(None), ("", ""))
+
+# The false mismatch this fixed. Felix Schoeller's Impressum prints 16630 and 5121; ours is 16630,
+# and reading only the first entry made the page somebody else's and disqualified it.
+_multi = {
+    "register_number": "HRB 5121",
+    "register_numbers": ["HRB 5121", "HRB 16630"],
+    "postcode": None,
+    "postcodes": [],
+    "text_snippet": "",
+}
+
+
+class _RegCompany(_PageCompany):
+    def __init__(self, register: str) -> None:
+        super().__init__()
+        self.registration_number = register
+
+
+def _reg_evidence(register: str, extracted: dict) -> set[str]:
+    got, _seen, _t = pl._page_evidence(_OWN_HOST, _RegCompany(register), html="<html>x</html>", extracted=extracted)
+    return got
+
+
+_ours_second = _reg_evidence("Amtsgericht Osnabrück HRB 16630", _multi)
+check_true("our entry is found even when it is not the first", conf.REGISTER_MATCH in _ours_second)
+check_true("and that is not also a mismatch", conf.REGISTER_MISMATCH not in _ours_second)
+# Still a mismatch when none of the entries is ours.
+check_true(
+    "a page listing only other companies is still a mismatch",
+    conf.REGISTER_MISMATCH in _reg_evidence("Amtsgericht Osnabrück HRB 777777", _multi),
+)
+# A different register is not a mismatch. `VR 2217` on the page of an HRB company says nothing about
+# that company either way, and a mismatch disqualifies — too strong a conclusion to draw.
+_other_register = {**_multi, "register_number": "VR 2217", "register_numbers": ["VR 2217"]}
+_got_other = _reg_evidence("Amtsgericht Osnabrück HRB 16630", _other_register)
+check_true("an unrelated register is not a mismatch", conf.REGISTER_MISMATCH not in _got_other)
+check_true("and not a match either", conf.REGISTER_MATCH not in _got_other)
+# Same digits in a different register is a coincidence, not a match.
+_same_digits = {**_multi, "register_number": "VR 16630", "register_numbers": ["VR 16630"]}
+check_true(
+    "the same number in a different register is not a match",
+    conf.REGISTER_MATCH not in _reg_evidence("Amtsgericht Osnabrück HRB 16630", _same_digits),
+)
+
+# Reading the entry off the page text, when no Impressum could be found, needs the whole entry —
+# never the bare digits. Not hypothetical: Bäko-Osnabrück's register entry is `GnR 205`, and
+# searching a page for "205" hits a price, a house number or part of a phone number. That awarded
+# hard proof, worth 0.45 and able to overrule a disqualifier, on a coincidence.
+_bare = pl._page_evidence(
+    _OWN_HOST,
+    _RegCompany("Amtsgericht Osnabrück GnR 205"),
+    html="<html>Zweirad Liebig GmbH, Osnabrück. Artikel 205 kostet 205 Euro.</html>",
+    extracted=None,
+)[0]
+check_true("bare digits in the page text are not a register match", conf.REGISTER_MATCH not in _bare)
+check_true(
+    "the whole entry in the page text is",
+    conf.REGISTER_MATCH
+    in pl._page_evidence(
+        _OWN_HOST,
+        _RegCompany("Amtsgericht Osnabrück GnR 205"),
+        html="<html>Zweirad Liebig GmbH, Osnabrück. Genossenschaftsregister GnR 205.</html>",
+        extracted=None,
+    )[0],
+)
+check_true(
+    "and a different register in the page text is not",
+    conf.REGISTER_MATCH
+    not in pl._page_evidence(
+        _OWN_HOST,
+        _RegCompany("Amtsgericht Osnabrück GnR 205"),
+        html="<html>Zweirad Liebig GmbH, Osnabrück. Handelsregister HRB 205.</html>",
+        extracted=None,
+    )[0],
+)
+
+# ---------------------------------------------------------------------------------------
+# A domain that does not carry the name can still be the company's
+# ---------------------------------------------------------------------------------------
+#
+# Measured over 1,000 companies: 3 pages refused on their domain declared the company in their
+# structured data. That is not a guess about the domain, so it lifts the refusal — but only puts the
+# row back in the running, and only for a real name mismatch, never for a directory listing.
+
+_ORG = _LD % '{"@type":"Organization","name":"Zweirad Liebig GmbH","telephone":"+49 541 1"}'
+
+_lifted, _, _ = pl._page_evidence("https://ganz-anderer-name.de", _PageCompany(), html=_ORG, extracted=None)
+check_true("the domain is still recorded as not carrying the name", conf.HOST_NAME_MISMATCH in _lifted)
+check_true("but the structured data is read anyway", conf.JSONLD_NAME_MATCH in _lifted)
+check("and the refusal no longer stands", conf.standing_disqualifiers(_lifted), set())
+check("so the row is not disqualified", conf.score(methods=[conf.METHOD_OSM], evidence=_lifted).disqualified_because, None)
+# Being back in the running is not being accepted: the model still gets to read it, which is the
+# whole safety net for the arguable cases like a group's site naming a subsidiary.
+check_true("and the model is still asked", pl._worth_judging(_entry(_lifted)))
+
+# A listing page's structured data names the company it is listing. This is the repo's oldest trap
+# wearing a new hat, so the evidence is never emitted there.
+_listing, _, _ = pl._page_evidence(
+    "https://irgendein-portal.de/firma/zweirad-liebig", _PageCompany(), html=_ORG, extracted=None
+)
+check_true("a listing page gets no structured-data credit", conf.JSONLD_NAME_MATCH not in _listing)
+check("so its refusal stands", conf.standing_disqualifiers(_listing), {conf.HOST_NAME_MISMATCH})
+check_true("and the model is not asked about it", not pl._worth_judging(_entry(_listing)))
+# A known directory host returns before any of this and stays refused.
+_dir, _, _ = pl._page_evidence(
+    "https://www.northdata.de/Zweirad+Liebig", _PageCompany(), html=_ORG, extracted=None
+)
+check("a directory host is untouched by structured data", _dir, {conf.DIRECTORY_HOST})
+check("and nothing lifts it", conf.standing_disqualifiers(_dir), {conf.DIRECTORY_HOST})
+# An email domain must keep lifting the same refusal — it was there first.
+check(
+    "an OSM email domain still lifts the name refusal",
+    conf.standing_disqualifiers({conf.HOST_NAME_MISMATCH, conf.OSM_EMAIL_DOMAIN}),
+    set(),
+)
+# And a register match must keep lifting the industry-domain refusal, which the judge may supply.
+check(
+    "a register match still lifts an industry domain",
+    conf.standing_disqualifiers({conf.GENERIC_HOST, conf.REGISTER_MATCH}),
+    set(),
+)
+check_true(
+    "an industry domain is still shown to the model",
+    pl._worth_judging(_entry({conf.GENERIC_HOST, conf.NAME_ON_PAGE})),
 )
 
 # ---------------------------------------------------------------------------------------

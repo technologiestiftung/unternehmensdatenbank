@@ -8,9 +8,14 @@ Writes NOTHING to the database. It reads `public.companies`, probes the web, and
 files. Storing results is the DAGs' job; a measurement that also mutated state could not be
 re-run and compared.
 
-    run       do the work, one JSON line per company, resumable
-    report    read the JSON lines and print the scorecard
-    csv       read the JSON lines and write the handover CSV
+    run            do the work, one JSON line per company, resumable
+    report         read the JSON lines and print the scorecard
+    csv            read the JSON lines and write the handover CSV
+    labels         write a worksheet of ~60 companies for a human to label by hand
+    labels-report  read the worksheet back: precision, rejection accuracy, and the ceiling
+
+`report` counts what the pipeline did. `labels-report` is the only one that says whether what it
+did was RIGHT — everything else compares the pipeline against itself.
 
 From the repo root, with Postgres up:
 
@@ -80,6 +85,20 @@ RESULTS_PATH = OUT_DIR / "results.jsonl"
 OSM_CACHE_PATH = OUT_DIR / "osm_cache.json"
 OSM_SNAPSHOT_PATH = OUT_DIR / "osm_snapshot.json"
 CSV_PATH = OUT_DIR / "combined_discovery_urls.csv"
+PAGE_CACHE_PATH = OUT_DIR / "pages"
+
+# Keep every downloaded page, for this script only.
+#
+# `combined_discovery.page_cache` is off unless this variable is set, and it stays off inside Airflow
+# deliberately: a DAG must see the web as it is today, and a cache would let it report a page that
+# went offline last month as a company's current website. This script is a measurement rather than a
+# data load, and a measurement wants the opposite — the same input every time, so that a re-scored
+# comparison is a comparison.
+#
+# The payoff is that changing what gets read out of a page no longer costs 2.4 hours. Roughly 150-300
+# MB per 1,000 companies, gzipped, in a gitignored directory. `setdefault`, so an explicit
+# COMBINED_PAGE_CACHE_DIR still wins and setting it to empty switches caching off.
+os.environ.setdefault("COMBINED_PAGE_CACHE_DIR", str(PAGE_CACHE_PATH))
 
 #: Same ordering as scripts/ac_measurement.py, for the same reason: md5 of the id spreads the
 #: sample across the whole table, and it is stable, so every run sees the same companies.
@@ -747,6 +766,253 @@ def write_csv(limit: int | None = None) -> None:
     log.info("Against what the database already serves: %s", tally)
 
 
+# ---------------------------------------------------------------------------------------
+# The labelled set. The only thing here that measures whether the pipeline is RIGHT.
+# ---------------------------------------------------------------------------------------
+#
+# Everything else in this file counts what the pipeline did. None of it can say whether what it did
+# was correct, because there is nothing to compare against: "47 websites found" is not a score
+# without knowing how many of the 47 are real and how many real ones were missed. Comparing a new
+# version against the language model's opinion only measures agreement with the model.
+#
+# So: a human looks at about sixty companies and writes down the answer. Three groups, because there
+# are three different questions and one sample cannot answer them all.
+#
+#   winner          we claim a website. Is it that company's? -> PRECISION.
+#   judge_rejected  the rules proposed a website and it was rejected. Was rejecting it right?
+#                   -> the false-positive rate, and whether the rejections are throwing away
+#                      real websites.
+#   nothing         we found nothing at all. Does this company have a website?
+#                   -> THE CEILING. If most of these do have one, 4.7% is a recall problem worth
+#                      paying a search API for. If most do not, 4.7% is close to the truth and
+#                      buying search would be wasted money.
+#
+# The file is hand-filled and is never overwritten: `labels` merges, keeping every label already
+# written. Nothing in the pipeline may write to the label column — a measuring instrument the
+# thing being measured can adjust is not one.
+
+LABELS_PATH = OUT_DIR / "labels_todo.csv"
+
+LABEL_COLUMNS = [
+    "bucket", "company_id", "company_name", "address", "registration_number",
+    "candidate_url", "our_verdict", "confidence", "band", "band_without_judge",
+    "judge_verdict", "judge_reason", "why",
+    # The three a human fills in. Everything to the left is context for the decision.
+    #   label        yes | no | unclear   — is candidate_url this company's own website?
+    #   true_website for a `nothing` row, the website you found by hand, if any. Blank = none exists.
+    #   notes        anything worth remembering. Never parsed, only read.
+    "label", "true_website", "notes",
+]
+
+#: The three answers the label column accepts. `unclear` is deliberately available: forcing a
+#: yes/no on a genuinely ambiguous page produces a confident wrong number, and a count of how many
+#: cases a human could not decide is itself worth knowing.
+LABEL_VALUES = ("yes", "no", "unclear")
+
+
+def _demoted_answer(row: dict[str, Any]) -> dict[str, Any] | None:
+    """The candidate this company would have reported if the judge had not spoken.
+
+    The highest-scoring answer that was over the bar on the rules alone and is not over it now.
+    """
+    for answer in row.get("answers") or []:
+        was = answer.get("band_without_judge")
+        if was in ("low", "medium", "high") and answer.get("band") == "reject":
+            return answer
+    return None
+
+
+def _label_candidates(rows: list[dict[str, Any]]) -> dict[str, list[dict[str, Any]]]:
+    """Sort every company into one of the three groups, or none of them."""
+    buckets: dict[str, list[dict[str, Any]]] = {"winner": [], "judge_rejected": [], "nothing": []}
+    for row in rows:
+        if row.get("website") and row.get("band") in ("high", "medium", "low"):
+            buckets["winner"].append(
+                {
+                    "bucket": "winner",
+                    "candidate_url": row.get("website"),
+                    "our_verdict": "we say this is the company's website",
+                    "confidence": row.get("confidence_value"),
+                    "band": row.get("band"),
+                    "band_without_judge": row.get("band_without_judge"),
+                    "judge_verdict": row.get("judge_verdict"),
+                    "judge_reason": row.get("judge_reason"),
+                    "why": row.get("why"),
+                    "_row": row,
+                }
+            )
+            continue
+        demoted = _demoted_answer(row)
+        if demoted:
+            buckets["judge_rejected"].append(
+                {
+                    "bucket": "judge_rejected",
+                    "candidate_url": demoted.get("url"),
+                    "our_verdict": "the rules proposed this and it was rejected",
+                    "confidence": demoted.get("confidence"),
+                    "band": demoted.get("band"),
+                    "band_without_judge": demoted.get("band_without_judge"),
+                    "judge_verdict": demoted.get("judge_verdict"),
+                    "judge_reason": demoted.get("judge_reason"),
+                    "why": demoted.get("why"),
+                    "_row": row,
+                }
+            )
+            continue
+        buckets["nothing"].append(
+            {
+                "bucket": "nothing",
+                "candidate_url": "",
+                "our_verdict": "we found nothing — does a website exist at all?",
+                "confidence": "",
+                "band": "",
+                "band_without_judge": "",
+                "judge_verdict": "",
+                "judge_reason": "",
+                "why": "",
+                "_row": row,
+            }
+        )
+    return buckets
+
+
+def labels(limit: int | None = None, per_bucket: int = 20) -> None:
+    """Write (or extend) the hand-labelling worksheet.
+
+    Deterministic: companies are taken in `company_id` order, so asking for more of them later adds
+    rows rather than reshuffling the ones already labelled.
+    """
+    rows = sample_rows(limit)
+    buckets = _label_candidates(rows)
+
+    existing: dict[tuple[str, str], dict[str, str]] = {}
+    if LABELS_PATH.exists():
+        with LABELS_PATH.open(encoding="utf-8-sig", newline="") as handle:
+            for old in csv.DictReader(handle):
+                existing[(old.get("bucket") or "", old.get("company_id") or "")] = old
+        labelled = sum(1 for v in existing.values() if (v.get("label") or "").strip())
+        log.info("Found %d rows in %s, %d already labelled", len(existing), LABELS_PATH.name, labelled)
+
+    out: list[dict[str, Any]] = []
+    for name, entries in buckets.items():
+        entries.sort(key=lambda e: e["_row"].get("company_id") or "")
+        chosen = entries[:per_bucket]
+        # Never drop a row somebody has already labelled, even if it falls outside the first N.
+        already = [
+            e for e in entries[per_bucket:]
+            if (existing.get((name, e["_row"].get("company_id") or ""), {}).get("label") or "").strip()
+        ]
+        for entry in chosen + already:
+            row = entry.pop("_row")
+            was = existing.get((name, row.get("company_id") or ""), {})
+            out.append(
+                {
+                    **entry,
+                    "company_id": row.get("company_id"),
+                    "company_name": row.get("company_name"),
+                    "address": row.get("address"),
+                    "registration_number": row.get("registration_number"),
+                    # Carried over verbatim. This is the human's work.
+                    "label": was.get("label", ""),
+                    "true_website": was.get("true_website", ""),
+                    "notes": was.get("notes", ""),
+                }
+            )
+        log.info("%-15s %d rows (%d available)", name, len(chosen) + len(already), len(entries))
+
+    LABELS_PATH.parent.mkdir(parents=True, exist_ok=True)
+    with LABELS_PATH.open("w", encoding="utf-8-sig", newline="") as handle:
+        writer = csv.DictWriter(handle, fieldnames=LABEL_COLUMNS, extrasaction="ignore")
+        writer.writeheader()
+        for entry in out:
+            writer.writerow(entry)
+
+    print(f"\nWrote {len(out)} rows to {LABELS_PATH}")
+    print(f"Fill in the `label` column with one of: {', '.join(LABEL_VALUES)}")
+    print("  winner / judge_rejected -> is candidate_url that company's OWN website?")
+    print("  nothing                 -> search by hand; put what you find in true_website,")
+    print("                             and label `yes` if a website exists, `no` if none does.")
+    print(f"\nThen: python {Path(__file__).name} labels-report")
+
+
+def labels_report() -> None:
+    """Read the worksheet back and print the three numbers it exists to produce."""
+    if not LABELS_PATH.exists():
+        raise SystemExit(f"no {LABELS_PATH}; run `labels` first")
+    with LABELS_PATH.open(encoding="utf-8-sig", newline="") as handle:
+        rows = list(csv.DictReader(handle))
+
+    def bucket(name: str) -> list[dict[str, str]]:
+        return [r for r in rows if (r.get("bucket") or "") == name]
+
+    def tally(entries: list[dict[str, str]]) -> dict[str, int]:
+        counts = {value: 0 for value in LABEL_VALUES}
+        counts["unlabelled"] = 0
+        for entry in entries:
+            value = (entry.get("label") or "").strip().lower()
+            counts[value if value in counts else "unlabelled"] += 1
+        return counts
+
+    print(f"\n=== {len(rows)} rows in {LABELS_PATH.name} ===")
+    unknown = [
+        (r.get("company_name"), r.get("label"))
+        for r in rows
+        if (r.get("label") or "").strip()
+        and (r.get("label") or "").strip().lower() not in LABEL_VALUES
+    ]
+    if unknown:
+        print(f"\n!! {len(unknown)} rows have a label that is not one of {LABEL_VALUES}:")
+        for name, value in unknown[:10]:
+            print(f"     {name}: {value!r}")
+        print("   Those are counted as unlabelled.")
+
+    winners = tally(bucket("winner"))
+    decided = winners["yes"] + winners["no"]
+    print("\n-- precision: of the websites we report, how many are right? --")
+    print(f"{'labelled yes (correct)':<38}{winners['yes']:>5}")
+    print(f"{'labelled no (wrong)':<38}{winners['no']:>5}")
+    print(f"{'unclear':<38}{winners['unclear']:>5}")
+    print(f"{'not yet labelled':<38}{winners['unlabelled']:>5}")
+    if decided:
+        print(f"\n  PRECISION {winners['yes']}/{decided} = {100.0 * winners['yes'] / decided:.0f}%")
+    else:
+        print("\n  PRECISION unknown — nothing in this group is labelled yet")
+
+    rejected = tally(bucket("judge_rejected"))
+    decided = rejected["yes"] + rejected["no"]
+    print("\n-- the rejections: was throwing these away right? --")
+    print(f"{'labelled no (rightly rejected)':<38}{rejected['no']:>5}")
+    print(f"{'labelled yes (a real site we lost)':<38}{rejected['yes']:>5}")
+    print(f"{'unclear':<38}{rejected['unclear']:>5}")
+    print(f"{'not yet labelled':<38}{rejected['unlabelled']:>5}")
+    if decided:
+        print(
+            f"\n  REJECTIONS CORRECT {rejected['no']}/{decided} "
+            f"= {100.0 * rejected['no'] / decided:.0f}%"
+        )
+        if rejected["yes"]:
+            print(f"  {rejected['yes']} real websites were rejected. Those rows are worth reading.")
+
+    nothing = bucket("nothing")
+    counts = tally(nothing)
+    decided = counts["yes"] + counts["no"]
+    found_by_hand = sum(1 for r in nothing if (r.get("true_website") or "").strip())
+    print("\n-- the ceiling: do the companies we find nothing for have websites? --")
+    print(f"{'a website exists (label yes)':<38}{counts['yes']:>5}")
+    print(f"{'no website exists (label no)':<38}{counts['no']:>5}")
+    print(f"{'unclear':<38}{counts['unclear']:>5}")
+    print(f"{'not yet labelled':<38}{counts['unlabelled']:>5}")
+    print(f"{'true_website filled in':<38}{found_by_hand:>5}")
+    if decided:
+        rate = 100.0 * counts["yes"] / decided
+        print(f"\n  MISSED {counts['yes']}/{decided} = {rate:.0f}% of the companies we found nothing for")
+        print("  have a website that a human can find. That is the recall left on the table —")
+        print("  it is what buying a search API would be paying for.")
+    else:
+        print("\n  CEILING unknown — this is the group that decides whether to pay for search.")
+    print()
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     sub = parser.add_subparsers(dest="command", required=True)
@@ -783,6 +1049,16 @@ def main() -> None:
         help="write only the first N companies of the sample — use the same N the run used",
     )
 
+    p_labels = sub.add_parser(
+        "labels", help="write the hand-labelling worksheet (merges with what is already labelled)"
+    )
+    p_labels.add_argument("--limit", type=int, default=None)
+    p_labels.add_argument(
+        "--per-bucket", type=int, default=20,
+        help="how many companies per group (default 20, so about 60 rows in total)",
+    )
+    sub.add_parser("labels-report", help="read the worksheet back: precision, rejections, ceiling")
+
     args = parser.parse_args()
     if args.command == "run":
         stages = {s.strip() for s in args.stages.split(",") if s.strip()}
@@ -795,6 +1071,10 @@ def main() -> None:
         )
     elif args.command == "report":
         report(args.limit)
+    elif args.command == "labels":
+        labels(args.limit, args.per_bucket)
+    elif args.command == "labels-report":
+        labels_report()
     else:
         write_csv(args.limit)
 

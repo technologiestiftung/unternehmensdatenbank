@@ -30,6 +30,7 @@ it is.
 from __future__ import annotations
 
 import logging
+import re
 import time
 from dataclasses import dataclass, field
 from typing import Any
@@ -37,10 +38,19 @@ from urllib.parse import urlparse
 
 from imprint_probe import best_imprint
 from search_common import origin_url, own_site_verdict
+from url_discovery.imprint_extractor import extract_from_html, extract_register_numbers
 from url_discovery.scorer import name_uniqueness
 
 from combined_discovery import confidence as conf
-from combined_discovery import llm_judge, local_llm, name_frequency, osm_lookup, url_patterns
+from combined_discovery import (
+    llm_judge,
+    local_llm,
+    name_frequency,
+    osm_lookup,
+    page_cache,
+    structured_data,
+    url_patterns,
+)
 
 log = logging.getLogger(__name__)
 
@@ -72,6 +82,11 @@ class UrlAnswer:
     pattern: str | None = None
     imprint_url: str | None = None
     register_number_seen: str | None = None
+    #: The phone number printed on this page's Impressum, as written. Carried rather than turned
+    #: into evidence on the spot, because what it has to be compared against — the number
+    #: OpenStreetMap holds for this business — is not known until stage 2 has run, and stage 1
+    #: reads pages before that.
+    imprint_phone: str | None = None
     verdict: conf.Verdict | None = None
     #: The readable text of the page and of its Impressum, kept so the judge stage can read what
     #: was already downloaded instead of fetching it a second time. Truncated on the way in — a
@@ -138,10 +153,32 @@ class CompanyResult:
 
 def _digits(text: str | None) -> str:
     """The number out of a register string. "Amtsgericht Osnabrück HRB 213220" -> "213220"."""
-    import re
-
     match = re.search(r"\d+", text or "")
     return match.group(0) if match else ""
+
+
+#: How many trailing digits of two phone numbers have to agree. German subscriber numbers are
+#: usually six to eight digits after the area code, so seven is enough to identify a line while
+#: still allowing every way the same number gets written.
+_PHONE_TAIL_DIGITS = 7
+
+
+def _same_phone(left: str | None, right: str | None) -> bool:
+    """Do these two strings name the same telephone line?
+
+    Compared on their last seven digits, because the same number is written every possible way:
+    `+49 541 7607780`, `0541/760 77 80`, `(0541) 7607780`. Country code and trunk prefix are exactly
+    the parts that differ — `+49 541` and `0541` are the same city — so a comparison anchored at the
+    front would call two spellings of one number a mismatch.
+
+    Both sides need at least seven digits. A page printing `Tel. 12345` is not evidence of anything,
+    and a short number would match far too much.
+    """
+    left_digits = re.sub(r"\D", "", left or "")
+    right_digits = re.sub(r"\D", "", right or "")
+    if len(left_digits) < _PHONE_TAIL_DIGITS or len(right_digits) < _PHONE_TAIL_DIGITS:
+        return False
+    return left_digits[-_PHONE_TAIL_DIGITS:] == right_digits[-_PHONE_TAIL_DIGITS:]
 
 
 def _host_is_exact_name(url: str, company_name: str) -> bool:
@@ -195,7 +232,28 @@ def _page_evidence(
         return evidence, None, page_text
     if verdict != "own_site":
         evidence.add(conf.HOST_NAME_MISMATCH)
-        return evidence, None, page_text
+        # A company's website does not have to have the company's name in it. That refusal exists
+        # because a *guess* that missed the name landed on somebody else — but the page's own
+        # structured data is not a guess, and it does not depend on the domain string at all. It can
+        # therefore lift the refusal; see `confidence._LIFTED_BY`.
+        #
+        # Only for `host_name_mismatch`, never for `company_listing`. A listing page's structured
+        # data names the company it is listing, which is the oldest trap in this repo wearing a new
+        # hat: it would prove the page is ABOUT the company, not that it IS its site.
+        lifted = False
+        if verdict == "host_name_mismatch" and html:
+            for claimed in structured_data.names(html):
+                if _name_is_on_page(company.company_name, url_patterns.normalize(claimed)):
+                    evidence.add(conf.JSONLD_NAME_MATCH)
+                    lifted = True
+                    break
+        if not lifted:
+            return evidence, None, page_text
+        # The refusal is lifted, so keep reading. Returning here instead would leave the row scored on
+        # its base and the structured data alone, while the register number that settles it sits
+        # unread further down the same page — `thebigbash.de` and `gmh-gruppe.de` both print the
+        # company's own HRB number, worth 0.45 and hard proof, and both were being scored at ~0.55
+        # on a guess because this function had already stopped looking.
 
     # An industry domain cannot identify one company. Emitted as evidence rather than decided
     # here, because `confidence.py` is the single place that turns evidence into a refusal — and
@@ -216,17 +274,84 @@ def _page_evidence(
         evidence.add(conf.REDIRECT_OFF_HOST)
 
     seen_register: str | None = None
+    own_type, own_reg = conf.register_parts(company.registration_number)
     if extracted:
         evidence.add(conf.IMPRINT_FOUND)
+        if extracted.get("vat_id"):
+            evidence.add(conf.VAT_ID_FOUND)
+        # The site's Impressum gives an email address at the site's own domain. Reused rather than
+        # re-derived: `name_frequency.email_domain` is the one place that knows how to get a domain
+        # out of an address, and `origin_url` normalises `www.` away.
+        page_email_domain = name_frequency.email_domain(extracted.get("email"))
+        if page_email_domain:
+            host = (urlparse(url).hostname or "").lower().removeprefix("www.")
+            if host and page_email_domain.lower().removeprefix("www.") == host:
+                evidence.add(conf.IMPRINT_EMAIL_ON_DOMAIN)
         seen_register = extracted.get("register_number")
-        page_reg = _digits(seen_register)
-        own_reg = _digits(company.registration_number)
-        if page_reg and own_reg:
-            evidence.add(conf.REGISTER_MATCH if page_reg == own_reg else conf.REGISTER_MISMATCH)
-        if company.postcode and extracted.get("postcode") == company.postcode:
+        # Against EVERY register entry on the page, not just the first. A group's Impressum lists its
+        # subsidiaries, and a page often gives its own entry next to its parent's — reading only the
+        # first turned two of those into a false "different company's register number", which is a
+        # disqualifier and therefore fatal.
+        page_registers = extracted.get("register_numbers") or (
+            [seen_register] if seen_register else []
+        )
+        parsed = [conf.register_parts(entry) for entry in page_registers]
+        if own_reg and parsed:
+            # A match needs the same register as well as the same number when both name one. The five
+            # German registers number independently, so `VR 213220` and `HRB 213220` are two
+            # different entities that happen to share a number.
+            matches = [
+                (kind, number)
+                for kind, number in parsed
+                if number == own_reg and (not kind or not own_type or kind == own_type)
+            ]
+            if matches:
+                evidence.add(conf.REGISTER_MATCH)
+                seen_register = f"{matches[0][0]} {own_reg}".strip()
+            elif any(number != own_reg and kind == own_type for kind, number in parsed):
+                # Somebody else's entry in the SAME register. A page carrying only a `VR` number when
+                # this company is an `HRB` is not evidence about this company either way, so it does
+                # not become a mismatch — a mismatch disqualifies, and that is too strong a
+                # conclusion to draw from an unrelated register.
+                evidence.add(conf.REGISTER_MISMATCH)
+        # Against every postal address on the page, not just the first. A company's registered
+        # address and the address on its Impressum are often two different ones, and either
+        # agreeing with the register is the same evidence.
+        page_postcodes = extracted.get("postcodes") or (
+            [extracted["postcode"]] if extracted.get("postcode") else []
+        )
+        if company.postcode and company.postcode in page_postcodes:
             evidence.add(conf.POSTCODE_MATCH)
     else:
         evidence.add(conf.NO_IMPRINT)
+
+    # A page can print its register number and still have no Impressum this code can find — the
+    # link is an image, or the number sits in the footer of every page. The number is right there
+    # in the text either way, so read it rather than asking a model to read it. `llm_judge` used to
+    # be the only route to this evidence, and it was closed off when the judge stopped being shown
+    # pages that never name the company.
+    #
+    # Only when the Impressum produced no register entry at all. One found there is the better
+    # source, and a MISMATCH found there must not be talked out of by a second number somewhere else
+    # on the page — a page may quote other companies' numbers.
+    #
+    # The whole entry has to be on the page, register prefix included, never the bare digits. Plenty
+    # of register numbers are three digits long — Bäko-Osnabrück is `GnR 205` — and searching a web
+    # page for "205" finds a price, a house number or half a phone number. That mistake awarded hard
+    # proof, worth 0.45 and able to overrule a disqualifier, on a coincidence.
+    #
+    # Safe here for one reason: this code is only reached after `own_site_verdict` said `own_site`,
+    # or after structured data lifted the name refusal. A register number proves a page is ABOUT a
+    # company, never that it IS that company's site, and that gap is what the host check closes. Do
+    # not lift this test out of that guard.
+    if own_reg and not (evidence & {conf.REGISTER_MATCH, conf.REGISTER_MISMATCH}):
+        for kind, number in (
+            conf.register_parts(entry) for entry in extract_register_numbers(page_text[:20000])
+        ):
+            if number == own_reg and (not kind or not own_type or kind == own_type):
+                evidence.add(conf.REGISTER_MATCH)
+                seen_register = seen_register or f"{kind} {number}".strip()
+                break
 
     haystack = url_patterns.normalize(
         " ".join(
@@ -242,6 +367,21 @@ def _page_evidence(
             evidence.add(conf.CITY_ON_PAGE)
         if _name_is_on_page(company.company_name, haystack):
             evidence.add(conf.NAME_ON_PAGE)
+
+    # What the page says about itself in machine-readable form. Read from the raw HTML, not from the
+    # flattened text, because the whole claim lives inside a <script> block that `visible_text` and
+    # `page_text` both strip out — which is why nothing in this repo saw it until now.
+    #
+    # The name is tested with the same share rule used on the page text, so "Zweirad Liebig GmbH" in
+    # the structured data matches the register's "Zweirad Liebig Gesellschaft mbH". Comparing the two
+    # strings exactly would fail on every legal-form abbreviation in Germany.
+    if html:
+        for claimed in structured_data.names(html):
+            if _name_is_on_page(company.company_name, url_patterns.normalize(claimed)):
+                evidence.add(conf.JSONLD_NAME_MATCH)
+                break
+        if company.postcode and company.postcode in structured_data.postcodes(html):
+            evidence.add(conf.JSONLD_POSTCODE_MATCH)
 
     return evidence, seen_register, page_text
 
@@ -268,6 +408,39 @@ def _name_is_on_page(company_name: str, normalized_text: str) -> bool:
     return found / len(set(distinctive)) >= NAME_ON_PAGE_MIN_SHARE
 
 
+def _imprint_for(
+    base_url: str, homepage: str | None = None
+) -> tuple[str, str, dict[str, Any]] | None:
+    """`imprint_probe.best_imprint`, but remembering the page it settled on.
+
+    A miss costs up to twelve GETs: `fetch_impressum` walks its own path list and `best_imprint`
+    then walks another. A hit costs one file read.
+
+    Only the HTML and which URL it came from are cached. `extract_from_html` runs again on the way
+    out, so a better postcode regex or a new field applies to pages that were downloaded weeks ago —
+    which is the whole reason the cache exists. See `page_cache`.
+
+    The cache lives here rather than inside `imprint_probe` on purpose: that module sits at the top
+    of `dags/` and is shared with the three search-provider DAGs, and they have no business
+    importing a combined-discovery module or inheriting its caching.
+    """
+    cached = page_cache.get("imprint", base_url)
+    if cached is not None:
+        html = cached.get("html") or ""
+        if not html:
+            return None
+        return html, cached.get("imprint_url") or base_url, extract_from_html(html)
+
+    got = best_imprint(base_url, homepage=homepage)
+    if got is None:
+        # Remembered as a miss, so a replay does not walk all twelve paths again to learn nothing.
+        page_cache.put("imprint", base_url, {"html": "", "imprint_url": None})
+        return None
+    html, imprint_url, extracted = got
+    page_cache.put("imprint", base_url, {"html": html, "imprint_url": imprint_url})
+    return html, imprint_url, extracted
+
+
 def _fetch_and_read(url: str) -> tuple[str, dict[str, Any] | None, str | None, str]:
     """Download a page and its Impressum.
 
@@ -280,39 +453,76 @@ def _fetch_and_read(url: str) -> tuple[str, dict[str, Any] | None, str | None, s
     probe = url_patterns.probe(url)
     if not probe or probe.status_code == 0 or probe.status_code >= 400 or probe.parked:
         return "", None, None, ""
-    got = best_imprint(probe.final_url)
+    got = _imprint_for(probe.final_url, homepage=probe.html)
     if not got:
         return probe.html, None, None, ""
     imprint_html, imprint_url, extracted = got
     return probe.html, extracted, imprint_url, imprint_html
 
 
-def _remember_text(entry: UrlAnswer, page_text: str, imprint_html: str) -> None:
-    """Keep enough of a downloaded page for the judge to read it later.
+def _remember_page(
+    entry: UrlAnswer,
+    page_text: str,
+    imprint_html: str,
+    extracted: dict[str, Any] | None = None,
+) -> None:
+    """Keep what later stages need from a page that has just been downloaded.
 
-    Truncated to the judge's own budget: holding more would mean carrying whole web pages for
-    every candidate of every company, and the judge would throw the surplus away anyway.
+    The text is for the judge, so it can read what was already fetched instead of fetching it a
+    second time. Truncated to the judge's own budget: holding more would mean carrying whole web
+    pages for every candidate of every company, and the judge would throw the surplus away anyway.
+
+    The phone number is for the merge step. It cannot become evidence here because the thing it is
+    compared against comes from OpenStreetMap, which has not been consulted yet when stage 1 reads
+    its pages.
     """
     if page_text and not entry.page_text:
         entry.page_text = page_text[: llm_judge.MAX_CHARS]
     if imprint_html and not entry.imprint_text:
         entry.imprint_text = url_patterns.visible_text(imprint_html)[: llm_judge.MAX_CHARS]
+    if extracted and not entry.imprint_phone:
+        entry.imprint_phone = extracted.get("phone")
 
 
-#: Evidence that makes asking the model pointless, for two opposite reasons. `REGISTER_MATCH` means
-#: the page already proved it belongs to this company, so there is nothing left to decide.
-#: The three disqualifiers mean the URL is dead however the model votes — a model cannot lift a
-#: disqualifier, by design.
+#: Evidence that settles the question without a model: the page proved it belongs to this company, so
+#: there is nothing left to decide.
+_JUDGE_SKIP_EVIDENCE = frozenset({conf.REGISTER_MATCH})
+
+#: The one disqualifier that does NOT stop the model being asked. `GENERIC_HOST` is the refusal a
+#: register match can overrule, and the model can produce a register match, so an industry domain is
+#: a row it might legitimately rescue.
+_JUDGE_DESPITE = frozenset({conf.GENERIC_HOST})
+
+#: The page has to say WHO it is about before a model is asked WHOSE it is.
 #:
-#: `GENERIC_HOST` is deliberately NOT here even though it disqualifies. It is the one disqualifier
-#: a register match can overrule, and the judge can produce a register match, so an industry domain
-#: is a row the model might legitimately rescue.
-_JUDGE_SKIP_EVIDENCE = frozenset(
+#: At least one of these three has to be present: the company's name written out on the page, its
+#: city anywhere on the page, or its postcode on the Impressum. All three are already computed by
+#: `_page_evidence` before this stage runs, so the test is free.
+#:
+#: Measured 2026-08-14 on the stored 1,000-company run (767 judged candidates):
+#:
+#:     page shows NONE of name / city / postcode   510 calls    0 own_site verdicts
+#:     page shows the name only                    192 calls    2 own_site, both scored 0.00
+#:     page shows two or more of the three          49 calls   21 own_site
+#:
+#: Every website the judge ever rescued came from a page that already showed at least two of the
+#: three. Requiring one of them removes 510 of 767 calls — two thirds of the stage — and loses
+#: nothing on that sample.
+#:
+#: This is a VETO and nothing else. There is deliberately no matching rule that skips the judge
+#: because a candidate looks convincing: the judge's real work is its 388 demotions, and those land
+#: on exactly the medium-band candidates such a rule would wave through. Cheap evidence may cancel
+#: a model call; it may never stand in for one.
+#: The two structured-data facts join the list for the same reason the other three are on it: each is
+#: the page saying something about who it belongs to. Adding a marker can only ever send MORE pages
+#: to the model, never fewer, so it cannot cost a result — it just gives back some of the saving.
+_JUDGE_IDENTITY_EVIDENCE = frozenset(
     {
-        conf.REGISTER_MATCH,
-        conf.REGISTER_MISMATCH,
-        conf.DIRECTORY_HOST,
-        conf.HOST_NAME_MISMATCH,
+        conf.NAME_ON_PAGE,
+        conf.CITY_ON_PAGE,
+        conf.POSTCODE_MATCH,
+        conf.JSONLD_NAME_MATCH,
+        conf.JSONLD_POSTCODE_MATCH,
     }
 )
 
@@ -320,13 +530,30 @@ _JUDGE_SKIP_EVIDENCE = frozenset(
 def _worth_judging(entry: UrlAnswer) -> bool:
     """Would a model's opinion about this URL change anything?
 
-    Skipping is most of what keeps this stage affordable. On the 521-company sample about half the
-    candidate URLs are already disqualified on their host name alone, and each model call costs
-    roughly 15 seconds.
+    Skipping is most of what keeps this stage affordable. Each model call costs roughly 8 seconds,
+    and the stage is about 69% of the run's wall clock.
+
+    Three reasons to skip, and they are different in kind:
+
+    1. Nothing was downloaded, so there is nothing to read.
+    2. The answer is already settled — proven by a register match, or refused by a disqualifier that
+       the model cannot argue with.
+    3. `_JUDGE_IDENTITY_EVIDENCE` — the page never says who it is about, so the model is being
+       asked to guess. On the stored 1,000-company run it answered `unrelated` every single time.
+
+    Point 2 asks `confidence.standing_disqualifiers` rather than testing for the disqualifying
+    evidence directly, and the difference is load-bearing: a refusal that other evidence has LIFTED
+    is not a refusal. A page whose domain does not carry the company's name but whose structured data
+    names the company is back in the running, so it is exactly a page the model should read — and a
+    gate that looked for `HOST_NAME_MISMATCH` in the raw evidence would silently skip it.
     """
     if not (entry.page_text or entry.imprint_text):
         return False
-    return not (entry.evidence & _JUDGE_SKIP_EVIDENCE)
+    if entry.evidence & _JUDGE_SKIP_EVIDENCE:
+        return False
+    if conf.standing_disqualifiers(entry.evidence) - _JUDGE_DESPITE:
+        return False
+    return bool(entry.evidence & _JUDGE_IDENTITY_EVIDENCE)
 
 
 def discover(
@@ -383,7 +610,9 @@ def discover(
             result.parked_rejected = len(found.rejected_parked)
 
             for probe in found.live:
-                got = best_imprint(probe.final_url)
+                # `probe.html` is already the body of `final_url` — handing it over stops
+                # `best_imprint` re-downloading the homepage it was just given.
+                got = _imprint_for(probe.final_url, homepage=probe.html)
                 extracted = got[2] if got else None
                 imprint_url = got[1] if got else None
                 imprint_html = got[0] if got else ""
@@ -400,7 +629,7 @@ def discover(
                 entry.evidence |= evidence
                 entry.imprint_url = entry.imprint_url or imprint_url
                 entry.register_number_seen = entry.register_number_seen or register_seen
-                _remember_text(entry, page_text, imprint_html)
+                _remember_page(entry, page_text, imprint_html, extracted)
                 host = (urlparse(probe.url).hostname or "").lower()
                 entry.pattern = entry.pattern or found.pattern_by_host.get(host)
         except Exception as exc:  # noqa: BLE001
@@ -436,7 +665,7 @@ def discover(
                     entry.evidence |= evidence
                     entry.imprint_url = entry.imprint_url or imprint_url
                     entry.register_number_seen = entry.register_number_seen or register_seen
-                    _remember_text(entry, page_text, imprint_html)
+                    _remember_page(entry, page_text, imprint_html, extracted)
                 else:
                     entry = answer_for(match.website)
                 entry.methods.append(conf.METHOD_OSM)
@@ -468,7 +697,7 @@ def discover(
                         entry.evidence |= evidence
                         entry.imprint_url = entry.imprint_url or imprint_url
                         entry.register_number_seen = entry.register_number_seen or register_seen
-                        _remember_text(entry, page_text, imprint_html)
+                        _remember_page(entry, page_text, imprint_html, extracted)
                         entry.methods.append(conf.METHOD_OSM)
                         entry.evidence.add(conf.OSM_EMAIL_DOMAIN)
                         entry.evidence.add(conf.OSM_STRONG_MATCH)
@@ -492,7 +721,7 @@ def discover(
                     entry.evidence |= evidence
                     entry.imprint_url = entry.imprint_url or imprint_url
                     entry.register_number_seen = entry.register_number_seen or register_seen
-                    _remember_text(entry, page_text, imprint_html)
+                    _remember_page(entry, page_text, imprint_html, extracted)
                 else:
                     entry = answer_for(llm.website)
                 entry.methods.append(conf.METHOD_LOCAL_LLM)
@@ -541,6 +770,18 @@ def discover(
     # ---- 5. Merge and score --------------------------------------------------------------
     uniqueness = name_uniqueness(company.company_name)
     for entry in answers.values():
+        # Two independent records of this company agreeing on a phone number. Decided here rather
+        # than while reading the page, because the map entry is not known until stage 2 has run and
+        # stage 1 reads its pages before that. Only for a strong map match: a weak one agreed on the
+        # name alone, and the phone number of a business we are not sure is this one proves nothing.
+        if (
+            result.osm_phone
+            and result.osm_match_score
+            and result.osm_match_score >= osm_lookup.STRONG_MATCH_SCORE
+            and _same_phone(entry.imprint_phone, result.osm_phone)
+        ):
+            entry.evidence.add(conf.PHONE_MATCHES_OSM)
+
         distinct = set(entry.methods)
         if len(distinct) >= 3:
             entry.evidence.add(conf.AGREE_THREE)
