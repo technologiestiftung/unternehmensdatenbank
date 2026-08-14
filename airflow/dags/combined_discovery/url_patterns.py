@@ -426,8 +426,16 @@ def _stems(words: list[str]) -> list[tuple[str, str]]:
     ):
         shapes.append((base[0], "first_word"))
 
-    # Initials. "Norddeutsche Bau Gesellschaft" -> nbg.de. Three or four letters only: two is
-    # noise, five is not how anybody abbreviates.
+    # Initials. "Meyer Schmidt Weber Koch" -> mswk.de.
+    #
+    # In practice this only fires for FOUR-word names, despite the range below. A three-word name
+    # produces a three-letter acronym, and the `MIN_STEM_LENGTH` filter at the bottom of this
+    # function drops anything under four characters a few lines later. The example this comment
+    # used to carry, "Norddeutsche Bau Gesellschaft -> nbg.de", produces nothing at all — twice
+    # over, since "Gesellschaft" is a shell word, leaving `base` with two entries rather than three.
+    #
+    # Left as it is rather than "fixed": measured over 1000 companies the acronym shape fetched 64
+    # pages and won nothing, so making it reach further would buy more cost and no coverage.
     if 3 <= len(base) <= 4:
         acronym = "".join(w[0] for w in base)
         if len(acronym) >= 3:
