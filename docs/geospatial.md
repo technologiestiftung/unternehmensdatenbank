@@ -89,7 +89,8 @@ Note: this command assumes the container name `overpass-berlin`. This repo curre
 
 Nominatim is included as an optional separate profile because it is heavier and imports more slowly.
 
-This repo uses host port `8081` by default, not `8080`, because Airflow already uses `http://localhost:8080`.
+This repo uses host port `8081` by default, to stay clear of the 8080 range that Airflow
+installations tend to occupy. This project's own Airflow UI is on `8082` (`AIRFLOW_PORT`).
 
 Start it with:
 

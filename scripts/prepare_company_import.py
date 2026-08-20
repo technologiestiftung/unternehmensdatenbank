@@ -60,7 +60,10 @@ def _fix_encoding(text: str) -> str:
 
 
 DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
-WZ_RE = re.compile(r"^\d{2}(?:\.\d{2}(?:\.\d)?)?$")
+# Northdata writes WZ codes as 31, 31.0, 31.02 and 31.02.1 — one *or* two digits after
+# the first dot. Demanding two silently loses every one-decimal code (1,003 rows measured).
+WZ_RE = re.compile(r"^\d{2}(?:\.\d{1,2}(?:\.\d)?)?$")
+PLZ_RE = re.compile(r"^\d{5}$")
 LEGAL_SUFFIX_RE = re.compile(
     r"\b(gmbh(?:\s*&\s*co\.\s*kg)?|ug|haftungsbeschränkt|ag|eg|kg|ohg|gbr|se|kgaa|mbh|e\.v\.)\b",
     re.IGNORECASE,
@@ -91,6 +94,39 @@ def parse_clean_csv_line(raw_line: str) -> list[str]:
         cleaned = cleaned[:-1]
     cleaned = cleaned.replace('""', '"')
     return next(csv.reader([cleaned]))
+
+
+def prefix_is_aligned(row: list[str]) -> bool:
+    """True when row[:27] already lines up with HEADER_PREFIX.
+
+    The XXL export carries ~70 columns, so a row being longer than HEADER_PREFIX is the
+    normal case, not a defect — it only needs truncating. Reserve repair_prefix_row() for
+    rows an unquoted comma in `Gegenstand` actually shifted. Checking three anchors that
+    have a fixed shape (PLZ, Branchencode, Eintragung Datum) is enough to tell them apart;
+    each may be empty, because a shift puts free text there, never an empty string.
+    """
+    if len(row) < len(HEADER_PREFIX):
+        return False
+    plz, wz, established = row[10].strip(), row[20].strip(), row[26].strip()
+    return (
+        (not plz or PLZ_RE.match(plz) is not None)
+        and (not wz or WZ_RE.match(wz) is not None)
+        and (not established or DATE_RE.match(established) is not None)
+    )
+
+
+def normalize_prefix_row(row: list[str]) -> tuple[list[str], bool]:
+    """Return (27-column row, was_repaired).
+
+    Without this, repair_prefix_row() runs on EVERY row of the XXL export (70 columns never
+    equals 27) and its date+WZ anchor cannot validate a row whose Branchencode is empty —
+    5,964 rows — so perfectly well-formed rows were dropped. Measured: 7,449 -> 14,445 rows.
+    """
+    if len(row) == len(HEADER_PREFIX):
+        return row, False
+    if prefix_is_aligned(row):
+        return row[: len(HEADER_PREFIX)], False
+    return repair_prefix_row(row), True
 
 
 def repair_prefix_row(row: list[str]) -> list[str]:
@@ -126,9 +162,7 @@ def repair_prefix_row(row: list[str]) -> list[str]:
 
 
 def parse_relevant_fields(raw_line: str) -> dict[str, str]:
-    row = parse_clean_csv_line(raw_line)
-    if len(row) != len(HEADER_PREFIX):
-        row = repair_prefix_row(row)
+    row, _ = normalize_prefix_row(parse_clean_csv_line(raw_line))
     return dict(zip(HEADER_PREFIX, row))
 
 
@@ -161,10 +195,8 @@ def main() -> int:
             raw_line = _fix_encoding(raw_line)
 
             try:
-                row = parse_clean_csv_line(raw_line)
-                if len(row) != len(HEADER_PREFIX):
-                    row = repair_prefix_row(row)
-                    repaired_rows += 1
+                row, was_repaired = normalize_prefix_row(parse_clean_csv_line(raw_line))
+                repaired_rows += int(was_repaired)
                 data = dict(zip(HEADER_PREFIX, row))
             except Exception as exc:
                 skipped_rows += 1

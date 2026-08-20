@@ -69,6 +69,9 @@ x-airflow-common: &airflow-common
     CLAUDE_DISCOVERY_CHECKPOINT_FILE: ${CLAUDE_DISCOVERY_CHECKPOINT_FILE:-/opt/airflow/data/claude_search_discovery_checkpoint.json}
     ENABLE_OLLAMA_SEARCH_DISCOVERY: ${ENABLE_OLLAMA_SEARCH_DISCOVERY:-false}
     OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-http://ollama:11434}
+    # OpenAI-compatible endpoint on the same server. It returns token counts, the native API
+    # does not, so ac_measurement.py uses this one to compare a local model against Mistral.
+    OLLAMA_OPENAI_BASE_URL: ${OLLAMA_OPENAI_BASE_URL:-http://ollama:11434/v1}
     OLLAMA_MODEL: ${OLLAMA_MODEL:-qwen2.5:7b}
     OLLAMA_HTTP_TIMEOUT_S: ${OLLAMA_HTTP_TIMEOUT_S:-120}
     OLLAMA_HTTP_MAX_RETRIES: ${OLLAMA_HTTP_MAX_RETRIES:-3}
@@ -97,12 +100,73 @@ x-airflow-common: &airflow-common
     OSM_DISCOVERY_PROGRESS_LOG_EVERY: ${OSM_DISCOVERY_PROGRESS_LOG_EVERY:-25}
     OSM_DISCOVERY_CHECKPOINT_FILE: ${OSM_DISCOVERY_CHECKPOINT_FILE:-/opt/airflow/data/osm_discovery_checkpoint.json}
     OSM_MIN_MATCH_SCORE: ${OSM_MIN_MATCH_SCORE:-0.65}
+    # Shared extraction model for the search-API providers. Deliberately NOT MISTRAL_MODEL,
+    # which is a reasoning model and would burn output tokens on a mechanical extraction.
+    EXTRACT_MODEL: ${EXTRACT_MODEL:-ministral-8b-latest}
+    EXTRACT_MAX_CHARS: ${EXTRACT_MAX_CHARS:-20000}
+    EXTRACT_HTTP_TIMEOUT_S: ${EXTRACT_HTTP_TIMEOUT_S:-90}
+    EXTRACT_HTTP_MAX_RETRIES: ${EXTRACT_HTTP_MAX_RETRIES:-3}
+    EXTRACT_RETRY_MAX_WAIT_S: ${EXTRACT_RETRY_MAX_WAIT_S:-30}
+    EXTRACT_PRICE_IN: ${EXTRACT_PRICE_IN:-0}
+    EXTRACT_PRICE_OUT: ${EXTRACT_PRICE_OUT:-0}
+    MISTRAL_API_BASE_URL: ${MISTRAL_API_BASE_URL:-https://api.mistral.ai/v1}
+    # Impressum probing: works around fetch_impressum returning homepages (0/8 register
+    # numbers found vs 3/8 when the explicit paths are probed).
+    IMPRINT_PROBE_ENABLED: ${IMPRINT_PROBE_ENABLED:-true}
+    IMPRINT_PROBE_PATHS: ${IMPRINT_PROBE_PATHS:-/impressum/,/impressum,/imprint,/impressum.html}
+    IMPRINT_PROBE_TIMEOUT_S: ${IMPRINT_PROBE_TIMEOUT_S:-12}
+    LLM_WEBSITE_CONF_CAP: ${LLM_WEBSITE_CONF_CAP:-0.34}
+    # Off: the register number in the query pulls results toward aggregators and directories.
+    # Measured 21 vs 25 provable websites per 100 companies. Scorer use is unaffected.
+    SEARCH_QUERY_INCLUDE_REGISTER_NUMBER: ${SEARCH_QUERY_INCLUDE_REGISTER_NUMBER:-false}
+    # Parallel Search MCP — free and anonymous, so the key is optional and only raises limits.
+    ENABLE_PARALLEL_SEARCH_DISCOVERY: ${ENABLE_PARALLEL_SEARCH_DISCOVERY:-false}
+    PARALLEL_API_KEY: ${PARALLEL_API_KEY:-}
+    PARALLEL_MCP_URL: ${PARALLEL_MCP_URL:-https://search.parallel.ai/mcp}
+    PARALLEL_MCP_TIMEOUT_S: ${PARALLEL_MCP_TIMEOUT_S:-120}
+    PARALLEL_QUOTA_GIVEUP_AFTER: ${PARALLEL_QUOTA_GIVEUP_AFTER:-3}
+    PARALLEL_MAX_CANDIDATES: ${PARALLEL_MAX_CANDIDATES:-5}
+    PARALLEL_PROGRESS_LOG_EVERY: ${PARALLEL_PROGRESS_LOG_EVERY:-10}
+    PARALLEL_DISCOVERY_CHECKPOINT_FILE: ${PARALLEL_DISCOVERY_CHECKPOINT_FILE:-/opt/airflow/data/parallel_search_discovery_checkpoint.json}
+    # Exa — returns page contents with the search, and reports costDollars per request.
+    ENABLE_EXA_SEARCH_DISCOVERY: ${ENABLE_EXA_SEARCH_DISCOVERY:-false}
+    EXA_API_KEY: ${EXA_API_KEY:-}
+    EXA_API_BASE_URL: ${EXA_API_BASE_URL:-https://api.exa.ai}
+    EXA_SEARCH_TYPE: ${EXA_SEARCH_TYPE:-auto}
+    EXA_NUM_RESULTS: ${EXA_NUM_RESULTS:-8}
+    # highlights | text | both. Highlights are query-biased, so owner extraction may want text.
+    EXA_CONTENT_MODE: ${EXA_CONTENT_MODE:-highlights}
+    EXA_TEXT_MAX_CHARS: ${EXA_TEXT_MAX_CHARS:-4000}
+    EXA_HTTP_TIMEOUT_S: ${EXA_HTTP_TIMEOUT_S:-45}
+    EXA_HTTP_MAX_RETRIES: ${EXA_HTTP_MAX_RETRIES:-3}
+    EXA_RETRY_MAX_WAIT_S: ${EXA_RETRY_MAX_WAIT_S:-30}
+    EXA_REQUEST_DELAY_S: ${EXA_REQUEST_DELAY_S:-0.15}
+    EXA_MAX_CANDIDATES: ${EXA_MAX_CANDIDATES:-5}
+    EXA_PROGRESS_LOG_EVERY: ${EXA_PROGRESS_LOG_EVERY:-10}
+    EXA_DISCOVERY_CHECKPOINT_FILE: ${EXA_DISCOVERY_CHECKPOINT_FILE:-/opt/airflow/data/exa_search_discovery_checkpoint.json}
+    # Brave — snippets only, no page text, and q is capped at 400 chars / 50 words.
+    ENABLE_BRAVE_SEARCH_DISCOVERY: ${ENABLE_BRAVE_SEARCH_DISCOVERY:-false}
+    BRAVE_API_KEY: ${BRAVE_API_KEY:-}
+    BRAVE_API_URL: ${BRAVE_API_URL:-https://api.search.brave.com/res/v1/web/search}
+    BRAVE_COUNTRY: ${BRAVE_COUNTRY:-DE}
+    BRAVE_SEARCH_LANG: ${BRAVE_SEARCH_LANG:-de}
+    BRAVE_COUNT: ${BRAVE_COUNT:-10}
+    BRAVE_HTTP_TIMEOUT_S: ${BRAVE_HTTP_TIMEOUT_S:-30}
+    BRAVE_HTTP_MAX_RETRIES: ${BRAVE_HTTP_MAX_RETRIES:-3}
+    BRAVE_RETRY_MAX_WAIT_S: ${BRAVE_RETRY_MAX_WAIT_S:-30}
+    BRAVE_REQUEST_DELAY_S: ${BRAVE_REQUEST_DELAY_S:-0.1}
+    BRAVE_MAX_CANDIDATES: ${BRAVE_MAX_CANDIDATES:-5}
+    BRAVE_PROGRESS_LOG_EVERY: ${BRAVE_PROGRESS_LOG_EVERY:-10}
+    BRAVE_DISCOVERY_CHECKPOINT_FILE: ${BRAVE_DISCOVERY_CHECKPOINT_FILE:-/opt/airflow/data/brave_search_discovery_checkpoint.json}
   volumes:
     - ./airflow/dags:/opt/airflow/dags
     - ./airflow/logs:/opt/airflow/logs
     - ./airflow/config:/opt/airflow/config
     - ./airflow/plugins:/opt/airflow/plugins
     - ./airflow/data:/opt/airflow/data
+    # Read-only so an ad-hoc measurement script can import the DAG modules it measures,
+    # without the dag-processor ever parsing it as a DAG.
+    - ./scripts:/opt/airflow/scripts:ro
   user: "${AIRFLOW_UID:-50000}:0"
   depends_on: &airflow-common-depends-on
     postgres:

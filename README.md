@@ -98,7 +98,9 @@ cp .env.example .env
 ./scripts/dev-up.sh
 ```
 
-This starts Postgres, runs all Flyway migrations, builds the Airflow image, and brings up all Airflow services. Then open http://localhost:8080 (airflow / airflow), unpause the DAGs you want, and trigger them.
+This starts Postgres, runs all Flyway migrations, builds the Airflow image, and brings up all Airflow services. Then open http://localhost:8082 (airflow / airflow), unpause the DAGs you want, and trigger them.
+
+For which DAGs to run and how to read what they found, see [docs/running-discovery.md](docs/running-discovery.md).
 
 To import a Northdata CSV export into the companies table:
 
@@ -141,7 +143,7 @@ docker compose --profile geocoding up -d nominatim
 
 | Service | URL | Credentials |
 |---------|-----|-------------|
-| Airflow UI | http://localhost:8080 | airflow / airflow |
+| Airflow UI | http://localhost:8082 | airflow / airflow |
 | pgAdmin | http://localhost:5051 | admin@example.com / admin |
 | Postgres | localhost:5433 | app / app — db: unternehmensdatenbank |
 | SearXNG | http://localhost:8888 | — |

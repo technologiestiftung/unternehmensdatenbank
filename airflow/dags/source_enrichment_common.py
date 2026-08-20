@@ -573,13 +573,44 @@ def fetch_companies_for_llm_enrichment(
         connection.close()
 
 
-def build_search_queries(company: CompanyCandidate) -> dict[str, str]:
+#: Whether to put the Handelsregister number — the ID a German company gets in the commercial
+#: register, like "HRB 217094" — into the search query.
+#:
+#: Off, because measuring it said so. On 100 Osnabrück companies, searching WITH the number
+#: returned more results (only 17 companies found nothing, versus 29 without it) but fewer
+#: usable ones: a website we could actually prove for 21 companies, versus 25 for the identical
+#: pipeline searching without it. The extra results are register aggregators, insolvency
+#: trackers and business directories, because those are the pages that quote register numbers.
+#: The search gets pulled toward pages *about* the company and away from the company's own site.
+#:
+#: This does NOT stop url_discovery.scorer.score_candidate from using the register number to
+#: confirm a page it has already downloaded. The two uses are separable and only the query side
+#: is turned off here. See docs/website-and-owner-discovery-results.md.
+SEARCH_QUERY_INCLUDE_REGISTER_NUMBER = (
+    os.getenv("SEARCH_QUERY_INCLUDE_REGISTER_NUMBER", "false").lower() == "true"
+)
+
+
+def build_search_queries(
+    company: CompanyCandidate, *, include_registration_number: bool | None = None
+) -> dict[str, str]:
+    """Build the search queries for one company.
+
+    `include_registration_number` defaults to the SEARCH_QUERY_INCLUDE_REGISTER_NUMBER env var
+    (off). Pass it explicitly only to measure the difference — scripts/ac_measurement.py does.
+    """
+    if include_registration_number is None:
+        include_registration_number = SEARCH_QUERY_INCLUDE_REGISTER_NUMBER
     exact_name = f'"{company.company_name}"'
     normalized = normalize_company_name_for_search(company.company_name)
     normalized_name = f'"{normalized}"' if normalized and normalized != company.company_name.lower() else ""
     location = " ".join(part for part in [company.postcode or "", company.city or ""] if part).strip()
     address = company.address or location
-    registration_number = f'"{company.registration_number}"' if company.registration_number else ""
+    registration_number = (
+        f'"{company.registration_number}"'
+        if company.registration_number and include_registration_number
+        else ""
+    )
 
     general_variants = [exact_name]
     if normalized_name:

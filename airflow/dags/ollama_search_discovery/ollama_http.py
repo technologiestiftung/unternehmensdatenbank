@@ -59,18 +59,40 @@ def extract_json_block(text: str) -> dict[str, Any]:
     return json.loads(match.group(0))
 
 
-def run_chat_prompt(prompt: str) -> dict[str, Any]:
+def run_chat_prompt(
+    prompt: str,
+    *,
+    num_predict: int = 1024,
+    think: bool | None = None,
+    temperature: float = 0.1,
+) -> dict[str, Any]:
+    """Send one prompt, get back {"raw_text", "parsed"}.
+
+    `num_predict` caps output tokens. Generation is roughly ten times slower than reading the
+    prompt, so a caller that only needs a small JSON object should say so rather than leave room
+    for 1024 tokens it will never use.
+
+    `think` controls a reasoning model's think-out-loud step. None leaves the field out of the
+    request entirely, which is what every existing caller wants; False is worth passing for a
+    mechanical extraction, where thinking tokens are generated at the slow rate and add nothing.
+
+    `temperature` at 0 makes the same prompt give the same answer. Worth it for anything whose
+    output gets compared between runs: at 0.1 a judge asked twice about one page can return two
+    different verdicts, and then "the score changed" no longer means the code changed.
+    """
     url = f"{OLLAMA_BASE_URL.rstrip('/')}/api/chat"
-    payload = {
+    payload: dict[str, Any] = {
         "model": OLLAMA_MODEL,
         "messages": [{"role": "user", "content": prompt}],
         "stream": False,
         "format": "json",
         "options": {
-            "temperature": 0.1,
-            "num_predict": 1024,
+            "temperature": temperature,
+            "num_predict": num_predict,
         },
     }
+    if think is not None:
+        payload["think"] = think
 
     last_error: Exception | None = None
     for attempt in range(1, OLLAMA_HTTP_MAX_RETRIES + 1):
