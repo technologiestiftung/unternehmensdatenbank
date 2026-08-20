@@ -65,6 +65,7 @@ def run_chat_prompt(
     num_predict: int = 1024,
     think: bool | None = None,
     temperature: float = 0.1,
+    num_ctx: int | None = None,
 ) -> dict[str, Any]:
     """Send one prompt, get back {"raw_text", "parsed"}.
 
@@ -79,6 +80,13 @@ def run_chat_prompt(
     `temperature` at 0 makes the same prompt give the same answer. Worth it for anything whose
     output gets compared between runs: at 0.1 a judge asked twice about one page can return two
     different verdicts, and then "the score changed" no longer means the code changed.
+
+    `num_ctx` is the context length, and leaving it out is a trap worth knowing about. Ollama then
+    applies its own default, which is small, and it **truncates a longer prompt without saying so**.
+    Measured while building the branch classifier: a prompt of roughly 2,400 tokens came back
+    reporting 1,546 prompt tokens, and the part that got cut was the page text at the end — so the
+    model answered confidently about a page it had never seen. Any caller sending a whole page should
+    pass this. None keeps today's behaviour, so existing callers are unchanged.
     """
     url = f"{OLLAMA_BASE_URL.rstrip('/')}/api/chat"
     payload: dict[str, Any] = {
@@ -91,6 +99,8 @@ def run_chat_prompt(
             "num_predict": num_predict,
         },
     }
+    if num_ctx is not None:
+        payload["options"]["num_ctx"] = num_ctx
     if think is not None:
         payload["think"] = think
 

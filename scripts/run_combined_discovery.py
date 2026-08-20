@@ -681,6 +681,32 @@ def report(limit: int | None = None) -> None:
     print()
 
 
+def _branch_columns(row: dict[str, Any] | None) -> dict[str, Any]:
+    """The branch half of one CSV row. Empty when `classify` has not run for this company.
+
+    `branch_source` names the text the keywords came from — `services`, `homepage`, `imprint` or
+    `purpose` — or `wz` when the register's industry code answered and no text was needed.
+    """
+    if not row:
+        return {c: "" for c in (
+            "branch", "branch_score", "branch_source", "branch_decided_by", "branch_keywords",
+            "branch_runner_up", "branch_needs_review",
+        )}
+    keywords = row.get("keywords") or {}
+    sources = ["wz"] if row.get("decided_by") == "wz" else sorted(set(keywords.values()))
+    return {
+        # `outcome` rather than a blank when nothing was assigned: "torn" and "no_text" are
+        # different facts and a reader of this file needs to see which one applies.
+        "branch": row.get("branch") or f"({row.get('outcome')})",
+        "branch_score": row.get("score") or "",
+        "branch_source": "+".join(sources),
+        "branch_decided_by": row.get("decided_by") or "",
+        "branch_keywords": ";".join(sorted(keywords)),
+        "branch_runner_up": row.get("runner_up") or "",
+        "branch_needs_review": "yes" if row.get("needs_review") else "",
+    }
+
+
 CSV_COLUMNS = [
     "company_id", "company_name", "postcode", "city", "address", "registration_number",
     "url", "confidence", "band", "verified_by", "method", "pattern",
@@ -698,6 +724,10 @@ CSV_COLUMNS = [
     "judge_verdict", "judge_reason", "band_without_judge", "judge_changed_band",
     # What the application already serves for this company, and whether we agree with it.
     "db_website", "db_website_source", "db_website_confidence", "agrees_with_db",
+    # Which industry the company is in, from `classify`. Blank for every row when that has never
+    # been run — which is not the same as "this company has no industry".
+    "branch", "branch_score", "branch_source", "branch_decided_by", "branch_keywords",
+    "branch_runner_up", "branch_needs_review",
 ]
 
 
@@ -705,6 +735,11 @@ def write_csv(limit: int | None = None) -> None:
     rows = sample_rows(limit)
     rows.sort(key=lambda r: (-(r.get("confidence_value") or 0.0), r.get("company_name") or ""))
     db = load_db_websites([r["company_id"] for r in rows if r.get("company_id")])
+    # Branches, if `classify` has ever run. Absent is a legitimate state and leaves the columns
+    # blank rather than inventing an "unclassified" that nobody measured.
+    branches = {r["company_id"]: r for r in read_jsonl(BRANCHES_PATH) if r.get("company_id")}
+    if branches:
+        log.info("Joining branches for %d companies from %s", len(branches), BRANCHES_PATH.name)
     CSV_PATH.parent.mkdir(parents=True, exist_ok=True)
     with CSV_PATH.open("w", encoding="utf-8-sig", newline="") as handle:
         writer = csv.DictWriter(handle, fieldnames=CSV_COLUMNS)
@@ -753,6 +788,7 @@ def write_csv(limit: int | None = None) -> None:
                 "db_website_source": stored.get("source") or "",
                 "db_website_confidence": stored.get("confidence") or "",
                 "agrees_with_db": agreement(r.get("website"), stored.get("website")),
+                **_branch_columns(branches.get(r.get("company_id") or "")),
             })
     found = sum(1 for r in rows if r.get("website"))
     log.info("Wrote %s — %d rows, %d with a URL", CSV_PATH, len(rows), found)
@@ -1013,6 +1049,654 @@ def labels_report() -> None:
     print()
 
 
+# ---------------------------------------------------------------------------------------
+# Which industry is each company in
+# ---------------------------------------------------------------------------------------
+#
+# A BRANCH is an industry plus its technology field — "Bahnindustrie", "Gastgewerbe" — from Berlin's
+# list of 77 in `combined_discovery/branch_taxonomy.yaml`. A KEYWORD is a word that suggests one. A
+# WZ CODE is the official German industry code, already in `public.companies` for 8,483 companies
+# and mapped by `combined_discovery/wz_to_branch.yaml`.
+#
+# Three text sources, in falling order of how much they tell us and rising order of coverage:
+#
+#   services   /leistungen, /ueber-uns, /produkte — fetched by `fetch-content`, richest text
+#   homepage   already cached by `run`. 68% carry at least one keyword
+#   imprint    already cached by `run`. 44%. Kept because on 72 companies it adds a keyword
+#   purpose    `business_purpose` from the register. 11% of 7,478, but the matches are cleaner
+#
+# and the WZ code, which is not text at all and answers first when it can.
+#
+# `classify` makes NO web requests. Everything it reads is already on disk, which is what makes
+# re-running it after a taxonomy edit cost seconds. `fetch-content` is the only part that downloads.
+
+BRANCHES_PATH = OUT_DIR / "branches.jsonl"
+BRANCH_LABELS_PATH = OUT_DIR / "branch_labels_todo.csv"
+
+#: Read in this order, so a keyword found in several texts is credited to the most specific one.
+SOURCE_ORDER = ("services", "homepage", "imprint", "purpose")
+
+COMPANY_FACTS_SQL = """
+SELECT id::text, company_name, wz_code, business_purpose
+FROM public.companies
+WHERE company_name IS NOT NULL
+"""
+
+
+def load_company_facts() -> dict[str, dict[str, Any]]:
+    """Company id -> name, WZ code and register purpose, for the whole table.
+
+    The whole table rather than the sample: the WZ code answers for companies that have no website
+    at all, and those are exactly the ones the website path can never reach.
+    """
+    from source_enrichment_common import get_connection
+
+    connection = get_connection()
+    try:
+        with connection, connection.cursor() as cur:
+            cur.execute(COMPANY_FACTS_SQL)
+            rows = cur.fetchall()
+    finally:
+        connection.close()
+    return {
+        r[0]: {"company_name": r[1], "wz_code": r[2], "business_purpose": r[3]} for r in rows
+    }
+
+
+def _url_variants(url: str) -> list[str]:
+    """The spellings of one URL that the page cache might be keyed under.
+
+    The cache key is the URL as it was *requested*, and `results.jsonl` stores the URL as it was
+    *resolved* — `origin_url(probe.final_url)`. Those differ whenever a site redirected from
+    `http://x.de` to `https://www.x.de`, which most of them do. Trying the four spellings finds 860
+    of 902 pages; without it, several hundred readable pages look missing.
+    """
+    out = [url, url.rstrip("/"), url + "/"]
+    for old, new in (("https://", "http://"), ("http://", "https://")):
+        if url.startswith(old):
+            out.append(new + url[len(old):])
+    for old, new in (("://www.", "://"), ("://", "://www.")):
+        if old in url:
+            out.append(url.replace(old, new, 1))
+    seen: set[str] = set()
+    return [u for u in out if not (u in seen or seen.add(u))]
+
+
+def cached_html(namespace: str, url: str) -> str:
+    """The stored HTML for a URL, trying the spellings above. Empty string for a miss."""
+    from combined_discovery import page_cache
+
+    for candidate in _url_variants(url):
+        record = page_cache.get(namespace, candidate)
+        if record and record.get("html"):
+            return record["html"]
+    return ""
+
+
+def company_texts(
+    row: dict[str, Any],
+    facts: dict[str, Any],
+    *,
+    use_pages: bool,
+    use_purpose: bool,
+) -> dict[str, str]:
+    """Source name -> readable text, from the cache and the database only. Never downloads."""
+    from combined_discovery import content_pages
+    from combined_discovery.url_patterns import visible_text
+
+    texts: dict[str, str] = {}
+    website = row.get("website")
+    if use_pages and website:
+        homepage = cached_html("probe", website)
+        if homepage:
+            texts["homepage"] = visible_text(homepage)
+            got = content_pages.content_for(website, homepage, fetch=False)
+            if got.text:
+                texts["services"] = got.text
+        imprint = cached_html("imprint", website)
+        if imprint:
+            texts["imprint"] = visible_text(imprint)
+    if use_purpose and facts.get("business_purpose"):
+        texts["purpose"] = facts["business_purpose"]
+    return {name: text for name, text in texts.items() if text}
+
+
+def keywords_with_source(texts: dict[str, str], taxonomy: Any) -> dict[str, str]:
+    """Keyword -> the source it was first found in, most specific source first.
+
+    `normalize` runs once per text rather than once per keyword. The other way round lower-cases the
+    same 6,000 characters 527 times, which turns a seconds-long pass into a minutes-long one.
+    """
+    from combined_discovery import branch_classifier as bc
+
+    found: dict[str, str] = {}
+    for source in SOURCE_ORDER:
+        text = texts.get(source)
+        if not text:
+            continue
+        for keyword in sorted(bc.matched_keywords(bc.normalize(text), taxonomy)):
+            found.setdefault(keyword, source)
+    return found
+
+
+def fetch_content(limit: int | None, workers: int) -> None:
+    """Download the /leistungen and /ueber-uns pages the cached homepages link to.
+
+    The only part of branch classification that touches the network, and it pays once: every page
+    lands in the cache and a second run downloads nothing.
+
+    Measured over the 766 cached homepages: 644 of them (84%) link to a services or about-style
+    page, and fetching them under the cap is about 1,813 requests. The links are found in HTML that
+    is already on disk, so nothing is downloaded to decide what to download.
+    """
+    from combined_discovery import content_pages, page_cache
+
+    # `limit` counts companies that HAVE a website, not companies in the sample. Only about 6% of
+    # the table has one, so `--limit 100` on the raw sample would fetch pages for six companies and
+    # answer nothing. Ordered by company_id so that `--limit 100` is a prefix of the full run and
+    # the trial is part of the measurement rather than a separate one.
+    rows = sorted(
+        (r for r in latest_rows(RESULTS_PATH) if r.get("website")),
+        key=lambda r: r.get("company_id") or "",
+    )
+    if limit:
+        rows = rows[:limit]
+    log.info("%d companies with a website in scope", len(rows))
+
+    found_links = 0
+    counter = {"done": 0, "fetched": 0, "failed": 0, "no_homepage": 0, "no_links": 0}
+    started = time.monotonic()
+
+    def one(row: dict[str, Any]) -> None:
+        website = row["website"]
+        homepage = cached_html("probe", website)
+        if not homepage:
+            with _WRITE_LOCK:
+                counter["no_homepage"] += 1
+                counter["done"] += 1
+            return
+        got = content_pages.content_for(website, homepage, fetch=True)
+        with _WRITE_LOCK:
+            counter["done"] += 1
+            counter["fetched"] += got.fetched
+            counter["failed"] += got.failed
+            if not got.links:
+                counter["no_links"] += 1
+            done = counter["done"]
+        if done % 50 == 0 or done == len(rows):
+            rate = done / max(time.monotonic() - started, 1e-6)
+            log.info(
+                "[%d/%d] %d pages fetched, %d would not load | ~%.0f min left",
+                done, len(rows), counter["fetched"], counter["failed"],
+                (len(rows) - done) / rate / 60 if rate else 0,
+            )
+
+    with ThreadPoolExecutor(max_workers=workers) as pool:
+        list(pool.map(one, rows))
+
+    for row in rows:
+        index = page_cache.get("content-index", row["website"])
+        found_links += len(((index or {}).get("links")) or [])
+
+    print(f"\n{'companies in scope':<40}{len(rows):>7}")
+    print(f"{'no homepage in the cache':<40}{counter['no_homepage']:>7}")
+    print(f"{'homepage but no services-style link':<40}{counter['no_links']:>7}")
+    print(f"{'pages chosen':<40}{found_links:>7}")
+    print(f"{'…that came back':<40}{counter['fetched']:>7}")
+    print(f"{'…that would not load':<40}{counter['failed']:>7}")
+    print(
+        "\n  Run `classify` next. If the number of companies with at least one keyword has not\n"
+        "  risen above the 68% the homepage alone manages, these downloads bought nothing — say so\n"
+        "  and take the stage out rather than keeping it because it exists."
+    )
+
+
+def classify(
+    limit: int | None,
+    sources: set[str],
+    use_llm: bool,
+) -> None:
+    """Work out each company's branch and write one JSON line per company.
+
+    Three passes, and the middle one is why it cannot be done company by company: a keyword's weight
+    depends on **how many companies use that word**, so every company's text has to be read before
+    any company can be scored.
+    """
+    from combined_discovery import branch_classifier as bc
+    from combined_discovery import branch_llm
+
+    taxonomy = bc.load_taxonomy()
+    wz_map = bc.load_wz_map() if "wz" in sources else None
+    log.info(
+        "%d branches, %d keywords, taxonomy %s | WZ mappings: %d",
+        len(taxonomy.branches), len(taxonomy.keyword_branches), taxonomy.version,
+        len(wz_map.mappings) if wz_map else 0,
+    )
+
+    rows = {r["company_id"]: r for r in sample_rows(limit) if r.get("company_id")}
+    facts = load_company_facts()
+    scope = [cid for cid in facts if cid in rows] if rows else list(facts)
+    log.info("%d companies in scope", len(scope))
+
+    # ---- pass 1: read every text once ---------------------------------------------------
+    per_company: dict[str, dict[str, Any]] = {}
+    for company_id in scope:
+        texts = company_texts(
+            rows.get(company_id, {}),
+            facts[company_id],
+            use_pages="page" in sources,
+            use_purpose="purpose" in sources,
+        )
+        per_company[company_id] = {
+            "texts": sorted(texts),
+            "keywords": keywords_with_source(texts, taxonomy),
+            "had_text": bool(texts),
+            "page_text": " ".join(texts.get(s, "") for s in ("services", "homepage")).strip(),
+        }
+    with_text = sum(1 for v in per_company.values() if v["had_text"])
+    log.info("%d companies have text to read", with_text)
+
+    # ---- pass 2: how common is each keyword, counted over COMPANIES ---------------------
+    df = bc.document_frequency(v["keywords"] for v in per_company.values())
+    log.info("%d of %d keywords appear at least once", len(df), len(taxonomy.keyword_branches))
+
+    # ---- pass 3: score, and ask the model only where it can help ------------------------
+    if use_llm:
+        usable, reason = branch_llm.availability()
+        if not usable:
+            log.warning("The tie-break model is OFF: %s", reason)
+            log.warning("Continuing without it. Torn rows stay torn.")
+            use_llm = False
+        else:
+            log.info("The tie-break model is ON: %s", reason)
+
+    BRANCHES_PATH.parent.mkdir(parents=True, exist_ok=True)
+    if BRANCHES_PATH.exists():
+        BRANCHES_PATH.unlink()  # a full re-score, not an increment: every weight may have moved
+
+    asked = 0
+    for company_id in scope:
+        state = per_company[company_id]
+        result = bc.classify(
+            taxonomy=taxonomy,
+            df=df,
+            n_companies=max(with_text, 1),
+            keywords_by_source=state["keywords"],
+            had_text=state["had_text"],
+            wz_code=facts[company_id].get("wz_code"),
+            wz_map=wz_map,
+        )
+
+        # What the answer would have been without the pages `fetch-content` downloaded. The same
+        # shape as `band_without_judge`: it is the only honest way to say whether that stage paid
+        # for its 1,813 requests.
+        without_services = None
+        if any(source == "services" for source in state["keywords"].values()):
+            without_services = bc.classify(
+                taxonomy=taxonomy,
+                df=df,
+                n_companies=max(with_text, 1),
+                keywords_by_source={
+                    k: s for k, s in state["keywords"].items() if s != "services"
+                },
+                had_text=state["had_text"],
+                wz_code=facts[company_id].get("wz_code"),
+                wz_map=wz_map,
+            )
+
+        verdict = None
+        if use_llm and result.shortlist and state["page_text"]:
+            verdict = branch_llm.choose(
+                company_name=facts[company_id].get("company_name") or "",
+                text=state["page_text"],
+                shortlist=result.shortlist,
+                url=rows.get(company_id, {}).get("website") or company_id,
+                taxonomy_version=taxonomy.version,
+            )
+            asked += 0 if verdict.cached else 1
+            if verdict.branch:
+                result.branch = verdict.branch
+                result.outcome = "assigned"
+                result.decided_by = "model"
+            elif verdict.rejected_all:
+                # The model read the page and refused all three. That is not the same as no keyword
+                # firing, and a human should see it.
+                result.needs_review = True
+
+        append_jsonl(BRANCHES_PATH, {
+            "company_id": company_id,
+            "company_name": facts[company_id].get("company_name"),
+            "website": rows.get(company_id, {}).get("website"),
+            "wz_code": facts[company_id].get("wz_code"),
+            "wz_prefix": result.wz_prefix,
+            "outcome": result.outcome,
+            "branch": result.branch,
+            "score": result.score,
+            "decided_by": result.decided_by,
+            "runner_up": result.runner_up,
+            "runner_up_score": result.runner_up_score,
+            "ranked": result.ranked[:5],
+            "keywords": result.keywords,
+            "text_sources": state["texts"],
+            "shortlist": result.shortlist,
+            "needs_review": result.needs_review,
+            "outcome_without_services": without_services.outcome if without_services else None,
+            "branch_without_services": without_services.branch if without_services else None,
+            "llm_branch": verdict.branch if verdict else None,
+            "llm_reason": verdict.reason if verdict else "",
+            "llm_refused": verdict.refused if verdict else "",
+            "taxonomy_version": taxonomy.version,
+        })
+
+    if use_llm:
+        log.info("%d model calls made (the rest were already cached)", asked)
+    log.info("Wrote %d companies to %s", len(scope), BRANCHES_PATH)
+
+
+def classify_report() -> None:
+    """What happened. NOT whether it was right — that is `classify-labels-report`."""
+    rows = read_jsonl(BRANCHES_PATH)
+    if not rows:
+        raise SystemExit(f"nothing in {BRANCHES_PATH}; run `classify` first")
+    n = len(rows)
+
+    print(f"\n=== Branch classification over {n} companies ===\n")
+    outcomes: dict[str, int] = {}
+    for row in rows:
+        outcomes[row.get("outcome") or "?"] = outcomes.get(row.get("outcome") or "?", 0) + 1
+    order = ("assigned", "no_branch_applies", "torn", "no_keyword", "no_text")
+    print("-- the five outcomes, and they are five different claims --")
+    for outcome in order:
+        print(f"{outcome:<34}{outcomes.get(outcome, 0):>7}  {_pct(outcomes.get(outcome, 0), n)}")
+    for outcome, count in outcomes.items():
+        if outcome not in order:
+            print(f"{outcome:<34}{count:>7}  {_pct(count, n)}")
+    print(
+        "\n  `no_branch_applies` is an ANSWER: the register says holding company or housing\n"
+        "  association and Berlin's technology list has no home for it. `no_keyword` means we read\n"
+        "  text and found nothing. `no_text` means we had nothing to read. Adding any two of those\n"
+        "  together turns a blank into a claim."
+    )
+
+    assigned = [r for r in rows if r.get("outcome") == "assigned"]
+    print("\n-- what decided it --")
+    deciders: dict[str, int] = {}
+    for row in assigned:
+        deciders[row.get("decided_by") or "?"] = deciders.get(row.get("decided_by") or "?", 0) + 1
+    for decider, count in sorted(deciders.items(), key=lambda kv: -kv[1]):
+        print(f"{decider:<34}{count:>7}  {_pct(count, n)}")
+
+    print("\n-- which text the keywords came from --")
+    from_source: dict[str, int] = {}
+    for row in assigned:
+        if row.get("decided_by") == "wz":
+            continue
+        for source in (row.get("keywords") or {}).values():
+            from_source[source] = from_source.get(source, 0) + 1
+    for source, count in sorted(from_source.items(), key=lambda kv: -kv[1]):
+        print(f"{source:<34}{count:>7}  keyword hits")
+
+    # Did fetch-content earn its downloads? Counting decisions the homepage alone would not have
+    # reached, the same way `band_without_judge` counts what the model changed.
+    gained = [
+        r for r in assigned
+        if r.get("outcome_without_services") and r["outcome_without_services"] != "assigned"
+    ]
+    changed = [
+        r for r in assigned
+        if r.get("branch_without_services") and r["branch_without_services"] != r.get("branch")
+    ]
+    if any(r.get("outcome_without_services") for r in rows):
+        print("\n-- did the downloaded services pages pay for themselves --")
+        print(f"{'decided only thanks to them':<34}{len(gained):>7}")
+        print(f"{'decided differently because of them':<34}{len(changed):>7}")
+        print(
+            "\n  The first number is what the ~1,813 downloads bought. If it is near zero the stage\n"
+            "  should come out, not stay because it exists."
+        )
+
+    # How much evidence is behind an assignment, which is not the same question as how confident
+    # the score is. Measured on the first full run: 807 of 992 assignments rested on ONE keyword.
+    # That is not automatically wrong — `einzelhandel` (208 rows), `spedition` (39) and
+    # `steuerberater` (21) each name an industry on their own — but it is where the wrong answers
+    # live, and the two groups have to be labelled separately or one hides the other.
+    from_words = [r for r in assigned if r.get("decided_by") != "wz"]
+    single = [r for r in from_words if len(r.get("keywords") or {}) == 1]
+    print("\n-- how much evidence is behind each assignment --")
+    print(f"{'decided by ONE keyword':<34}{len(single):>7}  {_pct(len(single), max(len(from_words), 1))}")
+    print(f"{'decided by two or more':<34}{len(from_words) - len(single):>7}")
+    lone: dict[str, int] = {}
+    for row in single:
+        keyword = next(iter(row["keywords"]))
+        lone[keyword] = lone.get(keyword, 0) + 1
+    print("\n  the keywords carrying a whole assignment on their own, most common first:")
+    for keyword, count in sorted(lone.items(), key=lambda kv: -kv[1])[:12]:
+        print(f"    {keyword[:30]:<30}{count:>5}")
+    print(
+        "\n  Read that list as a to-do. A word that names an INDUSTRY belongs there; a word that\n"
+        "  names a QUALITY does not. 'sicherheit' is the clear case: Berlin's sheet gives it to\n"
+        "  Defence Tech, and on a German business page it means Arbeitssicherheit or\n"
+        "  Datensicherheit. No measurement can tell those apart — 'sicherheit' appears on 1.8% of\n"
+        "  our texts and 'einzelhandel' on 3.0%, and only one of them is decisive. This is a\n"
+        "  judgement for a person, made by deleting the keyword from branch_taxonomy.yaml with a\n"
+        "  comment saying why, NOT by adding a stop-list to the code."
+    )
+
+    print("\n-- the 15 most common branches --")
+    branches: dict[str, int] = {}
+    for row in assigned:
+        branches[row.get("branch") or "?"] = branches.get(row.get("branch") or "?", 0) + 1
+    for branch, count in sorted(branches.items(), key=lambda kv: -kv[1])[:15]:
+        print(f"{branch[:33]:<34}{count:>7}  {_pct(count, n)}")
+    print(
+        "\n  Defence Tech must not be near the top. If it is, a keyword is matching inside a German\n"
+        "  compound again — 'Sicherheit' hides in Arbeitssicherheit — and that is the bug this\n"
+        "  whole module is shaped around."
+    )
+
+    print("\n-- the 20 keywords that fired on the most companies --")
+    fired: dict[str, int] = {}
+    for row in rows:
+        for keyword in row.get("keywords") or {}:
+            fired[keyword] = fired.get(keyword, 0) + 1
+    for keyword, count in sorted(fired.items(), key=lambda kv: -kv[1])[:20]:
+        print(f"{keyword[:33]:<34}{count:>7}  {_pct(count, n)}")
+    print(
+        "\n  A keyword high on this list is worth almost nothing by construction: its weight falls\n"
+        "  with the number of companies using it. That is measured, not listed by hand — do not\n"
+        "  delete these from the taxonomy, and do not add a stop-list."
+    )
+
+    # Where the register and the website disagree. These are the rows worth reading by hand.
+    disagree = [
+        r for r in rows
+        if r.get("decided_by") == "wz" and r.get("branch")
+        and r.get("ranked") and r["ranked"][0][0] != r.get("branch")
+    ]
+    print(f"\n{'WZ code and the words disagree':<34}{len(disagree):>7}")
+    for row in disagree[:8]:
+        print(
+            f"    {(row.get('company_name') or '')[:30]:<30} "
+            f"wz={row.get('branch')} words={row['ranked'][0][0]}"
+        )
+
+    review = sum(1 for r in rows if r.get("needs_review"))
+    print(f"\n{'flagged for a human to look at':<34}{review:>7}")
+    print()
+
+
+BRANCH_LABEL_COLUMNS = [
+    "bucket", "company_id", "company_name", "website", "wz_code",
+    "branch", "score", "decided_by", "runner_up", "keyword_count", "keywords", "shortlist",
+    "llm_reason",
+    # The two a human fills in. Everything to the left is context for the decision.
+    #   label   yes | no | unclear — is `branch` the right industry for this company?
+    #   notes   anything worth remembering. Never parsed, only read.
+    "label", "notes",
+]
+
+BRANCH_LABEL_VALUES = ("yes", "no", "unclear")
+
+
+def branch_label_buckets(rows: list[dict[str, Any]]) -> dict[str, list[dict[str, Any]]]:
+    """Six groups, because there are six different questions and one sample cannot answer them all.
+
+    wz_decided        the register's industry code said it. Is that branch right?
+    keyword_decided   the words said it. PRECISION of the cheap path, and the main number here.
+    model_decided     the model broke a tie. Was breaking it that way right?
+    torn              two branches too close to call. **Label these before paying for the model** —
+                      they are exactly the rows it would be asked about, and if a human cannot
+                      separate them from the same text, a 4B model will not either.
+    no_keyword        we read text and no keyword appeared. Does this company have a branch anyway?
+    no_text           we had nothing to read. THE CEILING: what better input would be buying.
+
+    `torn`, `no_keyword` and `no_text` get their own buckets rather than one. Sampled together, 46%
+    of the draw comes from `no_text`, which is the least informative of the three.
+    """
+    buckets: dict[str, list[dict[str, Any]]] = {
+        "wz_decided": [], "keyword_decided": [], "model_decided": [],
+        "torn": [], "no_keyword": [], "no_text": [],
+    }
+    for row in rows:
+        if row.get("outcome") == "assigned":
+            key = {"wz": "wz_decided", "keywords": "keyword_decided", "model": "model_decided"}.get(
+                row.get("decided_by") or "", "keyword_decided"
+            )
+            buckets[key].append(row)
+        elif row.get("outcome") in buckets:
+            buckets[row["outcome"]].append(row)
+    return buckets
+
+
+def branch_labels(per_bucket: int = 10) -> None:
+    """Write (or extend) the hand-labelling worksheet. Never overwrites a label already written."""
+    rows = read_jsonl(BRANCHES_PATH)
+    if not rows:
+        raise SystemExit(f"nothing in {BRANCHES_PATH}; run `classify` first")
+    buckets = branch_label_buckets(rows)
+
+    existing: dict[tuple[str, str], dict[str, str]] = {}
+    if BRANCH_LABELS_PATH.exists():
+        with BRANCH_LABELS_PATH.open(encoding="utf-8-sig", newline="") as handle:
+            for old in csv.DictReader(handle):
+                existing[(old.get("bucket") or "", old.get("company_id") or "")] = old
+        done = sum(1 for v in existing.values() if (v.get("label") or "").strip())
+        log.info("%s has %d rows, %d labelled", BRANCH_LABELS_PATH.name, len(existing), done)
+
+    out: list[dict[str, Any]] = []
+    for bucket, entries in buckets.items():
+        entries.sort(key=lambda r: r.get("company_id") or "")
+        keep = entries[:per_bucket] + [
+            e for e in entries[per_bucket:]
+            if (existing.get((bucket, e.get("company_id") or ""), {}).get("label") or "").strip()
+        ]
+        for row in keep:
+            was = existing.get((bucket, row.get("company_id") or ""), {})
+            out.append({
+                "bucket": bucket,
+                "company_id": row.get("company_id"),
+                "company_name": row.get("company_name"),
+                "website": row.get("website") or "",
+                "wz_code": row.get("wz_code") or "",
+                "branch": row.get("branch") or "",
+                "score": row.get("score") or "",
+                "decided_by": row.get("decided_by") or row.get("outcome"),
+                "runner_up": row.get("runner_up") or "",
+                # How many keywords carried this row. 807 of the first run's 992 assignments
+                # rested on one, so the two groups have to be labelled apart.
+                "keyword_count": len(row.get("keywords") or {}),
+                "keywords": ";".join(sorted(row.get("keywords") or {})),
+                "shortlist": ";".join(row.get("shortlist") or []),
+                "llm_reason": row.get("llm_reason") or "",
+                # Carried over verbatim. This is the human's work.
+                "label": was.get("label", ""),
+                "notes": was.get("notes", ""),
+            })
+        log.info("%-16s %d rows (%d available)", bucket, len(keep), len(entries))
+
+    BRANCH_LABELS_PATH.parent.mkdir(parents=True, exist_ok=True)
+    with BRANCH_LABELS_PATH.open("w", encoding="utf-8-sig", newline="") as handle:
+        writer = csv.DictWriter(handle, fieldnames=BRANCH_LABEL_COLUMNS, extrasaction="ignore")
+        writer.writeheader()
+        writer.writerows(out)
+
+    print(f"\nWrote {len(out)} rows to {BRANCH_LABELS_PATH}")
+    print(f"Fill in `label` with one of: {', '.join(BRANCH_LABEL_VALUES)}")
+    print("  wz/keyword/model_decided -> is `branch` the right industry for this company?")
+    print("  torn                     -> can YOU pick one of `shortlist` from the same text? If")
+    print("                              not, no model can. Write which one in `notes`.")
+    print("  no_keyword / no_text     -> look the company up. `yes` if some branch on the list")
+    print("                              fits it, `no` if genuinely none does. Name it in `notes`.")
+    print(f"\nThen: python {Path(__file__).name} classify-labels-report")
+
+
+def branch_labels_report() -> None:
+    """Read the worksheet back. The only thing here that says whether the answer was RIGHT."""
+    if not BRANCH_LABELS_PATH.exists():
+        raise SystemExit(f"no {BRANCH_LABELS_PATH}; run `classify-labels` first")
+    with BRANCH_LABELS_PATH.open(encoding="utf-8-sig", newline="") as handle:
+        rows = list(csv.DictReader(handle))
+
+    def tally(bucket: str) -> dict[str, int]:
+        counts = {v: 0 for v in BRANCH_LABEL_VALUES}
+        counts["unlabelled"] = 0
+        for row in rows:
+            if (row.get("bucket") or "") != bucket:
+                continue
+            value = (row.get("label") or "").strip().lower()
+            counts[value if value in counts else "unlabelled"] += 1
+        return counts
+
+    print(f"\n=== {len(rows)} rows in {BRANCH_LABELS_PATH.name} ===")
+    for bucket, question in (
+        ("wz_decided", "the register's industry code decided it"),
+        ("keyword_decided", "the words on the page decided it"),
+        ("model_decided", "the model broke a tie"),
+    ):
+        counts = tally(bucket)
+        decided = counts["yes"] + counts["no"]
+        print(f"\n-- {question} --")
+        print(f"{'right':<38}{counts['yes']:>5}")
+        print(f"{'wrong':<38}{counts['no']:>5}")
+        print(f"{'unclear':<38}{counts['unclear']:>5}")
+        print(f"{'not yet labelled':<38}{counts['unlabelled']:>5}")
+        if decided:
+            print(f"\n  PRECISION {counts['yes']}/{decided} = {100.0 * counts['yes'] / decided:.0f}%")
+        else:
+            print("\n  PRECISION unknown — nothing in this group is labelled yet")
+
+    torn = tally("torn")
+    decided = torn["yes"] + torn["no"]
+    print("\n-- the ties: could a human separate them from the same text? --")
+    print(f"{'yes, one of the shortlist fits':<38}{torn['yes']:>5}")
+    print(f"{'no, none of the shortlist fits':<38}{torn['no']:>5}")
+    print(f"{'unclear':<38}{torn['unclear']:>5}")
+    print(f"{'not yet labelled':<38}{torn['unlabelled']:>5}")
+    if decided:
+        print(f"\n  A human separated {torn['yes']}/{decided}. That is the ceiling for the tie-break")
+        print("  model: it is asked the same question from the same text, with less to work with.")
+        print("  If a person cannot do it, 52 minutes of model time will not do it either.")
+
+    # The two kinds of blank, added together on purpose here and NOWHERE else: the question in this
+    # section is "does a branch exist for this company", and for that one question it does not
+    # matter whether we had no keyword or no text at all.
+    no_keyword, no_text = tally("no_keyword"), tally("no_text")
+    counts = {k: no_keyword[k] + no_text[k] for k in list(BRANCH_LABEL_VALUES) + ["unlabelled"]}
+    decided = counts["yes"] + counts["no"]
+    print("\n-- the ceiling: do the companies we gave no branch actually have one? --")
+    print(f"{'a branch on the list fits (yes)':<38}{counts['yes']:>5}")
+    print(f"{'no branch on the list fits (no)':<38}{counts['no']:>5}")
+    print(f"{'unclear':<38}{counts['unclear']:>5}")
+    print(f"{'not yet labelled':<38}{counts['unlabelled']:>5}")
+    if decided:
+        print(f"\n  MISSED {counts['yes']}/{decided} = {100.0 * counts['yes'] / decided:.0f}%")
+        print("  of the blanks do have a branch. That is what better text or a model would buy.")
+        print("  The rest are the Berlin/Osnabrück mismatch, and no classifier can fix those.")
+    else:
+        print("\n  CEILING unknown — this group decides whether anything more is worth building.")
+    print()
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     sub = parser.add_subparsers(dest="command", required=True)
@@ -1059,6 +1743,39 @@ def main() -> None:
     )
     sub.add_parser("labels-report", help="read the worksheet back: precision, rejections, ceiling")
 
+    p_fetch = sub.add_parser(
+        "fetch-content",
+        help="download the /leistungen and /ueber-uns pages the cached homepages link to",
+    )
+    p_fetch.add_argument("--limit", type=int, default=None,
+                         help="only the first N companies of the sample — use 100 first")
+    p_fetch.add_argument("--workers", type=int, default=int(os.getenv("COMBINED_WORKERS", "8")))
+
+    p_classify = sub.add_parser("classify", help="work out each company's branch")
+    p_classify.add_argument("--limit", type=int, default=None)
+    p_classify.add_argument(
+        "--source", default="wz,page,purpose",
+        help=(
+            "comma-separated: wz, page, purpose. Default all three. `wz` is the register's industry "
+            "code and answers first; `page` is the cached website text; `purpose` is the register's "
+            "description of the business."
+        ),
+    )
+    p_classify.add_argument(
+        "--llm", action="store_true",
+        help=(
+            "ask a local model to break the remaining ties, choosing from three shortlisted "
+            "branches. About 10 seconds a page, so leave it off until the keyword numbers settle."
+        ),
+    )
+    sub.add_parser("classify-report", help="print the branch scorecard")
+    p_blabels = sub.add_parser(
+        "classify-labels", help="write the branch labelling worksheet (merges with what is labelled)"
+    )
+    p_blabels.add_argument("--per-bucket", type=int, default=10,
+                           help="how many companies per group (default 10, so about 40 rows)")
+    sub.add_parser("classify-labels-report", help="read it back: is the branch actually right?")
+
     args = parser.parse_args()
     if args.command == "run":
         stages = {s.strip() for s in args.stages.split(",") if s.strip()}
@@ -1075,6 +1792,20 @@ def main() -> None:
         labels(args.limit, args.per_bucket)
     elif args.command == "labels-report":
         labels_report()
+    elif args.command == "fetch-content":
+        fetch_content(args.limit, args.workers)
+    elif args.command == "classify":
+        sources = {s.strip() for s in args.source.split(",") if s.strip()}
+        unknown = sources - {"wz", "page", "purpose"}
+        if unknown:
+            raise SystemExit(f"unknown source(s): {sorted(unknown)}")
+        classify(args.limit, sources, args.llm)
+    elif args.command == "classify-report":
+        classify_report()
+    elif args.command == "classify-labels":
+        branch_labels(args.per_bucket)
+    elif args.command == "classify-labels-report":
+        branch_labels_report()
     else:
         write_csv(args.limit)
 

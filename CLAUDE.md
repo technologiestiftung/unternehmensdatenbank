@@ -143,7 +143,41 @@ changing `confidence.py`, the judge gate, or anything that reads a page. In shor
 Local model setup — native Windows Ollama with `OLLAMA_IGPU_ENABLE=1`, which is **74× faster** than
 the Docker one because the host had paged the WSL2 VM's memory to disk: vault `Local Model Setup`.
 
-## Four facts that have misled people repeatedly
+## Branch classification — which industry a company is in
+
+A **branch** is an industry plus its technology field ("Bahnindustrie", "Gastgewerbe"), from Berlin's
+list of 77. A **WZ code** is the official German industry code, already in `public.companies` for
+8,483 companies. Full detail and every number:
+[docs/branch-classification.md](docs/branch-classification.md).
+
+```powershell
+python scripts/wz_branch_worksheet.py write --top 100   # 100 codes = 5,845 companies (69%)
+python scripts/run_combined_discovery.py fetch-content  # 1,567 pages, once, then cached
+python scripts/run_combined_discovery.py classify --source wz,page,purpose
+python scripts/run_combined_discovery.py classify-report
+```
+
+1. **The WZ code answers first.** It is deterministic, free, and it reaches the **1,943** companies
+   that have a code and no describing text at all. `null` in `wz_to_branch.yaml` means "no branch
+   applies" — holding companies and landlords genuinely have none, and that is an answer, not a gap.
+2. **Both lists are YAML, not tables.** They are edited by hand and need comments; a table would mean
+   a migration per edit, or an unversioned table that makes last month's run impossible to reproduce.
+3. **Never match a keyword inside a German compound.** Allowing it took `sicherheit` from 90 pages to
+   139 — it hides in *Arbeitssicherheit* — and made Defence Tech the biggest industry in Osnabrück,
+   while clear winners *fell* 338 → 316.
+4. **Read the homepage, not the Impressum** (68% carry a keyword against 44%) — and better still the
+   pages it links to. 644 of 766 homepages link to `/leistungen` or `/ueber-uns`; fetching them gave
+   92% keyword coverage and **136 companies a branch nothing else would have found.**
+5. **Keywords decide; the model only breaks ties, from three options.** Asked to pick from all 77 it
+   files everything under "Dienstleistung". 10.3 s a page on `qwen3.5:4b`, so it is off by default.
+6. **`classify` makes zero web requests** and takes two minutes over all 14,443 companies. That is
+   what makes arguing with the taxonomy cheap; `fetch-content` is the only part that downloads.
+
+Not yet known: **whether any of it is right.** 974 companies have a branch and no row is hand-checked.
+`classify-labels` writes the 40-row worksheet; only `classify-labels-report` says anything about
+precision.
+
+## Five facts that have misled people repeatedly
 
 - **`website_url` is a view column, not a table column.** V9 dropped it from `companies`. Enriched
   fields live in `company_canonical_field_sources` and are read through `public.v_companies_enriched`.
@@ -151,6 +185,12 @@ the Docker one because the host had paged the WSL2 VM's memory to disk: vault `L
   company's site.** Registry pages, insolvency trackers and directories all quote them.
   `search_common.is_own_site_candidate` is the single predicate for that call; a looser one anywhere
   else is the recurring bug here. It reappeared in the judge, where a directory scored 0.805.
+- **A word that names a quality is not a word that names an industry, and no measurement separates
+  them.** `sicherheit` appears in 1.8% of our texts, `einzelhandel` in 3.0%; only one is decisive.
+  Berlin's sheet filed `Sicherheit` under Defence Tech, and it produced 27 of that branch's 35
+  assignments alone — a bed shop, a lift company, an estate agent, a dental laboratory. The fix is
+  deleting the keyword from `branch_taxonomy.yaml` with the number in a comment. It is **not** a
+  stop-list in the code: that is the next bullet, and the two are easy to confuse.
 - **Never grow a list of bad domains or words.** Genericness is *measured* from the data —
   `name_frequency.common_words` counts company names, `common_email_domains` counts mapped
   businesses. The most common email domain in Osnabrück is `osnanet.de`, a local ISP no
@@ -183,6 +223,9 @@ Three guard scripts, all free — no API, no model, no database, no network:
   and digit so layouts can be studied without exposing anyone's name)
 - `scripts/check_combined_discovery.py` — URL guessing, the confidence ladder, the judge's limits and
   gate, what `_page_evidence` takes off a page, postcodes, and JSON-LD including malformed shapes
+
+- `scripts/check_branch_classifier.py` — the compound-word rule, the keyword weights, the
+  longest-prefix WZ lookup, and the services-page link finder
 
 Run them after touching `search_common.py`, `imprint_probe.py`,
 `url_discovery/imprint_extractor.py`, or anything in `combined_discovery/`.

@@ -1,0 +1,1041 @@
+# Berlin's branch list: which industry a company belongs to, and the words that say so.
+#
+# A BRANCH is an industry plus its technology field. A KEYWORD is a word on a company's website, or
+# in its register purpose, that suggests that branch.
+#
+# Generated once from ALLE_Abfrage_Labels(IIIB).csv by scripts/import_branch_taxonomy.py.
+# AFTER THAT THIS FILE IS THE SOURCE OF TRUTH — edit it by hand. Re-running the importer with --out
+# writes elsewhere, so a newly exported sheet can be diffed against this one rather than
+# overwriting the edits and comments below.
+#
+# 77 branches, 572 keyword entries, 527 distinct keywords.
+#
+# Keyed by branch, not by keyword, because a keyword belongs to several branches ("Sensorik" to
+# seven of them) and because a person editing this asks "what belongs to Bahnindustrie?". The
+# keyword -> branches index is built in memory when the file loads.
+#
+# Matching is case-insensitive and needs a word boundary on both sides. It deliberately does NOT
+# match inside a German compound: allowing that made "Sicherheit" hit 139 pages instead of 90,
+# because it hides inside Arbeitssicherheit and Sicherheitstechnik — and it belongs to Defence
+# Tech, which briefly became Osnabrueck's largest industry.
+#
+# A keyword shared by many branches is already worth less: its weight is divided across the
+# branches that claim it, and again by how many companies use the word at all. So do NOT delete a
+# keyword for being too common — that is measured from the data rather than from anyone's opinion.
+# Delete a keyword only when it is WRONG for its branch, and say so in a comment.
+
+branches:
+  "5G- bzw. 6G Anwendungen":
+    senweb_unit: "IIIB4"
+    berlin_partner: "Juliane Haupt"
+    related:
+      - "62.10.3"
+    keywords:
+      - "Campusnetze"
+      - "IoT"
+      - "Edge Computing"
+      - "Network Slicing"
+
+  "Additive Fertigung":
+    senweb_unit: "IIIC1"
+    berlin_partner: "David Hampel"
+    keywords:
+      - "3D-Druck"
+      - "Rapid Prototyping"
+      - "Serienfertigung"
+      - "Leichtbau"
+      - "Funktionsbauteile"
+
+  "Advanced Materials":
+    senweb_unit: "III B 3"
+    berlin_partner: "David Hampel"
+    keywords:
+      - "Hochleistungswerkstoffe"
+      - "Verbundwerkstoffe"
+      - "Leichtbau"
+      - "Nanotechnologie"
+      - "Funktionswerkstoffe"
+
+  "Architekturmarkt":
+    senweb_unit: "IIB4"
+    berlin_partner: "Justina Siegmund-Born"
+    keywords:
+      - "BIM"
+      - "Nachhaltiges Bauen"
+      - "Generalplanung"
+      - "Objektplanung"
+      - "Revitalisierung"
+
+  "Automobilwirtschaft":
+    senweb_unit: "IIIB3, IIIC1"
+    berlin_partner: "Sascha Tiede, David Hampel"
+    keywords:
+      - "Elektromobilität"
+      - "Autonomes Fahren"
+      - "Konnektivität"
+      - "Nachhaltigkeit"
+      - "Transformation"
+      - "Automotive"
+      - "Fahrzeugtechnik"
+      - "Smart Mobility"
+      - "Future Mobility"
+      - "Fahrzeugentwicklung"
+      - "Fahrzeugproduktion"
+      - "Automotive Engineering"
+      - "Smart Factory"
+      - "Industrie 4.0"
+      - "Robotik"
+      - "Predictive Maintenance"
+      - "Supply Chain"
+      - "Leichtbau"
+      - "Circular Economy"
+
+  "Autonomes, vernetzes Fahren":
+    senweb_unit: "IIIB3"
+    berlin_partner: "Sascha Tiede"
+    keywords:
+      - "V2X-Kommunikation"
+      - "Sensorfusion"
+      - "Fahrerassistenzsysteme"
+      - "Software-defined Vehicle"
+      - "Telematik"
+      - "Teleoperiertes Fahren"
+      - "Connected Car"
+      - "V2X"
+      - "V2I (Vehicle-to-Infrastructure)"
+      - "V2V (Vehicle-to-Vehicle)"
+      - "Cloud Connectivity"
+      - "Autonomous Driving"
+      - "Automated Driving"
+      - "ADAS"
+      - "LiDAR"
+      - "Radar"
+      - "Machine Learning"
+      - "Deep Learning"
+      - "Digital Twin"
+      - "AI"
+      - "Simulation"
+      - "Selbstfahrende Autos"
+      - "Robotaxis"
+      - "SAE/Level 3-5"
+      - "Operational Design Domain"
+      - "Motion Planing"
+      - "Localization"
+      - "Autonomous Shuttle"
+      - "Shuttle-Bus"
+      - "Connected Vehicle"
+      - "Vehicle Operating System"
+      - "AI for Mobility"
+      - "3D-Umgebungserfassung"
+      - "Vollautonome Fahrzeuge"
+
+  "Bahnindustrie":
+    senweb_unit: "IIIB3"
+    berlin_partner: "Sascha Tiede"
+    keywords:
+      - "Bahntechnik"
+      - "Schienenfahrzeuge"
+      - "Signaltechnik"
+      - "Schieneninfrastruktur"
+      - "Instandhaltung"
+      - "Railway Technology"
+      - "Rail Industry"
+      - "Railway Engineering"
+      - "Rail Systems"
+      - "Rail Infrastructure"
+      - "Schienenverkehr"
+      - "Eisenbahntechnik"
+      - "Bahninfrastruktur"
+      - "Bahnbetrieb"
+      - "Digitale Schiene"
+      - "Digitaler Zwilling"
+      - "Automatisierter Bahnverkehr"
+      - "hochautomatisiertes Fahren"
+      - "Zugsteuerung"
+      - "Sensorik"
+      - "Bahnsicherheit"
+      - "Autonomous Rail"
+      - "Smart Infrastructure"
+      - "Green Rail"
+      - "Sustainable Mobility"
+      - "Rail Telematics"
+      - "AI for Rail"
+      - "European Train Control System (ETCS)"
+      - "European Rail Traffic Management System (ERTMS)"
+
+  "Batterietechnologien":
+    related:
+      - "Elektromobilität"
+      - "Ladeinfrastruktur"
+    keywords:
+      - "Lithium-Ionen-Technologie"
+      - "Lithium-Schwefel-Batterien"
+      - "Feststoffbatterie"
+      - "Energiespeichersysteme"
+      - "Batteriemanagementsystem"
+      - "Batterierecycling"
+      - "Akkus"
+
+  "Bauindustrie":
+    senweb_unit: "IIIC1"
+    berlin_partner: "David Hampel"
+    keywords:
+      - "Nachhaltiges Bauen"
+      - "Kreislaufwirtschaft"
+      - "Baustoffe"
+      - "Holzbau"
+      - "Dekarbonisierung"
+
+  "Bioproduktion":
+    senweb_unit: "IIIC1"
+    berlin_partner: "David Hampel"
+    keywords:
+      - "Fermentation"
+      - "Bioreaktoren"
+      - "Bioprozesstechnik"
+      - "Zellkultur"
+      - "Skalierung"
+
+  "Biotechnologie":
+    senweb_unit: "IIIB2"
+    berlin_partner: "Carolin Clement"
+    related:
+      - "Pharma & Wirkstoffe"
+      - "Künstliche Intelligenz"
+    keywords:
+      - "Biotechnologie"
+      - "Wirkstoffentwicklung"
+      - "Antikörper"
+      - "Bioprozess"
+      - "GMP"
+      - "Genomik"
+      - "ATMP"
+      - "Zell- und Gentherapie"
+
+  "Buchmarkt":
+    senweb_unit: "IIB4"
+    berlin_partner: "Justina Siegmund-Born"
+    keywords:
+      - "Verlagswesen"
+      - "Digital Publishing"
+      - "Buchvertrieb"
+      - "Print-on-Demand"
+      - "Self-Publishing"
+      - "Buchhandel"
+
+  "Carbon Management":
+    senweb_unit: "IIIA4"
+    berlin_partner: "Wolfgang Korek"
+    keywords:
+      - "direct air capture"
+      - "ccs"
+      - "ccu"
+
+  "Chemische Industrie":
+    senweb_unit: "IIIC1"
+    berlin_partner: "David Hampel"
+    keywords:
+      - "Spezialchemie"
+      - "Feinchemikalien"
+      - "Polymere"
+      - "Kreislaufwirtschaft"
+      - "Grüne Chemie"
+
+  "Cybersicherheit":
+    senweb_unit: "IIIB1"
+    berlin_partner: "Juliane Haupt"
+    related:
+      - "Künstliche Intelligenz"
+    keywords:
+      - "IT-Sicherheit"
+      - "Verschlüsselung"
+      - "Penetration Testing"
+      - "Cloud-Security"
+      - "Digitale Identität"
+
+  "Defence Tech":
+    related:
+      - "Drohnen"
+      - "Raumfahrt"
+    keywords:
+      # "Sicherheit" removed 2026-08-20. Measured: it fired on 140 of 7,739 texts and produced 27
+      # of this branch's 35 assignments on its own — a bed shop, a lift company, an estate agent, a
+      # transport firm and a home-help service among them. On a German business page the word means
+      # Arbeitssicherheit or Datensicherheit, never defence. This is the one thing no measurement
+      # can decide: "sicherheit" appears on 1.8% of our texts and "einzelhandel" on 3.0%, and only
+      # one of those names an industry. The branch keeps 14 keywords that do name one.
+      - "Dual Use"
+      - "Verteidigung"
+      - "Defense Technology"
+      - "Verteidigungstechnik"
+      - "Cyber-Defense"
+      - "Schutzsysteme"
+      - "Sensorik"
+      - "Aufklärungssysteme"
+      - "Drohnenabwehr"
+      - "KI basierte Lagebilder"
+      - "Erdbedobachtung"
+      - "Satellitendaten"
+      - "Raumfahrttechnologien"
+      - "Software Defined Defence"
+
+  "Designwirtschaft":
+    senweb_unit: "IIB4"
+    berlin_partner: "Justina Siegmund-Born"
+    keywords:
+      - "Mediendesign"
+      - "Markenidentität"
+      - "Produktdesign"
+      - "Kreativagentur"
+      - "Corporate Design"
+
+  "Dienstleistung":
+    senweb_unit: "IIB2"
+    berlin_partner: "nicht bekannt"
+    keywords:
+      - "Schausteller"
+      - "Sicherheitskräfte"
+      - "Taxigewerbe"
+      - "Lieferdienste"
+      - "Makler"
+      - "Fitnessstudio"
+
+  "Digital Health":
+    senweb_unit: "IIIB2"
+    berlin_partner: "Petra Schmauß"
+    related:
+      - "Künstliche Intelligenz"
+      - "Softwaretechnologien"
+    keywords:
+      - "Digital Health"
+      - "Telemedizin"
+      - "DiGA"
+      - "ePA"
+      - "Interoperabilität"
+      - "App"
+      - "KI-Diagnostik"
+
+  "Drohnen":
+    senweb_unit: "IIIB3"
+    berlin_partner: "Sascha Tiede"
+    related:
+      - "Dual Use"
+    keywords:
+      - "UAV"
+      - "UAM"
+      - "UIC"
+      - "unbemannte Luftfahrt"
+      - "Drohnentechnologie"
+      - "Luftbildvermessung"
+      - "Inspektion"
+      - "Sensorik"
+      - "Vermessung"
+      - "Drohnensicherheit"
+      - "Bildkomposition"
+      - "Lufträume"
+      - "U-Space"
+      - "unbemannten Fluggeräte"
+      - "Drohnendetektion"
+      - "Drohneninfrastruktur"
+
+  "Elektroindustrie":
+    senweb_unit: "IIIC1"
+    berlin_partner: "David Hampel"
+    keywords:
+      - "Automatisierungstechnik"
+      - "Elektrifizierung"
+      - "Elektrotechnik"
+      - "Halbleiter"
+      - "Industrie 4.0"
+      - "Sensorik"
+      - "Elektromobilität"
+
+  "Elektromobilität":
+    senweb_unit: "IIIB3"
+    berlin_partner: "Sascha Tiede"
+    related:
+      - "Ladeinfrastruktur"
+      - "Batterietechnologien"
+    keywords:
+      - "Ladeinfrastruktur"
+      - "Batterietechnologie"
+      - "Ladestationen"
+      - "E-Mobilität"
+      - "E-Autos"
+      - "Flottenmanagement"
+      - "Elektrifizierung"
+      - "Elektrotechnik"
+
+  "Energiespeicher":
+    senweb_unit: "IIIA4"
+    berlin_partner: "Wolfgang Korek"
+    keywords:
+      - "Wasserstoffspeicher"
+      - "Wärmespeicher"
+      - "Stromspeicher"
+
+  "Ernährungsindustrie":
+    senweb_unit: "III C 11"
+    berlin_partner: "David Hampel, Jens Woelki, Dorota Thiel-Jankievicz"
+    keywords:
+      - "Lebensmittelsicherheit"
+      - "Qualitätsmanagement"
+      - "Produktentwicklung"
+      - "Rückverfolgbarkeit"
+      - "Nachhaltigkeit"
+
+  "Fernwärme":
+    senweb_unit: "IIIA4"
+    berlin_partner: "Wolfgang Korek"
+    keywords:
+      - "Wärmequellen"
+      - "Steuerung"
+      - "Smart Grid"
+
+  "Filmwirtschaft":
+    senweb_unit: "IIB4"
+    berlin_partner: "Justina Siegmund-Born"
+    keywords:
+      - "Filmproduktion"
+      - "Postproduktion"
+      - "Content Creation"
+      - "Audiovisuelle Medien"
+      - "VFX"
+
+  "FinTech":
+    senweb_unit: "IIA4"
+    berlin_partner: "Juliane Haupt"
+    related:
+      - "Web3"
+      - "Blockchain"
+      - "DLT"
+    keywords:
+      - "Payment-Lösungen"
+      - "Open Banking"
+      - "Digital Banking"
+      - "Blockchain"
+      - "Robo-Advisory"
+
+  "Foodtech":
+    senweb_unit: "III C 11"
+    berlin_partner: "Jens Woelki"
+    keywords:
+      - "Pflanzenbasierte Proteine"
+      - "Biotechnologie"
+      - "Feermentation"
+      - "Aquaponik"
+
+  "Freiberufler":
+    senweb_unit: "IIB2"
+    berlin_partner: "nicht bekannt"
+    keywords:
+      - "Ingenieure"
+      - "Architekten"
+      - "Steuerberater"
+      - "Unternehmensberater"
+      - "Wirtschaftsprüfer"
+
+  "Games":
+    senweb_unit: "IIB4"
+    berlin_partner: "Justina Siegmund-Born"
+    keywords:
+      - "Spieleentwicklung"
+      - "Game Design"
+      - "Gamification"
+      - "Esports"
+      - "Virtual Reality"
+
+  "Gastgewerbe":
+    senweb_unit: "IIB3"
+    berlin_partner: "?"
+    keywords:
+      - "Hotellerie"
+      - "Gastronomie"
+      - "Beherbergung"
+      - "Bewirtung"
+      - "Restaurant"
+      - "Bar"
+      - "Café"
+
+  "Geothermie":
+    senweb_unit: "IIIA4"
+    berlin_partner: "Wolfgang Korek"
+    keywords:
+      - "Umweltwärme"
+      - "Tiefengeothermie"
+      - "Erdwärme"
+
+  "Gesundheitsversorgung & Pflege":
+    senweb_unit: "IIIB2"
+    berlin_partner: "Petra Schmauß"
+    related:
+      - "Digital Health"
+      - "Medizintechnik"
+      - "Künstliche Intelligenz"
+    keywords:
+      - "Krankenhaus"
+      - "ambulante Versorgung"
+      - "MVZ"
+      - "Pflegedienst"
+      - "Rehabilitation"
+      - "Pflege-Robotik"
+
+  "GovTech":
+    senweb_unit: "IIA4"
+    berlin_partner: "Juliane Haupt"
+    keywords:
+      - "Verwaltungsdigitalisierung"
+      - "E-Government"
+      - "Digitale Souveränität"
+      - "Bürgerservice"
+      - "Smart Government"
+
+  "Gummi- und Kunststoffverarbeitende Industrie":
+    senweb_unit: "IIIC1"
+    berlin_partner: "David Hampel"
+    keywords:
+      - "Spritzguss"
+      - "Extrusion"
+      - "Elastomertechnik"
+      - "Thermoplaste"
+      - "Compoundierung"
+      - "Formenbau"
+      - "Verpackungen"
+      - "Kunststoffrecycling"
+
+  "Halbleitertechnologien":
+    senweb_unit: "IIIB1"
+    berlin_partner: "Gerrit Rössler"
+    related:
+      - "Mikroelektronik"
+    keywords:
+      - "Mikroelektronik"
+      - "Halbleiterfertigung"
+      - "Leistungselektronik"
+      - "Chipdesign"
+      - "Wafertechnologie"
+      - "Semiconductor"
+
+  "Handel":
+    senweb_unit: "IIB2"
+    berlin_partner: "nicht bekannt"
+    keywords:
+      - "E-Commerce"
+      - "Einzelhandel"
+      - "Lebensmittel"
+      - "Spätverkaufsstellen"
+      - "Shoppingcenter/Einkaufszentren"
+
+  "Handwerk":
+    senweb_unit: "IIB2"
+    berlin_partner: "nicht bekannt"
+    keywords:
+      - "Digitalisierung"
+      - "Nachhaltigkeit"
+      - "Energieeffizienz"
+      - "Angebot Aus- und berufliche Weiterbildung (z.B Meister)"
+      - "Fachkräfte"
+
+  "Immersive Technologien (VR, AR, XR)":
+    senweb_unit: "IIIB1"
+    berlin_partner: "Juliane Haupt"
+    keywords:
+      - "Virtual Reality"
+      - "Augmented Reality"
+      - "Mixed Reality"
+      - "Spatial Computing"
+      - "Immersive Experience"
+
+  "Kreislaufwirtschaft":
+    keywords:
+      - "Cradle-to-Cradle"
+      - "Ressourceneffizienz"
+      - "Wertstoffkreislauf"
+      - "Kreislauffähigkeit"
+      - "Zero Waste"
+      - "Lebenszyklusverlängerung"
+      - "R-Strategien"
+      - "zirkulär"
+
+  "Kunstmarkt":
+    senweb_unit: "IIB4"
+    berlin_partner: "Justina Siegmund-Born"
+    keywords:
+      - "Kunsthandel"
+      - "Kunstbewertung"
+      - "Sammlungsmanagement"
+      - "Galerie"
+
+  "Künstliche Intelligenz":
+    senweb_unit: "IIIB1"
+    berlin_partner: "Juliane Haupt"
+    keywords:
+      - "Maschinelles Lernen"
+      - "Neuronale Netze"
+      - "Deep Learning"
+      - "Generative KI"
+      - "Natural Language Processing"
+
+  "Ladeinfrastruktur":
+    senweb_unit: "IIIB3"
+    berlin_partner: "Sascha Tiede"
+    related:
+      - "Elektromobilität"
+      - "Batterietechnologien"
+    keywords:
+      - "Ladetechnologien"
+      - "Schnellladen"
+      - "Smart Charging"
+      - "Wallbox"
+      - "bidirektionales Laden"
+      - "HPC-Laden"
+      - "Megawatt-Charging"
+      - "MCS"
+
+  "Logistik":
+    senweb_unit: "IIIB3"
+    berlin_partner: "Sascha Tiede"
+    keywords:
+      - "Lieferkettenmanagement"
+      - "Kontraktlogistik"
+      - "Lagerlogistik"
+      - "Transportlogistik"
+      - "Green Logistics"
+      - "Verkehrslogistik"
+      - "Güterverkehr"
+      - "Warenverkehr"
+      - "Letzte Meile"
+      - "Spedition"
+      - "Logistikdienstleister"
+      - "Wertschöpfungskette"
+      - "Transportation Management System"
+      - "Supply Chain Resilience"
+      - "Digitale Logistik"
+      - "Internet of Things"
+      - "Smart Logistics"
+      - "Cloud Logistics"
+      - "Automatisiertes Lager"
+      - "Robotik"
+      - "Autonome Logistik"
+      - "Fahrerlose Transportsysteme"
+      - "Urbane Logistik"
+      - "Last Mile Delivery"
+      - "City Logistics"
+      - "Depot"
+      - "Mikrodepot"
+      - "Paketlogistik"
+      - "ITS"
+      - "Cargo Bikes"
+      - "Sustainable Logistics"
+      - "Nachhaltige Lieferketten"
+      - "Flurförderfahrzeuge"
+      - "Kurier-Express Dienstleistungen"
+      - "Drohnenlieferservice"
+
+  "Markt für darstellende Künste":
+    senweb_unit: "IIB4"
+    berlin_partner: "Justina Siegmund-Born"
+    keywords:
+      - "Bühnenproduktion"
+      - "Kulturmanagement"
+      - "Live-Entertainment"
+      - "Inszenierung"
+      - "Spielstätte"
+
+  "Maschinen- und Anlagenbau":
+    senweb_unit: "IIIC1"
+    berlin_partner: "David Hampel"
+    keywords:
+      - "Automatisierungstechnik"
+      - "Antriebssysteme"
+      - "Prozessanlagen"
+      - "Industrieanlagen"
+      - "Werkzeugmaschinen"
+      - "Fördertechnik"
+      - "Sondermaschinenbau"
+      - "Prozessoptimierung"
+      - "Industrie 4.0"
+      - "Steuerungstechnik"
+
+  "Medizintechnik":
+    senweb_unit: "IIIB2"
+    berlin_partner: "Petra Schmauß"
+    related:
+      - "Digital Health"
+      - "Optik & Photonik"
+      - "Künstliche Intelligenz"
+    keywords:
+      - "Medizinprodukt"
+      - "MDR"
+      - "Implantat"
+      - "Diagnostik"
+      - "Bildgebung"
+      - "Automat"
+
+  "Messe- und Kongresswirtschaft":
+    senweb_unit: "IIB3"
+    berlin_partner: "?"
+    keywords:
+      - "Eventmanagement"
+      - "Veranstaltungsort"
+      - "Networking"
+      - "Standbau"
+      - "Kongressorganisation"
+
+  "Metallindustrie":
+    senweb_unit: "IIIC1"
+    berlin_partner: "David Hampel"
+    keywords:
+      - "Metallverarbeitung"
+      - "Blechbearbeitung"
+      - "CNC-Zerspanung"
+      - "Präzisionstechnik"
+      - "Oberflächentechnik"
+      - "Umformtechnik"
+
+  "Mikroelektronik":
+    senweb_unit: "IIIB1"
+    berlin_partner: "Gerrit Rössler"
+    related:
+      - "Halbleitertechnologien"
+    keywords:
+      - "Halbleiter"
+      - "Chipdesign"
+      - "Sensorik"
+      - "Leistungselektronik"
+      - "Mikrosystemtechnik"
+      - "Advanced Packaging"
+      - "Heterointergration"
+
+  "Mobilitätssoftware":
+    senweb_unit: "IIIB3"
+    berlin_partner: "Sascha Tiede"
+    keywords:
+      - "Mobility-as-a-Service"
+      - "Flottenmanagement"
+      - "Shared Mobility"
+      - "Routenoptimierung"
+      - "Smart Mobility"
+      - "Digitale Mobilität"
+      - "Mobilitätsplattform"
+      - "Mobilitätsdienstleistungen"
+      - "Verkehrstechnologie"
+      - "Verkehrssysteme"
+      - "Intelligente Mobilität"
+      - "Zukunftsmobilität"
+      - "Sustainable Mobility"
+      - "Multimodale Mobilität"
+      - "Mobilitäts-Apps"
+      - "Mobility Data"
+      - "Open Data"
+      - "Digitaler Zwilling"
+      - "Big Data"
+      - "Open Mobility Data"
+      - "Sharing"
+      - "Mobilitätssoftware"
+      - "Verkehrsoptimierung"
+      - "Verkehrsmanagement"
+      - "Smart City Plattform"
+      - "Digitale Infrastruktur"
+      - "ITS"
+      - "Intelligente Verkehrsysteme"
+      - "ÖPNV-Software"
+      - "Vehicle Data Platform"
+      - "Vehicle Connectivity"
+      - "Telematik"
+
+  "Modewirtschaft":
+    senweb_unit: "IIB4"
+    berlin_partner: "Justina Siegmund-Born"
+    keywords:
+      - "Fashion"
+      - "Modedesign"
+      - "Kollektion"
+
+  "Musikwirtschaft":
+    senweb_unit: "IIB4"
+    berlin_partner: "Justina Siegmund-Born"
+    keywords:
+      - "Musikproduktion"
+      - "Musikvertrieb"
+      - "Künstlermanagement"
+      - "Lizenzierung"
+      - "Musikverlag"
+      - "Labels"
+      - "Konzertveranstalter"
+      - "Clubs"
+
+  "Nachhaltige Wirtschaft":
+    senweb_unit: "IIA6"
+    berlin_partner: "Diana Woelki, Robin Bruck"
+    keywords:
+      - "Kreislaufwirtschaft"
+      - "Erneuerbare Energien"
+      - "Ressourceneffizienz"
+      - "CO2-Neutralität"
+      - "Corporate Social Responsibility"
+      - "ESG"
+
+  "Neue Mobilitätsangebote":
+    senweb_unit: "IIIB3"
+    berlin_partner: "Sascha Tiede"
+    keywords:
+      - "Mobility-as-a-Service"
+      - "Carsharing"
+      - "Mikromobilität"
+      - "Ridepooling"
+      - "Intermodale Mobilität"
+      - "Shared Mobility"
+      - "Bikesharing"
+      - "Ridehailing"
+      - "On-Demand Mobility"
+      - "Elektrokleinstfahrzeuge"
+      - "E-Roller"
+      - "E-Scooter"
+
+  "Papier- und Druckindustrie":
+    senweb_unit: "IIIC1"
+    berlin_partner: "David Hampel"
+    keywords:
+      - "Digitaldruck"
+      - "Offsetdruck"
+      - "Druckveredelung"
+      - "Verpackungsdruck"
+      - "Printmedien"
+
+  "Pharma & Wirkstoffe":
+    senweb_unit: "IIIB2"
+    berlin_partner: "Carolin Clement"
+    related:
+      - "Biotechnologie"
+      - "Medizintechnik"
+    keywords:
+      - "Arzneimittel"
+      - "Wirkstoff"
+      - "klinische Studien"
+      - "Zulassung"
+      - "Galenik"
+      - "Generika"
+      - "Orphan Drugs"
+      - "Pharmazeutika"
+
+  "Pharmaindustrie":
+    senweb_unit: "IIIC1"
+    berlin_partner: "Carolin Clement"
+    keywords:
+      - "Wirkstoffentwicklung"
+      - "Klinische Studien"
+      - "Biotechnologie"
+      - "Arzneimittelsicherheit"
+      - "Zulassungsverfahren"
+
+  "Photonik":
+    senweb_unit: "IIIB1"
+    berlin_partner: "Gerrit Rössler"
+    related:
+      - "Quantentechnologien"
+    keywords:
+      - "Lasertechnik"
+      - "Optoelektronik"
+      - "Optische Systeme"
+      - "Sensorik"
+      - "Machine Vision"
+
+  "Pressemarkt":
+    senweb_unit: "IIB4"
+    berlin_partner: "Justina Siegmund-Born"
+    keywords:
+      - "Digital-Publishing"
+      - "Qualitätsjournalismus"
+      - "Paid Content"
+      - "Medienvertrieb"
+      - "Printmedien"
+
+  "Quantentechnologien":
+    senweb_unit: "IIIB1"
+    berlin_partner: "Gerrit Rössler"
+    related:
+      - "Photonik"
+    keywords:
+      - "Quantencomputing"
+      - "Quantensensorik"
+      - "Quantenkryptographie"
+      - "Quantenkommunikation"
+      - "Quantum Key Distribution"
+
+  "Raumfahrt":
+    senweb_unit: "IIIB3"
+    berlin_partner: "Sascha Tiede"
+    related:
+      - "DefenceTech"
+    keywords:
+      - "Satelliten"
+      - "New Space"
+      - "Luft- und Raumfahrt"
+      - "Trägerraketen"
+      - "Erdbeobachtung"
+      - "Weltraumschrott"
+      - "Mondmission"
+      - "Kleinsatelliten"
+      - "Datenauswertung"
+      - "Moon Rover"
+      - "Satellitenkonstellation"
+
+  "Rechenzentrenbetreiber":
+    senweb_unit: "IIIB4"
+    berlin_partner: "Juliane Haupt"
+    related:
+      - "63.10.1"
+      - "63.10.2"
+      - "63.10.9"
+    keywords:
+      - "Compute"
+      - "Rechenleistung"
+      - "Cloud-Infrastruktur"
+
+  "Recycling":
+    senweb_unit: "IIIC1"
+    berlin_partner: "Hannes Lebert"
+    keywords:
+      - "Kreislaufwirtschaft"
+      - "Wertstoffrückgewinnung"
+      - "Ressourceneffizienz"
+      - "Nachhaltigkeit"
+      - "Abfallmanagement"
+
+  "Robotik":
+    senweb_unit: "IIIC1"
+    berlin_partner: "David Hampel"
+    keywords:
+      - "Automatisierung"
+      - "Industrieroboter"
+      - "Cobots"
+      - "Systemintegration"
+      - "Sensorik"
+
+  "Rundfunkwirtschaft":
+    senweb_unit: "IIB4"
+    berlin_partner: "Justina Siegmund-Born"
+    keywords:
+      - "Broadcasting"
+      - "Medienproduktion"
+      - "Content-Distribution"
+      - "Streaming-Technologie"
+      - "Medientechnologie"
+
+  "Sicherheits- und Verteidigungsindustrie":
+    senweb_unit: "III C 1"
+    berlin_partner: "David Hampel"
+    keywords:
+      - "Rüstungsgüter"
+
+  "Solarenergie":
+    senweb_unit: "IIIA4"
+    berlin_partner: "Wolfgang Korek"
+    keywords:
+      - "Photovoltaik"
+      - "Solarthermie"
+      - "PVT"
+
+  "Soziale Unternehmen":
+    senweb_unit: "IIA6"
+    berlin_partner: "Diana Woelki, Anne Le Rolland, Janis Gummersbach"
+    keywords:
+      - "Gemeinwohl"
+      - "Soziale Innovation"
+      - "Impact"
+      - "Wirkung"
+      - "Inklusion"
+      - "Verantwortungseigentum"
+      - "Fair"
+      - "Kollektiv"
+
+  "Stromnetz":
+    senweb_unit: "IIIA4"
+    berlin_partner: "Wolfgang Korek"
+    keywords:
+      - "Lastsenke"
+      - "Steuerung"
+      - "Smart-Grid"
+      - "Resilienz"
+
+  "Telekommunikationsanbieter":
+    senweb_unit: "IIIB4"
+    berlin_partner: "Juliane Haupt"
+    related:
+      - "61.10.0"
+      - "61.10.1"
+      - "61.10.2"
+    keywords:
+      - "Glasfaser"
+      - "5G"
+      - "6G"
+      - "Campusnetze"
+      - "Richtfunk"
+      - "LoRaWAN"
+      - "Mobilfunk"
+      - "Telekommunikation"
+      - "Open RAN"
+
+  "Tourismus":
+    senweb_unit: "IIB3"
+    berlin_partner: "?"
+    keywords:
+      - "Destination"
+      - "Pauschalreise"
+      - "Fremdenverkehr"
+      - "Reiseveranstalter"
+      - "Urlaubserlebnis"
+      - "Incomingagentur"
+      - "Stadtführung"
+      - "Sightseeing"
+
+  "Wasserstoff":
+    senweb_unit: "IIIA4"
+    berlin_partner: "Wolfgang Korek"
+    keywords:
+      - "Elektrolyseur"
+      - "Netz"
+      - "Speicher"
+
+  "Wassertechnologien":
+    senweb_unit: "IIIA4"
+    berlin_partner: "Wolfgang Korek"
+    keywords:
+      - "Abwasserbehandlung"
+      - "Trinkwasseraufbereitung"
+      - "Membrantechnologie"
+      - "Prozesswasser"
+      - "Wasserwiederverwendung"
+
+  "Web3, Blockchain, DLT":
+    senweb_unit: "IIIB1"
+    berlin_partner: "Juliane Haupt"
+    related:
+      - "FinTech"
+    keywords:
+      - "Tokenisierung"
+      - "Dezentralisierung"
+      - "Smart Contracts"
+      - "Digitale Assets"
+      - "Hash"
+      - "Onchain Asset Management"
+
+  "Werbemarkt":
+    senweb_unit: "IIB4"
+    berlin_partner: "Justina Siegmund-Born"
+    keywords:
+      - "Programmatic Advertising"
+      - "Performance Marketing"
+      - "Content-Kreation"
+      - "Branding"
+      - "Social Media"
+
+  "Windenergie":
+    senweb_unit: "IIIA4"
+    berlin_partner: "Wolfgang Korek"
+    keywords:
+      - "Windenergieanlagen"
+      - "Steuerung"
+      - "Turbinen"
+      - "Rotorblätter End-of-life"
