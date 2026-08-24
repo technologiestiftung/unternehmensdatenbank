@@ -150,7 +150,7 @@ the Docker one because the host had paged the WSL2 VM's memory to disk: vault `L
 | the question | what field does it **work in**? | what is it **registered as**? |
 | from | words the company published | its official WZ code |
 | values | one of Berlin's 77, or `NONE` | 76 divisions in 20 sections |
-| filled for | **974** companies (6.7%) | **8,483** (58.7%) |
+| filled for | **909** companies (6.3%) | **8,483** (58.7%) |
 | judgement | keyword weights, thresholds | **none** — a lookup |
 
 Full detail and every number: [docs/branch-classification.md](docs/branch-classification.md).
@@ -169,22 +169,29 @@ python scripts/run_combined_discovery.py classify-report
    parameter at all**, and the guard fails if one reappears. Same class of error as "a register number
    proves a page is *about* a company, never that it *is* its site".
 2. **`NONE` is the normal Technologiefeld and not a failure**, with three reasons kept apart: `torn`
-   400, `no_keyword` 6,365, `no_text` 6,704. Never add two of them together.
+   272, `no_keyword` 6,558, `no_text` 6,704. Never add two of them together.
 3. **The WZ cluster needs no mapping and no human.** Division = `wz_code[:2]`, section = the letter
    above it, both from `wz_titles.yaml` (2,008 codes, **WZ 2025** — `70.10.4` and `62.10.9` do not
    exist in WZ 2008, so a 2008 table mismatches silently).
 4. **Never match a keyword inside a German compound.** Allowing it took `sicherheit` from 90 pages to
    139 — it hides in *Arbeitssicherheit* — and made Defence Tech the biggest field in Osnabrück, while
-   clear winners *fell* 338 → 316.
+   clear winners *fell* 338 → 316. That covers the compounds German **glues**; the ones it
+   **hyphenates** still get through, so `Kfz-Zulassung` fires `zulassung` → Pharma and `Foto-Galerie`
+   fires `galerie` → Kunstmarkt. `BRANCH_HYPHEN_IS_BOUNDARY` closes it and is **off**, because closing
+   it also loses *E-Commerce-Lösungen* → `e-commerce`. Measure the trade before flipping it.
 5. **Read the homepage, not the Impressum** (68% carry a keyword against 44%) — and better still the
    pages it links to. 644 of 766 homepages link to `/leistungen` or `/ueber-uns`; fetching them gave
-   **136** companies a field nothing else found.
+   **136** companies a field nothing else found. Every page fetched is read: keeping one per category
+   while fetching two threw away 443 of 1,372 downloaded pages.
 6. **Keywords decide; the model only breaks ties, from three options.** Asked to pick from all 77 it
-   files everything under "Dienstleistung". 10.3 s a page, so it is off by default.
+   files everything under "Dienstleistung". 10.3 s a page, so it is off by default — and it **has
+   never been run**: no `branch-llm` cache exists and all 909 answers say `decided_by = keywords`. It
+   is a tie-breaker, not a classifier: it can only ever pick among fields the keywords nominated, so
+   it reaches ~270 rows and none of the 6,558 `no_keyword` companies.
 7. **`classify` makes zero web requests** and takes two minutes over all 14,443 companies. That is
    what makes arguing with the taxonomy cheap; `fetch-content` is the only part that downloads.
 
-Not yet known: **whether the Technologiefeld is right.** 974 companies have one and no row is
+Not yet known: **whether the Technologiefeld is right.** 909 companies have one and no row is
 hand-checked. `classify-labels` writes the 40-row worksheet; only `classify-labels-report` reports
 precision. The WZ column needs no labelling — nobody guessed it.
 
@@ -239,8 +246,10 @@ Three guard scripts, all free — no API, no model, no database, no network:
 - `scripts/check_combined_discovery.py` — URL guessing, the confidence ladder, the judge's limits and
   gate, what `_page_evidence` takes off a page, postcodes, and JSON-LD including malformed shapes
 
-- `scripts/check_branch_classifier.py` — the compound-word rule, the keyword weights, the
-  longest-prefix WZ lookup, and the services-page link finder
+- `scripts/check_branch_classifier.py` — the compound-word rule and the hyphen knob, the keyword
+  weights, the two-character WZ division lookup, the services-page link finder and the assembly of
+  their text, the `content-index` cache key, and the model's answer validation (imported from
+  `branch_llm.verdict_from_answer`, never restated)
 
 Run them after touching `search_common.py`, `imprint_probe.py`,
 `url_discovery/imprint_extractor.py`, or anything in `combined_discovery/`.

@@ -13,7 +13,7 @@ mistake made here was answering one with the other.
 | who decides | Berlin's economic-development list of 77 fields | the Statistisches Bundesamt |
 | filled from | words the company published about itself | the company's official WZ code |
 | possible values | one of the 77, or `NONE` | 76 divisions in 20 sections |
-| companies with a value | **974** (6.7%) | **8,483** (58.7%) |
+| companies with a value | **909** (6.3%) | **8,483** (58.7%) |
 | any judgement involved | yes: keyword weights, thresholds | **none** — it is a lookup |
 
 Neither is a check on the other. A company registered under *68 Grundstücks- und Wohnungswesen* whose
@@ -25,7 +25,8 @@ Technologiefeld is `NONE` is fully and correctly described by both columns.
   values: "Bahnindustrie", "Quantentechnologien", "Gastgewerbe", "Handwerk". A company has one of
   those or it has `NONE`.
 - **Keyword** — a word that suggests a Technologiefeld. "Schienenfahrzeuge" suggests Bahnindustrie.
-  The Berlin list gives each field a handful; 526 distinct words in total.
+  The Berlin list gives each field a handful; 527 distinct words, of which 27 have been
+  deleted by hand for naming an activity rather than an industry, leaving 500.
 - **WZ code** — the official German industry code, *Klassifikation der Wirtschaftszweige*. `56.11.1`
   is "Restaurants mit Bedienung". The Northdata export brought one along for 8,483 companies.
 - **Division** (*Abteilung*) — the first two characters of a WZ code, e.g. `56 Gastronomie`. 87 exist,
@@ -51,7 +52,7 @@ Where things live:
 
 An earlier version had **one** column and filled it from both sources. A hand-written mapping turned
 a WZ code into a Technologiefeld: `56.11.1 → Gastgewerbe`, `43.22.0 → Handwerk`, `70.20.0 →
-Dienstleistung`. It looked like a triumph — 3,118 companies with a field instead of 974.
+Dienstleistung`. It looked like a triumph — 3,118 companies with a field instead of ~950.
 
 It was wrong twice.
 
@@ -144,6 +145,16 @@ already links there, so **finding those links costs nothing**:
 spread keywords over more fields, so some companies moved from a clear winner to a visible tie. That
 is probably better precision, but precision is not measured yet.
 
+**Every page that came back is read.** That sounds like nothing to state, and it was not true until
+2026-08-24. The cap fetches two pages per category, and the code kept only the *first* one in each:
+of the 1,372 pages that loaded, **443 (32%) were downloaded, converted to text and thrown away**,
+74.6 MB of HTML, on every run. The fallback that arrangement existed for — a second page rescuing a
+first that would not load — had fired **twice**. `ContentPages.pages` now holds a list per category.
+
+> The row counts in the table above predate that fix and the numbers below it are the ones the fix
+> changes. Re-run `fetch-content` and `classify`, then replace them; the counts on disk at the time
+> of writing were 692 indexes, 1,396 pages chosen, 1,372 loaded.
+
 ### Stage 2 — count the keywords, weighted
 
 **A keyword matches only with a word boundary on both sides. Never inside a German compound.** German
@@ -152,6 +163,34 @@ allowing it looks like free coverage. Measured: pages with at least one keyword 
 `sicherheit` went from 90 companies to 139 — it hides in *Arbeitssicherheit* and *Sicherheitstechnik*
 — and **Defence Tech became the most common industry in Osnabrück**, while companies with a clear
 winner *fell* 338 → 316. More matches, worse answers.
+
+**That rule only covers the compounds German glues together. The ones it hyphenates get through.**
+
+```
+Arbeitssicherheit        blocked
+Instandhaltungsarbeiten  blocked
+Kfz-Zulassung            fires `zulassung`  ->  Pharma & Wirkstoffe
+Foto-Galerie             fires `galerie`    ->  Kunstmarkt
+Web-App-Entwicklung      fires `app`        ->  Digital Health
+```
+
+How often, measured over the 1,372 cached services pages, counting a page only when the keyword never
+appears standing alone anywhere on it (raw HTML, so `app` is an upper bound — some of those hits are
+markup):
+
+| keyword | pages it hits | hits **only** through a hyphen |
+|---|---|---|
+| `galerie` | 67 | 24 (36%) |
+| `app` | 789 | 171 (22%) |
+| `makler` | 13 | 4 |
+| `zulassung` | 5 | 0 |
+
+Closing the hole is one character — put `-` in the word class — and it is **not** obviously right,
+because it also stops *E-Commerce-Lösungen* matching `e-commerce`. That is a true positive lost for
+every false positive gained, which is a trade and not a fix. So it sits behind
+`BRANCH_HYPHEN_IS_BOUNDARY`, **off by default**, and the decision needs the same three numbers that
+settled the glued-compound rule: companies carrying any keyword, the per-keyword company counts above,
+and companies ending with a clear winner. Run `classify` both ways, put the table here, then choose.
 
 Then two weights, both **measured from the data**:
 
@@ -168,21 +207,21 @@ company names: genericness is measured, never hand-listed.
 
 | | | |
 |---|---|---|
-| a Berlin field | **974** (6.7%) | |
+| a Berlin field | **909** (6.3%) | |
 | `NONE` | 400 | `torn` — keywords fired, two fields too close to separate |
-| `NONE` | 6,365 | `no_keyword` — we read the text, no keyword appeared |
+| `NONE` | 6,558 | `no_keyword` — we read the text, no keyword appeared |
 | `NONE` | 6,704 | `no_text` — nothing to read |
 
 **Never add any two of those together.** "We had no text" is not evidence that a company has no
 technology field. All three print `NONE` in the column and keep their reason beside them, in
 `technologiefeld_reason`.
 
-Where the keywords came from, counting hits on the 974: `purpose` 719, `services` 527, `homepage` 289,
+Where the keywords came from, counting hits on the 909: `purpose` 625, `services` 519, `homepage` 226,
 `imprint` 59. The business purpose from the register is the most productive single source and costs one
 SQL query.
 
 **Expect `NONE` to be the common case, and do not treat it as failure.** Berlin's list was built for
-Berlin's technology economy; 277 of 526 keywords match nothing here at all, and the fields that come
+Berlin's technology economy; 265 of the 500 keywords match nothing here at all, and the fields that come
 out on top are Handel (242), Gastgewerbe (96), Logistik (56) and Freiberufler (56). A Lower Saxony
 town of trades and restaurants is mostly not in a technology taxonomy, and the WZ column is what
 describes those companies instead.
@@ -218,9 +257,28 @@ Two rules that pull opposite ways on purpose:
 2. **Do delete a keyword that is wrong for its field** — in the YAML, with a comment saying what it
    cost. That is a judgement about German, and a person has to make it.
 
-`classify-report` prints the keywords carrying a whole assignment alone — **777 of the 974** — as a
+`classify-report` prints the keywords carrying a whole assignment alone — **701 of the 909** — as a
 to-do list. Most are sound: `einzelhandel` 206, `spedition` 40, `gastronomie` 40, `windenergieanlagen`
 26, `steuerberater` 24.
+
+That list shows the keyword and not the **field** it carries, which is the number that convicts one.
+`sicherheit` was not merely common; it *was* Defence Tech, 27 of 35 assignments. So the report also
+prints each field's share, and five fields have the same shape today:
+
+```
+  share  field  lone   Technologiefeld / the one keyword
+   100%     26    26   Windenergie            windenergieanlagen   <- names an industry
+    90%     30    27   Bahnindustrie          instandhaltung       <- names a chore
+    85%    242   206   Handel                 einzelhandel         <- names an industry
+    82%     11     9   Kunstmarkt             galerie              <- a photo gallery in a nav bar
+    76%     17    13   Dienstleistung         makler
+    75%     16    12   Digital Health         app
+    64%     11     7   Pharma & Wirkstoffe    zulassung            <- Kfz-Zulassung
+```
+
+A high share is a **warning, not a verdict** — `windenergieanlagen` and `einzelhandel` sit at the top
+and are exactly right. The question is always the same one German asks: does the word name an industry
+or an activity everybody does? Settle the hyphen question first, because it moves these counts.
 
 ## Running it
 
@@ -240,7 +298,7 @@ WZ cluster is attached to every row regardless, whether or not any text was read
 
 ## What is not known yet
 
-**Nobody has checked whether the Technologiefeld is right.** 974 companies have one and not a single
+**Nobody has checked whether the Technologiefeld is right.** 909 companies have one and not a single
 row is hand-labelled. `classify-labels` writes 40 rows in five buckets; `classify-labels-report` is
 the only thing that reports precision. Start with `torn`: those are the rows the model would be asked
 about, and if a person cannot separate two fields from the same text, a 4B model will not either.

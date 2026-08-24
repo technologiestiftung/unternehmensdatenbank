@@ -59,6 +59,17 @@ About **2 minutes 51 seconds** at eight threads. Running it again downloads **no
 is cached. To try it small first, use `--limit 100`, which means 100 companies *that have a website*,
 not the first 100 of the table.
 
+Two things about that cache, both learned on 2026-08-24:
+
+1. **`pages chosen` is now a list of pages that all get read.** It used to fetch two per category and
+   read one, throwing away 32% of what it downloaded.
+2. **The remembered choice of pages carries the rules that made it.** Change
+   `COMBINED_CONTENT_MAX_PER_CATEGORY`, `COMBINED_CONTENT_MAX_PER_COMPANY` or a category pattern in
+   `content_pages.CATEGORIES`, and the affected companies are re-examined. That costs no bandwidth —
+   the homepage is on disk and the pages are cached under their own URLs — so a first run after such a
+   change should still report **0 pages fetched** unless the new rules pick pages nobody has fetched
+   before. If it downloads thousands, the rules changed more than you meant them to.
+
 ## 3. Classify — two minutes, no network at all
 
 ```powershell
@@ -69,10 +80,10 @@ Reads every company's text from disk, counts which Berlin keywords appear, weigh
 the WZ cluster to every row. Expect:
 
 ```
-77 Technologiefelder, 526 keywords, taxonomy 4d7e5d81c795 | 87 WZ divisions in 22 sections
+77 Technologiefelder, 500 keywords, taxonomy c154c74cf003 | 87 WZ divisions in 22 sections
 14443 companies in scope
 7739 companies have text to read
-249 of 526 keywords appear at least once
+235 of 500 keywords appear at least once
 Wrote 14443 companies to …\combined_discovery\branches.jsonl
 ```
 
@@ -92,9 +103,9 @@ python scripts/run_combined_discovery.py classify-report
 It prints three blocks. **Column 1, Technologiefeld:**
 
 ```
-a Berlin field                        974    6.7%
-NONE: torn                            400    2.8%
-NONE: no_keyword                     6365   44.1%
+a Berlin field                        909    6.3%
+NONE: torn                            272    1.9%
+NONE: no_keyword                     6558   45.4%
 NONE: no_text                        6704   46.4%
 ```
 
@@ -102,10 +113,10 @@ NONE: no_text                        6704   46.4%
 Osnabrück is trades and restaurants. The three reasons are counted apart on purpose: *"we had no text
 to read"* is not evidence that a company has no technology field.
 
-Also in this block: which text the keywords came from (`purpose` 719 hits, `services` 527, `homepage`
-289, `imprint` 59), whether the downloaded services pages paid for themselves (**136** companies got a
+Also in this block: which text the keywords came from (`purpose` 625 hits, `services` 519, `homepage`
+226, `imprint` 49), whether the downloaded services pages paid for themselves (**157** companies got a
 field only because of them), the 15 most common fields, and — worth reading every time — the keywords
-that carried a whole assignment on their own, **777 of the 974**.
+that carried a whole assignment on their own, **701 of the 909**.
 
 **Column 2, WZ cluster:**
 
@@ -119,16 +130,54 @@ distinct sections present              20
 then the 15 biggest divisions and the section rollup. Nothing here was decided by anybody, so there is
 nothing to argue with — only present or absent.
 
-**Both columns** ends with coverage: 864 companies have both, 110 a Technologiefeld only, 7,619 a WZ
-cluster only, 5,850 neither. That is coverage and **not** agreement: the two columns answer different
+**Both columns** ends with coverage: 810 companies have both, 99 a Technologiefeld only, 7,673 a WZ
+cluster only, 5,861 neither. That is coverage and **not** agreement: the two columns answer different
 questions and cannot agree or disagree.
 
-### Two things in that report that mean "go and fix something"
+### Four things in that report that mean "go and fix something"
 
 1. **`Defence Tech` near the top of the field list** — a keyword is matching inside a German compound
    again.
 2. **`!! divisions with no title`** — `wz_titles.yaml` is older than the data. Rebuild it:
    `python scripts/import_wz_titles.py <the WZ .xlsx>`.
+3. **`!! this file mixes runs`** — `branches.jsonl` holds rows from two different runs, and they are
+   not comparable, because a keyword's weight depends on how many companies use it. Re-run `classify`.
+4. **A field near the top of *fields resting on single keywords* whose words name an activity rather
+   than an industry.** That is the shape `sicherheit` had before it was deleted, and 26 more keywords
+   went the same way on 2026-08-24 — `instandhaltung` (26 of Bahnindustrie's 29 assignments, none of
+   them a railway), `netz` (which is how German says "online"), `app`, `galerie`, `social media`,
+   `inspektion`. Check a suspect by reading the companies it decided; the wrong ones are obvious.
+   Then delete it from `branch_taxonomy.yaml` with the count in a comment — never a stop-list in the
+   code. And ask whether the word is generic in GERMAN or only in Osnabrück: `clubs` scored just as
+   badly here and was kept, because in Berlin a Club really is a music venue.
+
+## 4b. Optional: is the hyphen hole worth closing?
+
+The keyword rule stops a word hiding inside a glued German compound (*Arbeitssicherheit*) and not
+inside a hyphenated one, so `Kfz-Zulassung` fires `zulassung` and lands a car-registration office in
+**Pharma & Wirkstoffe**. Closing it also stops *E-Commerce-Lösungen* matching `e-commerce`, so it is a
+trade. Measure it, do not guess:
+
+```powershell
+python scripts/run_combined_discovery.py classify --source page,purpose      # the knob is off
+python scripts/run_combined_discovery.py classify-report > before.txt
+$env:BRANCH_HYPHEN_IS_BOUNDARY = "1"
+python scripts/run_combined_discovery.py classify --source page,purpose
+python scripts/run_combined_discovery.py classify-report > after.txt
+Remove-Item Env:\BRANCH_HYPHEN_IS_BOUNDARY
+```
+
+Four minutes, no network. Compare exactly three things, the same three that settled the
+glued-compound rule:
+
+1. companies carrying **at least one keyword** (`no_keyword` falling means more matched);
+2. the **per-keyword company counts** for `app`, `galerie`, `zulassung`, `makler`;
+3. companies with a **clear winner** — the `a Berlin field` line.
+
+If the clear-winner count **falls**, the hole is doing less harm than closing it would: leave it and
+delete the individual keywords instead. If it rises, flip the default and put the table in
+`docs/branch-classification.md`. Either way the run's `taxonomy+rule version` line at the top of the
+report changes, so the two files can never be confused.
 
 ## 5. The spreadsheet to hand over
 
@@ -174,11 +223,35 @@ with `yes`, `no` or `unclear`, and use `notes` freely.
 The `wz_*` columns are in the file as **context, not for labelling** — nobody guessed them. Knowing a
 company is registered under `56 Gastronomie` helps you judge whether `Gastgewerbe` is right.
 
-Re-running merges: a label already written is never overwritten. Then:
+**Do this after a `classify` run, not before one.** A label is an answer about one classification. A
+keyword's weight depends on how many companies use the word, so the next run can give the same
+company a different field — and `yes, Handel is right` says nothing about a row that now reads
+`Logistik`.
+
+Re-running merges, and it keeps a label even when the row moved between groups. It never overwrites
+what a person wrote. When the row a label describes **has** changed, that label is marked in the
+`stale` column and `notes` records what it was originally about:
+
+```
+stale  yes
+notes  my note [labelled yes when this was keyword_decided/Handel in run 4d7e5d81c795]
+```
+
+Three things follow from that, and they are the whole point of the column:
+
+1. A stale label is **left out of every number** in the report. Precision from an answer to a
+   question nobody asked is worse than no precision.
+2. The flag is **sticky**. Re-running does not clear it, because re-running has not re-read anything.
+3. **You** clear it: re-read the row, fix `label` if the answer changed, then blank the `stale` cell.
+   That is the only thing that clears it, and it means "I have looked again".
+
+Then:
 
 ```powershell
 python scripts/run_combined_discovery.py classify-labels-report
 ```
+
+Its first lines say which run(s) the labels describe and how many are stale.
 
 ## 7. Optional: the local model, for the ties only
 
