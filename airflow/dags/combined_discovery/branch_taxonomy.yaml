@@ -8,7 +8,10 @@
 # writes elsewhere, so a newly exported sheet can be diffed against this one rather than
 # overwriting the edits and comments below.
 #
-# 77 branches, 572 keyword entries, 527 distinct keywords.
+# 77 branches. The import gave 572 keyword entries and 527 distinct keywords; 26 have since been
+# deleted by hand, each with the measurement in a comment where it used to be, leaving 501. One
+# branch — Handwerk — is deliberately empty, because Berlin's sheet gave it five keywords and not
+# one of them named a craft.
 #
 # Keyed by branch, not by keyword, because a keyword belongs to several branches ("Sensorik" to
 # seven of them) and because a person editing this asks "what belongs to Bahnindustrie?". The
@@ -74,7 +77,12 @@ branches:
       - "Autonomes Fahren"
       - "Konnektivität"
       - "Nachhaltigkeit"
-      - "Transformation"
+      # "Transformation" removed 2026-08-24. It fired on 53 texts and decided 6 companies
+      # for this branch, every one a consultancy with the word in its OWN NAME — zeitgeist
+      # Transformations, TransformIT Europe, Transferagentur Niedersachsen, "Transformation
+      # in Healthcare Services". None sells cars. Worth knowing generally: the page text we
+      # read includes the company's own name in its header, so a generic word in a company
+      # name assigns that company to itself.
       - "Automotive"
       - "Fahrzeugtechnik"
       - "Smart Mobility"
@@ -137,7 +145,12 @@ branches:
       - "Schienenfahrzeuge"
       - "Signaltechnik"
       - "Schieneninfrastruktur"
-      - "Instandhaltung"
+      # "Instandhaltung" removed 2026-08-24. Measured: it fired on 60 of 7,739 texts and produced
+      # 26 of this branch's 29 assignments on its own. Maintenance is what every workshop, facility
+      # manager, machine shop and building service does; it is a chore, not an industry, and none
+      # of the 26 was a railway company. Closing the hyphen hole does not help here — the word
+      # stands alone on those pages, so the count was 26 with the rule on as well. The branch keeps
+      # 28 keywords that do name the railway industry, down to "European Train Control System".
       - "Railway Technology"
       - "Rail Industry"
       - "Railway Engineering"
@@ -194,7 +207,18 @@ branches:
       - "Bioreaktoren"
       - "Bioprozesstechnik"
       - "Zellkultur"
-      - "Skalierung"
+      # "Skalierung" removed 2026-08-24. Scaling up is what every start-up says it is doing. It
+      # decided 5 of this branch's 8 assignments: a talent-recruitment firm (twice), a solar UG and
+      # a "Global Solutions" consultancy. Only one, MycelCore, was plausibly biological. The branch
+      # keeps Fermentation, Bioreaktoren, Bioprozesstechnik and Zellkultur — words with no second
+      # meaning in German.
+      #
+      # Contrast "Clubs" under Musikwirtschaft, which was measured at the same time and KEPT despite
+      # scoring just as badly here (4 assignments: a swing-golf company, a sports club, a frisbee
+      # club, one nightlife publisher). In German a Club is usually a Verein — but in BERLIN, which
+      # is what this list was written for and where the real data comes from, "Clubs" genuinely means
+      # music venues. Deleting it would have been fitting the list to Osnabrück, a town of 14,443
+      # companies being used as a benchmark. "Skalierung" is generic in any city; "Clubs" is not.
 
   "Biotechnologie":
     senweb_unit: "IIIB2"
@@ -312,7 +336,12 @@ branches:
       - "DiGA"
       - "ePA"
       - "Interoperabilität"
-      - "App"
+      # "App" removed 2026-08-24. Measured: it fired on 90 of 7,739 texts — the 6th most common
+      # keyword we have — and produced 11 of this branch's 14 assignments on its own. An app is how
+      # a business reaches its customers, not the field it works in, and every trade has one. It is
+      # also the keyword the hyphen rule hurt most: 171 of its 789 page hits came only from
+      # "Web-App" or "App-Entwicklung". The branch keeps DiGA, ePA, Telemedizin and KI-Diagnostik,
+      # which no company outside digital health writes.
       - "KI-Diagnostik"
 
   "Drohnen":
@@ -327,7 +356,10 @@ branches:
       - "unbemannte Luftfahrt"
       - "Drohnentechnologie"
       - "Luftbildvermessung"
-      - "Inspektion"
+      # "Inspektion" removed 2026-08-24. In Germany an Inspektion is the service interval on
+      # your car. It decided 5 companies for this branch: two car dealerships, a Pkw/Lkw
+      # repair shop, a testing service and a fittings maker. Drones do inspect things, but
+      # "Luftbildvermessung", "Drohnentechnologie" and "unbemannte Luftfahrt" say so.
       - "Sensorik"
       - "Vermessung"
       - "Drohnensicherheit"
@@ -379,8 +411,10 @@ branches:
     berlin_partner: "David Hampel, Jens Woelki, Dorota Thiel-Jankievicz"
     keywords:
       - "Lebensmittelsicherheit"
-      - "Qualitätsmanagement"
-      - "Produktentwicklung"
+      # "Qualitätsmanagement" (35 texts) and "Produktentwicklung" removed 2026-08-24. Every
+      # manufacturer of anything does both. Together they decided 7 companies for this
+      # branch: a shoe company, a skin-testing laboratory, a concept agency, a components
+      # firm. "Lebensmittelsicherheit" and "Rückverfolgbarkeit" stay — those are food words.
       - "Rückverfolgbarkeit"
       - "Nachhaltigkeit"
 
@@ -454,7 +488,11 @@ branches:
       - "Beherbergung"
       - "Bewirtung"
       - "Restaurant"
-      - "Bar"
+      # "Bar" removed 2026-08-24. In German "bar" is how you pay — "bar bezahlen", "bar oder mit
+      # Karte" — and it fired on 41 texts, deciding 9 companies for this branch alone: an insurance
+      # broker, a literature society, a media agency, a foundation. Three letters cannot carry a
+      # branch. "Hotellerie", "Gastronomie", "Beherbergung", "Bewirtung", "Restaurant" and "Café"
+      # all stay, and a real bar's website says at least one of them.
       - "Café"
 
   "Geothermie":
@@ -530,11 +568,26 @@ branches:
     senweb_unit: "IIB2"
     berlin_partner: "nicht bekannt"
     keywords:
-      - "Digitalisierung"
-      - "Nachhaltigkeit"
-      - "Energieeffizienz"
-      - "Angebot Aus- und berufliche Weiterbildung (z.B Meister)"
-      - "Fachkräfte"
+      # EMPTIED 2026-08-24, and this one is not a bad keyword — it is a branch with no usable
+      # keyword at all. Berlin's sheet gave Handwerk five: "Digitalisierung", "Nachhaltigkeit",
+      # "Energieeffizienz", "Fachkräfte" and a sentence about apprenticeships. Not one of them names
+      # a craft. They are the topics a chamber of crafts talks ABOUT, and every company in Germany
+      # writes them.
+      #
+      # Measured: all 26 assignments came from those words — digitalisierung 12, fachkräfte 9,
+      # energieeffizienz 8 — and the companies were an energy co-operative, a dental laboratory
+      # (twice), a document-management firm, a foundation, a metering company and an e-learning
+      # start-up. Zero craft businesses out of 26.
+      #
+      # So the branch is left with nothing rather than filled with noise. A roofer, a joiner or an
+      # electrician is now correctly NONE: we would need words like Dachdecker, Tischlerei,
+      # Elektroinstallation, Sanitär, Malerbetrieb, and Berlin's list does not have them. That is a
+      # gap in the taxonomy for whoever owns it — the same kind as the missing general-software
+      # field — and it is not something the classifier can fix.
+      #
+      # "Nachhaltigkeit" survives elsewhere: Automobilwirtschaft, Ernährungsindustrie and Recycling
+      # also claim it, and removing Handwerk's claim makes it worth more to each of them.
+      []
 
   "Immersive Technologien (VR, AR, XR)":
     senweb_unit: "IIIB1"
@@ -564,7 +617,11 @@ branches:
       - "Kunsthandel"
       - "Kunstbewertung"
       - "Sammlungsmanagement"
-      - "Galerie"
+      # "Galerie" removed 2026-08-24. Measured: 9 of this branch's 11 assignments rested on it
+      # alone. On a German business site "Galerie" is the photo-gallery item in the navigation —
+      # a roofer's finished jobs, a restaurant's dishes — and 24 of the 67 pages carrying the word
+      # only had it as part of "Foto-Galerie" or "Bild-Galerie". The branch keeps Kunsthandel,
+      # Kunstbewertung and Sammlungsmanagement, all three of which name the art trade itself.
 
   "Künstliche Intelligenz":
     senweb_unit: "IIIB1"
@@ -653,7 +710,11 @@ branches:
       - "Werkzeugmaschinen"
       - "Fördertechnik"
       - "Sondermaschinenbau"
-      - "Prozessoptimierung"
+      # "Prozessoptimierung" removed 2026-08-24. It fired on 38 texts and decided 6 companies
+      # here, all management consultancies — ECOVIS Unternehmensberatung, DO! Business
+      # Consulting, Praxis Erfolgskonzept. Optimising a process is advice, not machinery.
+      # "Industrieanlagen" is the counter-example and stays: its 8 companies are Weil
+      # Industrieanlagen, IAB Industrie-Anlagen-Bau, Balsmann Anlagenbau. It names the thing.
       - "Industrie 4.0"
       - "Steuerungstechnik"
 
@@ -676,7 +737,10 @@ branches:
     senweb_unit: "IIB3"
     berlin_partner: "?"
     keywords:
-      - "Eventmanagement"
+      # "Eventmanagement" removed 2026-08-24. It decided 4 of this branch's 5 assignments: an
+      # IT company, a childcare service, a data company and a sausage stall. Every business
+      # that has ever run a summer party writes it. "Standbau" and "Kongressorganisation"
+      # stay — those are the trade itself.
       - "Veranstaltungsort"
       - "Networking"
       - "Standbau"
@@ -748,7 +812,10 @@ branches:
     senweb_unit: "IIB4"
     berlin_partner: "Justina Siegmund-Born"
     keywords:
-      - "Fashion"
+      # "Fashion" removed 2026-08-24. An English word German businesses use as decoration —
+      # "Hair Fashion", "Fashion Store" — it decided 4 of this branch's 6 assignments: a
+      # photo studio, a workwear and uniforms maker, a holding company. "Modedesign" and
+      # "Kollektion" stay, and a fashion label writes at least one of them.
       - "Modedesign"
       - "Kollektion"
 
@@ -759,9 +826,13 @@ branches:
       - "Musikproduktion"
       - "Musikvertrieb"
       - "Künstlermanagement"
-      - "Lizenzierung"
+      # "Lizenzierung" and "Labels" removed 2026-08-24 — 12 of this branch's 20 assignments.
+      # Software is licensed too, so `lizenzierung` decided a travel app, a law firm and two
+      # IT companies. `labels` in German business text is what you stick on a product:
+      # it decided a distributor and a retail group three times over. Exactly one of the
+      # twelve was a music business. "Musikproduktion", "Musikvertrieb", "Musikverlag" and
+      # "Konzertveranstalter" stay, and they cannot mean anything else.
       - "Musikverlag"
-      - "Labels"
       - "Konzertveranstalter"
       - "Clubs"
 
@@ -813,7 +884,11 @@ branches:
       - "Arzneimittel"
       - "Wirkstoff"
       - "klinische Studien"
-      - "Zulassung"
+      # "Zulassung" removed 2026-08-24. In pharma it means getting a drug approved; in ordinary
+      # German it is registering a car, admitting a student or certifying a machine. Measured with
+      # the hyphen rule on, it carried 6 of this branch's 10 assignments alone, and the pages saying
+      # it write "Kfz-Zulassung". The branch keeps Arzneimittel, Wirkstoff, klinische Studien,
+      # Galenik, Generika, Orphan Drugs and Pharmazeutika — seven words nobody else uses.
       - "Galenik"
       - "Generika"
       - "Orphan Drugs"
@@ -907,10 +982,13 @@ branches:
     senweb_unit: "IIIC1"
     berlin_partner: "David Hampel"
     keywords:
-      - "Automatisierung"
+      # "Automatisierung" (50 texts) and "Systemintegration" removed 2026-08-24 — all 7 of
+      # this branch's assignments came from them, and not one company had a robot: four
+      # software firms, an IT consultancy and a Catholic youth charity. Automating a process
+      # and integrating a system are what every software company sells. "Industrieroboter"
+      # and "Cobots" stay, and a robotics company writes one of them.
       - "Industrieroboter"
       - "Cobots"
-      - "Systemintegration"
       - "Sensorik"
 
   "Rundfunkwirtschaft":
@@ -944,10 +1022,16 @@ branches:
       - "Gemeinwohl"
       - "Soziale Innovation"
       - "Impact"
-      - "Wirkung"
+      # "Wirkung" removed 2026-08-24. It fired on 90 of 7,739 texts, level with "app". Berlin's
+      # sheet plainly meant it as the German for "impact", but on a business page it is the ordinary
+      # word for "effect" — the effect of a cream, a fertiliser, an advert. Same class as the
+      # "Sicherheit" deletion under Defence Tech: it names a quality, not an industry.
       - "Inklusion"
       - "Verantwortungseigentum"
-      - "Fair"
+      # "Fair" removed 2026-08-24. It fired on 44 texts, and in German it is an adjective every
+      # business applies to itself — "faire Preise", "ein fairer Partner". In English it is also a
+      # trade fair, which is a different branch entirely. "Impact" and "Gemeinwohl" stay: those are
+      # terms of art, and a company writing them has chosen to.
       - "Kollektiv"
 
   "Stromnetz":
@@ -995,8 +1079,14 @@ branches:
     berlin_partner: "Wolfgang Korek"
     keywords:
       - "Elektrolyseur"
-      - "Netz"
-      - "Speicher"
+      # "Netz" and "Speicher" removed 2026-08-24, and they were 19 of this branch's 22
+      # assignments. "Im Netz finden Sie uns" is how a German company says "we are online",
+      # so `netz` decided: Terre des Hommes (a children's charity), a car-parts dealer, a
+      # vehicle-valuation firm, an office-supplies wholesaler, a theatre-education workshop.
+      # `speicher` is any storage — data, water, a warehouse — and decided a crypto UG, a
+      # body-care UG and the same theatre workshop. Hydrogen storage is a real thing, and
+      # these words are not how a company says it. "Elektrolyseur" stays: nobody writes it
+      # by accident, and it is the one word here that only this industry uses.
 
   "Wassertechnologien":
     senweb_unit: "IIIA4"
@@ -1029,7 +1119,13 @@ branches:
       - "Performance Marketing"
       - "Content-Kreation"
       - "Branding"
-      - "Social Media"
+      # "Social Media" removed 2026-08-24. It fired on 132 of 7,739 texts — the second most common
+      # keyword we have — and decided 24 companies for this branch on its own. Read those 24: a
+      # sports club, a firm of solicitors, a Caritas care service, a circus association, a landscape
+      # gardener, a furniture shop. Exactly one was an advertising business. Every German company
+      # links its Instagram in the footer, so the words say nothing about what the company sells.
+      # This costs the genuine agencies too — it also supported 29 assignments in other branches —
+      # and it is still worth it at 1 right in 12. The branch keeps four words only the trade uses.
 
   "Windenergie":
     senweb_unit: "IIIA4"
