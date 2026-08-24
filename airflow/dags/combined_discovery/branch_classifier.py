@@ -338,20 +338,31 @@ def classify(
     rather than an inference from marketing copy. When it maps to nothing, the words get their turn;
     when it maps explicitly to "no branch", that IS the answer and the words are not consulted — a
     holding company whose page happens to say "Nachhaltigkeit" is still a holding company.
+
+    **The words are scored even when the WZ code has already won**, and the ranking is carried on the
+    answer. It costs nothing — the keywords were matched before this function was called — and it is
+    the only way to see where the register and the website disagree. Returning early instead makes
+    that count structurally zero, which reads like agreement and is really an unasked question. Those
+    rows are what decides how hard the eventual resolution rule has to be.
     """
     keywords_by_source = dict(keywords_by_source or {})
+    ranked = (
+        score_branches(keywords_by_source, taxonomy, df, n_companies)
+        if keywords_by_source else []
+    )
+    from_words = [(b, round(s, 3)) for b, s in ranked]
 
     if wz_map is not None:
         mapped, branch, prefix = wz_map.lookup(wz_code)
         if mapped and branch:
             return Assignment(
                 outcome="assigned", branch=branch, decided_by="wz", wz_prefix=prefix,
-                keywords=keywords_by_source,
+                keywords=keywords_by_source, ranked=from_words,
             )
         if mapped:
             return Assignment(
                 outcome="no_branch_applies", decided_by="wz", wz_prefix=prefix,
-                keywords=keywords_by_source,
+                keywords=keywords_by_source, ranked=from_words,
             )
 
     if not had_text:
@@ -359,7 +370,6 @@ def classify(
     if not keywords_by_source:
         return Assignment(outcome="no_keyword")
 
-    ranked = score_branches(keywords_by_source, taxonomy, df, n_companies)
     if not ranked:
         # Every keyword that fired is used by so many companies that its weight rounded to nothing.
         # That is "no usable keyword", not "no keyword" — but it is not an answer either.
@@ -373,7 +383,7 @@ def classify(
         "score": round(best_score, 3),
         "runner_up": second,
         "runner_up_score": round(second_score, 3),
-        "ranked": [(b, round(s, 3)) for b, s in ranked],
+        "ranked": from_words,
         "keywords": keywords_by_source,
     }
     if clear:

@@ -23,6 +23,7 @@ Where things live:
 |---|---|
 | Berlin's branch list | `airflow/dags/combined_discovery/branch_taxonomy.yaml` |
 | WZ code → branch | `airflow/dags/combined_discovery/wz_to_branch.yaml` |
+| what every WZ code means | `airflow/dags/combined_discovery/wz_titles.yaml` (2,008 codes) |
 | the matcher | `airflow/dags/combined_discovery/branch_classifier.py` |
 | fetching better pages | `airflow/dags/combined_discovery/content_pages.py` |
 | the optional tie-break | `airflow/dags/combined_discovery/branch_llm.py` |
@@ -77,9 +78,34 @@ Writing `null` records that as a decision. Leaving it blank invites somebody to 
 companies under Finanzwirtschaft to make a coverage number look better.
 
 Only **3 of the 78** rows in Berlin's sheet even hint at a WZ code, so nothing can be converted
-automatically. `scripts/wz_branch_worksheet.py write` prints the 100 codes with company counts and
-three example names each, for a person to fill in; `apply` reads it back and refuses to write a
-branch name that is not in the taxonomy.
+automatically. `scripts/wz_branch_worksheet.py write` prints the 100 codes with company counts,
+three example names, and — the column that makes the sheet fillable — **the official title of the
+code**. Deciding whether *Unternehmensberatung* is a branch is a judgement; deciding whether
+*70.20.0* is one is a lookup. `apply` reads the sheet back and refuses any branch name that is not
+in the taxonomy, so a typo cannot reach the mapping.
+
+**Our codes are WZ 2025, not WZ 2008.** All 100 of the most common ones match the 2025 edition
+*exactly*, including three-suffix codes like `70.10.4` and `62.10.9` that the 2008 edition does not
+contain at all. Anybody mapping these against a 2008 table will mismatch silently, which is the
+worst way to be wrong. The official titles are checked in at
+`airflow/dags/combined_discovery/wz_titles.yaml` — **2,008 codes, grouped by section, editable by
+hand**, so nothing in the repo depends on a spreadsheet sitting in somebody's Downloads folder.
+`wz_branch_worksheet.py titles <xlsx>` rebuilds it, which is needed once per WZ edition rather than
+once per run. The .xlsx itself stays out of the repo: a 75 KB binary cannot be reviewed in a pull
+request, and a YAML file can.
+
+### The gap the mapping refuses to paper over
+
+Seven codes were left **deliberately blank** rather than mapped or marked `none`:
+
+| codes | companies | why |
+|---|---|---|
+| `62.10`, `62.10.9`, `62.20.1`, `62.90.0` | ~250 | Programmierung and IT-Beratung. Berlin's list has *Künstliche Intelligenz*, *Games*, *FinTech*, *GovTech*, *Cybersicherheit* — and **no general software branch at all** |
+| `35.11`, `35.11.1`, `35.11.2` | ~230 | Elektrizitätserzeugung aus **nicht erneuerbaren** Energieträgern. The list has Solarenergie, Windenergie, Fernwärme and no conventional generation |
+
+Blank means `apply` skips them and they fall through to the keyword path. `none` would have claimed
+Berlin's list is complete, and a forced branch would have been wrong for 480 companies. The gap is
+the finding, and it belongs to whoever owns the taxonomy.
 
 ### Stage B0 — get the right pages first
 
@@ -152,24 +178,46 @@ This is the same rule the repo already follows twice — `name_frequency.common_
 company names instead of listing them, and `common_email_domains` counts mail providers instead of
 listing them. Genericness is measured, never hand-written.
 
-**Not deciding is an answer, and there are five of them.** From the full run:
+**Not deciding is an answer, and there are five of them.** From the full run, with the WZ mapping in
+place:
 
 | | | |
 |---|---|---|
-| `assigned` | 974 | one branch cleared the floor and beat the runner-up |
-| `torn` | 400 | keywords fired, two branches too close to separate |
-| `no_keyword` | 6,365 | we read text and not one keyword appeared |
-| `no_text` | 6,704 | we had nothing to read |
-| `no_branch_applies` | 0 so far | the WZ code says holding company. Needs Stage A filled in |
+| `assigned` | **3,118** (21.6%) | 2,632 of them by the WZ code, 486 by the words |
+| `no_branch_applies` | **3,151** (21.8%) | the register says holding company or association |
+| `torn` | 167 | keywords fired, two branches too close to separate |
+| `no_keyword` | 2,607 | we read text and not one keyword appeared |
+| `no_text` | 5,400 | we had nothing to read |
+
+So **6,269 of 14,443 companies (43%) now have a definite answer**, against 974 (6.7%) before Stage A
+existed. The WZ code is doing 84% of the assigning.
 
 **Never add any two of those together.** `no_text` is not evidence that a company has no industry,
 and `no_branch_applies` is an answer rather than a gap. This is the same distinction the website side
 draws between `no_result` and `never_tried`, for the same reason: collapsing them turns a blank into
 a claim.
 
-Where the keywords came from, counting hits on assigned companies: `purpose` 722, `services` 566,
-`homepage` 320, `imprint` 72. The register's own description of the business is the single most
-productive source, and it costs one SQL query.
+Where the keywords came from, counting hits on assigned companies: `purpose` 396, `services` 188,
+`homepage` 108, `imprint` 22. The register's own description of the business is the most productive
+text source, and it costs one SQL query. Those numbers are *lower* than before Stage A existed
+(722/566/320/72) for a good reason: the WZ code now answers first for most of those companies, so
+the words are only asked where the register was silent.
+
+### Where the register and the website disagree
+
+**361 companies.** The report prints them because they are the interesting rows, and reading them
+says which source to trust:
+
+| company | WZ code says | the words say |
+|---|---|---|
+| Elektro Horstmann | Handwerk | Nachhaltige Wirtschaft |
+| Echterhoff Holding | Bauindustrie | Soziale Unternehmen |
+| HI Nord Planungsgesellschaft | Freiberufler | Wassertechnologien |
+| CoffeeLogX | Handel | Gastgewerbe |
+
+In most of these the register is plainly right, which is the evidence behind putting the WZ code
+first. It is also the size of the job when branch eventually becomes a real field: the coordinator
+will need a rule for 361 rows out of 14,443, not for thousands.
 
 ### Stage C — a local model, only for the ties
 
@@ -234,6 +282,7 @@ python scripts/check_combined_discovery.py
 Stage A, once, with a person in the middle:
 
 ```powershell
+python scripts/wz_branch_worksheet.py titles path/to/gliederung-klassifikation-wz.xlsx
 python scripts/wz_branch_worksheet.py write --top 100
 # fill in the `branch` column of airflow/data/combined_discovery/wz_branch_todo.csv
 python scripts/wz_branch_worksheet.py apply
@@ -265,7 +314,9 @@ python scripts/run_combined_discovery.py classify --source page --llm
 ## What is not known yet
 
 **Nobody has checked whether any of this is right.** Every number above counts what happened. Not one
-says whether the branch is correct, because that needs a human looking at companies:
+says whether the branch is correct, because that needs a human looking at companies. That matters more
+now than before: 2,632 of the 3,118 assignments come from a WZ mapping whose first draft was written
+in one pass, so the `wz_decided` bucket is the one to read first:
 
 ```powershell
 python scripts/run_combined_discovery.py classify-labels        # 40 rows, six groups

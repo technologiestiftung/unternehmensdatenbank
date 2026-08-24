@@ -1,0 +1,114 @@
+# WZ code -> branch. The cheapest industry signal in this repo.
+#
+# A WZ code is the official German industry code (Klassifikation der Wirtschaftszweige): "56.1" is
+# restaurants, "62.10.9" software, "64.2" holding companies. It is already in public.companies for
+# 8,483 companies, so this mapping costs one SQL query and no downloads — and it reaches the 1,943
+# companies that have no describing text at all.
+#
+# Generated from airflow/data/combined_discovery/wz_branch_todo.csv by
+# scripts/wz_branch_worksheet.py apply. Edit the worksheet and re-run rather than editing here, or
+# the next `apply` overwrites your change.
+#
+# MATCHED BY LONGEST PREFIX. Our codes arrive at three different depths — "64.2", "64.21", "94.99"
+# and "94.99.9" all occur — so a company's "94.99.9" matches the entry for "94.99" when there is no
+# more specific one. A flat exact-match table would miss most of the table.
+#
+# `null` means NO BRANCH APPLIES: the company really is a holding company or a housing association,
+# and Berlin's list, built for a technology economy, has no home for it. That is a real answer and
+# is reported separately from "we could not tell" — collapsing the two is how a blank turns into a
+# fact.
+
+mappings:
+  "64.2": null  # 508 companies — Beteiligungsgesellschaften - a shell that owns shares is not an industry
+  "94.99": null  # 383 companies — Interessenvertretungen und Vereinigungen
+  "68.32": null  # 369 companies — Verwaltung von Grundstuecken fuer Dritte
+  "64.21": null  # 329 companies — Beteiligungsgesellschaften
+  "68.20": null  # 189 companies — Vermietung eigener Grundstuecke
+  "70.10.4": null  # 187 companies — Sonstige Verwaltung und Fuehrung von Unternehmen
+  "70.20.0": "Dienstleistung"  # 162 companies — Unternehmensberatung
+  "94.99.9": null  # 130 companies — Alle anderen Interessenvertretungen
+  "68.31": null  # 94 companies — Vermittlung von Grundstuecken
+  "56.1": "Gastgewerbe"  # 87 companies — Restaurants, Gaststaetten, Imbissstuben
+  "73.11.0": "Werbemarkt"  # 87 companies — Werbeagenturen
+  "66.19.9": null  # 74 companies — Mit Finanzdienstleistungen verbundene Taetigkeiten
+  "46.73": "Automobilwirtschaft"  # 73 companies — Grosshandel mit Kraftraedern und -zubehoer
+  "43.22.0": "Handwerk"  # 65 companies — Gas-, Wasser-, Heizungsinstallation
+  "43.99.9": "Bauindustrie"  # 63 companies — Alle anderen spezialisierten Bautaetigkeiten
+  "69.20": "Freiberufler"  # 63 companies — Wirtschaftspruefung und Steuerberatung
+  "41.00": "Bauindustrie"  # 61 companies — Hochbau
+  "94.99.2": null  # 61 companies — Organisationen der Kultur - an association, not the Kunstmarkt
+  "47.81.1": "Automobilwirtschaft"  # 58 companies — Einzelhandel mit Kraftwagen bis 3,5 t
+  "49.41.0": "Logistik"  # 57 companies — Gueterbefoerderung im Strassenverkehr
+  "68.1": null  # 57 companies — Kauf und Verkauf eigener Grundstuecke
+  "85.59": null  # 57 companies — Sonstiger Unterricht - Berlin's list has no education branch
+  "68": null  # 56 companies — Grundstuecks- und Wohnungswesen
+  "70.10.1": null  # 56 companies — Managementtaetigkeiten von Holdinggesellschaften
+  "62.10.1": "Designwirtschaft"  # 55 companies — Entwicklung von Internetpraesentationen - web agencies, CHECK
+  "93.19": null  # 54 companies — Dienstleistungen des Sports
+  "56.11.1": "Gastgewerbe"  # 53 companies — Restaurants mit Bedienung
+  "47.78": "Handel"  # 50 companies — Einzelhandel mit sonstigen Neuwaren
+  "66.19": null  # 49 companies — Mit Finanzdienstleistungen verbundene Taetigkeiten
+  "88.99": "Soziale Unternehmen"  # 49 companies — Sonstiges Sozialwesen
+  "63.1": "Rechenzentrenbetreiber"  # 48 companies — Datenverarbeitung, Hosting
+  "70.10": null  # 48 companies — Verwaltung und Fuehrung von Unternehmen
+  "52.26.1": "Logistik"  # 45 companies — Speditionen
+  "71.12": "Freiberufler"  # 45 companies — Ingenieurbueros
+  "82.99.9": "Dienstleistung"  # 44 companies — Alle anderen wirtschaftlichen Dienstleistungen
+  "47.71": "Modewirtschaft"  # 43 companies — Einzelhandel mit Bekleidung
+  "69.10": "Freiberufler"  # 43 companies — Rechtsberatung
+  "68.31.1": null  # 41 companies — Vermittlung von Wohngrundstuecken
+  "70.2": "Dienstleistung"  # 39 companies — Unternehmensberatung
+  "41.00.1": "Bauindustrie"  # 38 companies — Bau von Gebaeuden
+  "43.99": "Bauindustrie"  # 37 companies — Sonstige spezialisierte Bautaetigkeiten
+  "47.75": "Handel"  # 36 companies — Einzelhandel mit kosmetischen Erzeugnissen
+  "47.81": "Automobilwirtschaft"  # 36 companies — Einzelhandel mit Kraftwagen
+  "64.21.0": null  # 36 companies — Beteiligungsgesellschaften
+  "87.30": "Gesundheitsversorgung & Pflege"  # 36 companies — Seniorenwohnheime und Wohnheime
+  "69.20.2": "Freiberufler"  # 35 companies — Praxen von Steuerberatern
+  "43.21.0": "Handwerk"  # 34 companies — Elektroinstallation
+  "64.99": null  # 34 companies — Sonstige Finanzdienstleistungen - not FinTech, just finance
+  "66.22": null  # 32 companies — Versicherungsvermittlung - Berlin's list has FinTech but no insurance
+  "96.21.0": "Handwerk"  # 32 companies — Frisier- und Barbiersalons
+  "71.12.2": "Freiberufler"  # 31 companies — Ingenieurbueros fuer Tragwerksplanung
+  "94.91.0": null  # 31 companies — Kirchliche und religioese Vereinigungen
+  "81.21.0": "Dienstleistung"  # 29 companies — Allgemeine Gebaeudereinigung
+  "66.22.1": null  # 28 companies — Versicherungsmakler
+  "43.34": "Handwerk"  # 27 companies — Malerei und Glaserei
+  "71.11": "Architekturmarkt"  # 27 companies — Architekturbueros
+  "78.20": "Dienstleistung"  # 27 companies — Ueberlassung von Arbeitskraeften
+  "81.22": "Dienstleistung"  # 27 companies — Spezielle Reinigung von Gebaeuden
+  "81.30": "Handwerk"  # 27 companies — Garten- und Landschaftsbau
+  "86.9": "Gesundheitsversorgung & Pflege"  # 27 companies — Sonstiges Gesundheitswesen
+  "28.29": "Maschinen- und Anlagenbau"  # 25 companies — Herstellung von sonstigen Maschinen
+  "46.90": "Handel"  # 25 companies — Grosshandel ohne ausgepraegten Schwerpunkt
+  "47.91": "Handel"  # 25 companies — Vermittlungstaetigkeiten fuer den Einzelhandel
+  "43.21": "Handwerk"  # 24 companies — Elektroinstallation
+  "68.32.1": null  # 24 companies — Verwaltung von Wohngrundstuecken fuer Dritte
+  "73.11": "Werbemarkt"  # 24 companies — Werbeagenturen
+  "64.31.0": null  # 23 companies — Investmentfonds
+  "18.12": "Papier- und Druckindustrie"  # 22 companies — Sonstiges Drucken
+  "46.7": "Automobilwirtschaft"  # 22 companies — Grosshandel mit Kraftwagen und Kraftraedern
+  "86.10": "Gesundheitsversorgung & Pflege"  # 22 companies — Krankenhaeuser
+  "32.50": "Medizintechnik"  # 21 companies — Medizinische und zahnmedizinische Apparate
+  "43.22": "Handwerk"  # 21 companies — Gas-, Wasser-, Heizungsinstallation
+  "55.10": "Gastgewerbe"  # 21 companies — Hotels, Gasthoefe, Pensionen - accommodation is Gastgewerbe in WZ
+  "61.90.9": "Telekommunikationsanbieter"  # 21 companies — Sonstige Telekommunikation
+  "71.12.1": "Freiberufler"  # 21 companies — Ingenieurbueros fuer bautechnische Gesamtplanung
+  "93.29": null  # 21 companies — Unterhaltung und Erholung a. n. g.
+  "47.71.0": "Modewirtschaft"  # 20 companies — Einzelhandel mit Bekleidung
+  "95.31.3": "Automobilwirtschaft"  # 20 companies — Instandhaltung und Reparatur von Kraftwagen
+  "25.12": "Metallindustrie"  # 19 companies — Ausbauelemente aus Metall
+  "46.43.2": "Handel"  # 19 companies — Grosshandel mit elektrischen Haushaltsgeraeten
+  "49.41": "Logistik"  # 19 companies — Gueterbefoerderung im Strassenverkehr
+  "69.20.1": "Freiberufler"  # 19 companies — Praxen von Wirtschaftspruefern
+  "85.59.2": null  # 19 companies — Berufliche Erwachsenenbildung - no education branch
+  "43.33.0": "Handwerk"  # 18 companies — Fussboden-, Fliesen- und Plattenlegerei
+  "82.30": "Messe- und Kongresswirtschaft"  # 18 companies — Messe-, Kongress- und Business-Event-Veranstalter
+  "52.26.9": "Logistik"  # 17 companies — Sonstige Dienstleistungen fuer den Verkehr
+  "56.11.3": "Gastgewerbe"  # 17 companies — Imbissstuben
+  "60.39.3": "Pressemarkt"  # 17 companies — Verbreitung von Medieninhalten ueber Blogs
+  "64.3": null  # 17 companies — Treuhand- und sonstige Fonds
+  "68.11": null  # 17 companies — Kauf und Verkauf eigener Grundstuecke
+  "77.11.1": "Automobilwirtschaft"  # 17 companies — Vermietung von Kraftwagen - could be Neue Mobilitaetsangebote, CHECK
+  "78.10.0": "Dienstleistung"  # 17 companies — Vermittlung von Arbeitskraeften
+  "29.32.0": "Automobilwirtschaft"  # 16 companies — Herstellung von Teilen und Zubehoer fuer Kraftwagen

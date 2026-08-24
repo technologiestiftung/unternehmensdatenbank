@@ -157,7 +157,10 @@ python scripts/run_combined_discovery.py classify --source wz,page,purpose
 python scripts/run_combined_discovery.py classify-report
 ```
 
-1. **The WZ code answers first.** It is deterministic, free, and it reaches the **1,943** companies
+1. **The WZ code answers first, and it does 84% of the work.** With 93 codes mapped: **3,118**
+   companies assigned and **3,151** told "no branch applies" — 6,269 of 14,443 answered, against 974
+   from keywords alone. The codes are **WZ 2025**, not 2008; official titles are checked in at
+   `combined_discovery/wz_titles.yaml` (2,008 codes), so nothing depends on the spreadsheet. It is deterministic, free, and it reaches the **1,943** companies
    that have a code and no describing text at all. `null` in `wz_to_branch.yaml` means "no branch
    applies" — holding companies and landlords genuinely have none, and that is an answer, not a gap.
 2. **Both lists are YAML, not tables.** They are edited by hand and need comments; a table would mean
@@ -173,7 +176,12 @@ python scripts/run_combined_discovery.py classify-report
 6. **`classify` makes zero web requests** and takes two minutes over all 14,443 companies. That is
    what makes arguing with the taxonomy cheap; `fetch-content` is the only part that downloads.
 
-Not yet known: **whether any of it is right.** 974 companies have a branch and no row is hand-checked.
+Where the register and the website disagree: **361 companies**, printed by `classify-report`. Reading
+them, the register is usually right — which is both why it goes first and the size of the eventual
+resolution rule.
+
+Not yet known: **whether any of it is right.** 3,118 companies have a branch and no row is
+hand-checked, and 2,632 of those rest on a WZ mapping drafted in one pass.
 `classify-labels` writes the 40-row worksheet; only `classify-labels-report` says anything about
 precision.
 

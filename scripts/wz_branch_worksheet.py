@@ -61,12 +61,25 @@ WORKSHEET_PATH = OUT_DIR / "wz_branch_todo.csv"
 MAP_PATH = DAGS_DIR / "combined_discovery" / "wz_to_branch.yaml"
 TAXONOMY_PATH = DAGS_DIR / "combined_discovery" / "branch_taxonomy.yaml"
 
+#: The official name of every WZ code, so the worksheet asks "is *Unternehmensberatung* a branch?"
+#: rather than "is *70.20.0* a branch?".
+#:
+#: **Checked into the repo**, so nothing here depends on a spreadsheet in somebody's Downloads
+#: folder. YAML rather than CSV for the same reasons the other two lists are YAML: it is editable by
+#: hand, a changed title is one changed line in a diff, and it takes a comment — which matters when
+#: a code's official name is unhelpfully vague and somebody wants to write down what it covers here.
+#: The `titles` subcommand rebuilds it, and is needed once per WZ edition, not once per run.
+TITLES_PATH = DAGS_DIR / "combined_discovery" / "wz_titles.yaml"
+
 #: The value that means "this industry has no branch in Berlin's list". Spelled out rather than left
 #: blank, because a blank cell is indistinguishable from an unanswered row.
 NO_BRANCH = "none"
 
 COLUMNS = [
     "wz_code",
+    # What the code officially means, from the Statistisches Bundesamt. This is the column that
+    # makes the sheet fillable: "Unternehmensberatung" is a decision, "70.20.0" is a lookup.
+    "wz_title",
     "companies",
     "example_1",
     "example_2",
@@ -101,6 +114,111 @@ def load_codes() -> list[dict[str, Any]]:
     return [{"wz_code": r[0], "companies": r[1], "examples": list(r[2] or [])} for r in rows]
 
 
+TITLES_HEADER = """\
+# The official name of every WZ code — the German industry classification.
+#
+# WZ stands for Klassifikation der Wirtschaftszweige. A code names an industry: "56.1" is
+# restaurants, "62.10.9" software development, "64.2" holding companies. `public.companies` carries
+# one for 8,483 of 14,443 companies, courtesy of the Northdata export, and `wz_to_branch.yaml` maps
+# those codes onto Berlin's branches. This file is what makes that mapping readable: deciding
+# whether *Unternehmensberatung* is a branch is a judgement, deciding whether *70.20.0* is one is a
+# lookup nobody should have to do.
+#
+# THIS EDITION IS WZ 2025. All 100 of the most common codes in our table match it exactly, including
+# codes like "70.10.4" and "62.10.9" that WZ 2008 does not contain at all. Anyone checking these
+# against a 2008 table will mismatch silently, which is the worst way to be wrong.
+#
+# Checked in on purpose, so nothing depends on a spreadsheet in somebody's Downloads folder. Source:
+# Statistisches Bundesamt, "Gliederung der Klassifikation der Wirtschaftszweige", rebuilt with
+#
+#     python scripts/wz_branch_worksheet.py titles <the .xlsx>
+#
+# which is needed once per WZ edition, not once per run. Edit this file by hand in between — a
+# clearer wording for a vague official title is an improvement, and a comment explaining what a code
+# actually covers in practice is worth more here than anywhere else.
+#
+# The level of a code is its shape, so it is not stored: a letter is a section, two digits a
+# division, "nn.n" a group, "nn.nn" a class, "nn.nn.n" the German sub-class.
+#
+# {count} codes.
+"""
+
+
+def import_titles(xlsx_path: Path) -> None:
+    """Convert the government's WZ spreadsheet into the checked-in YAML of code -> official name.
+
+    Converted rather than read directly for two reasons: nobody else has the file in their Downloads
+    folder, and a 75 KB binary cannot be reviewed in a pull request while a text file can.
+
+    Needs `openpyxl`, which is deliberately not in `airflow/requirements.txt` — this runs once per
+    WZ edition, on a laptop, and nothing in the pipeline imports it.
+    """
+    import openpyxl
+
+    workbook = openpyxl.load_workbook(xlsx_path, read_only=True, data_only=True)
+    sheet = next((workbook[name] for name in workbook.sheetnames if "Struktur" in name), None)
+    if sheet is None:
+        raise SystemExit(
+            f"{xlsx_path.name} has no sheet with 'Struktur' in its name.\n"
+            f"Found: {workbook.sheetnames}"
+        )
+
+    def quote(value: str) -> str:
+        return '"' + value.replace("\\", "\\\\").replace('"', '\\"') + '"'
+
+    lines: list[str] = []
+    count = 0
+    for level, code, title in sheet.iter_rows(values_only=True):
+        if not code or str(code).strip().lower() == "code":
+            continue
+        code, title = str(code).strip(), str(title or "").strip()
+        # A section is a single letter and a heading rather than a code any company carries. Kept as
+        # a comment: it is what makes the file readable top to bottom instead of being 2,000 rows.
+        if str(level or "").strip() == "1" or (len(code) == 1 and code.isalpha()):
+            lines.append(f"\n  # ---- {code}  {title} ".rstrip() + " ----")
+            continue
+        lines.append(f"  {quote(code)}: {quote(title)}")
+        count += 1
+    if not count:
+        raise SystemExit(f"no codes found in {xlsx_path.name}")
+
+    TITLES_PATH.parent.mkdir(parents=True, exist_ok=True)
+    TITLES_PATH.write_text(
+        TITLES_HEADER.format(count=count) + "\ncodes:\n" + "\n".join(lines) + "\n",
+        encoding="utf-8",
+    )
+    print(f"Wrote {count} codes to {TITLES_PATH}")
+    print(f"  source: {xlsx_path}")
+    print("  this file is checked in — nothing else needs the spreadsheet again")
+
+
+def load_titles() -> dict[str, str]:
+    """WZ code -> its official name. Empty only if the checked-in file has been removed."""
+    import yaml
+
+    if not TITLES_PATH.exists():
+        log.warning("no %s; run `titles <xlsx>` to rebuild it", TITLES_PATH.name)
+        return {}
+    data = yaml.safe_load(TITLES_PATH.read_text(encoding="utf-8")) or {}
+    return {str(k).strip(): str(v).strip() for k, v in (data.get("codes") or {}).items()}
+
+
+def title_for(code: str, titles: dict[str, str]) -> str:
+    """The official name of a code, falling back to its nearest shorter prefix.
+
+    A company can carry a code more specific than the edition we have. `94.99.9` resolves exactly,
+    but if it did not, `94.99` still says what kind of business it is — and a slightly broader
+    label is far better than an empty cell in a sheet somebody has to fill in.
+    """
+    if code in titles:
+        return titles[code]
+    best = ""
+    for prefix in titles:
+        if code.startswith(prefix) and len(prefix) > len(best):
+            best = prefix
+    return f"~ {titles[best]}" if best else ""
+
+
 def load_branch_names() -> set[str]:
     """Every branch name the taxonomy knows, so a typo in the worksheet fails loudly."""
     import yaml
@@ -125,6 +243,7 @@ def write(top: int) -> None:
     written against it stays in the file: the work is the human's, not this script's.
     """
     codes = load_codes()
+    titles = load_titles()
     existing = read_worksheet()
     decided = sum(1 for row in existing.values() if (row.get("branch") or "").strip())
     if existing:
@@ -143,6 +262,7 @@ def write(top: int) -> None:
         out.append(
             {
                 "wz_code": code["wz_code"],
+                "wz_title": title_for(code["wz_code"], titles),
                 "companies": code["companies"],
                 "example_1": examples[0],
                 "example_2": examples[1],
@@ -254,6 +374,11 @@ def render(rows: list[dict[str, Any]]) -> str:
 def main() -> int:
     parser = argparse.ArgumentParser(description="WZ code to branch, with a human in the middle.")
     sub = parser.add_subparsers(dest="command", required=True)
+    p_titles = sub.add_parser(
+        "titles", help="convert the government's WZ spreadsheet into the checked-in wz_titles.csv"
+    )
+    p_titles.add_argument("xlsx_path", type=Path,
+                          help="the Statistisches Bundesamt 'Gliederung der Klassifikation' .xlsx")
     p_write = sub.add_parser("write", help="write the worksheet (merges with what is decided)")
     p_write.add_argument(
         "--top", type=int, default=100,
@@ -262,7 +387,9 @@ def main() -> int:
     sub.add_parser("apply", help="read the worksheet back and write wz_to_branch.yaml")
 
     args = parser.parse_args()
-    if args.command == "write":
+    if args.command == "titles":
+        import_titles(args.xlsx_path)
+    elif args.command == "write":
         write(args.top)
     else:
         apply()

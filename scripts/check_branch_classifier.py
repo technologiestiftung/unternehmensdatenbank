@@ -154,6 +154,17 @@ def main() -> int:
     check("the WZ code answers without any text", restaurant.branch, "Gastgewerbe")
     check("...and says so", restaurant.decided_by, "wz")
 
+    # A WZ answer still carries what the words said, or "the register and the website disagree" is a
+    # number that can never be anything but zero — which reads as agreement and is really an
+    # unasked question.
+    both = bc.classify(
+        taxonomy=taxonomy, df={"schienenfahrzeuge": 3}, n_companies=860, wz_code="56.1", wz_map=wz,
+        keywords_by_source={"schienenfahrzeuge": "homepage"}, had_text=True,
+    )
+    check("a WZ answer keeps the keyword ranking", bool(both.ranked), True)
+    check("...and it can disagree with the code", both.ranked[0][0], "Bahnindustrie")
+    check("...while the code still decides", both.branch, "Gastgewerbe")
+
     # -------------------------------------------------------------------------------------
     section("not deciding: four different answers, never added together")
     # -------------------------------------------------------------------------------------
