@@ -43,7 +43,7 @@ import time
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import asdict
 from pathlib import Path
-from typing import Any
+from typing import Any, Mapping
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 DAGS_DIR = REPO_ROOT / "airflow" / "dags"
@@ -1190,6 +1190,51 @@ def company_texts(
     return {name: text for name, text in texts.items() if text}
 
 
+#: How much text to show either side of a matched keyword in the labelling worksheet. Wide enough
+#: for the sentence, narrow enough that 40 of them fit in a spreadsheet column.
+EVIDENCE_WIDTH = int(os.getenv("BRANCH_EVIDENCE_WIDTH", "110"))
+
+
+def evidence_snippets(
+    texts: dict[str, str], keywords_by_source: dict[str, str], taxonomy: Any
+) -> tuple[dict[str, str], str]:
+    """The company's own words around each keyword that fired, plus a fallback snippet.
+
+    This exists for one reason: a person labelling 40 rows should not have to open 40 websites. The
+    question "is `Handel` right for this company?" is usually answerable from the sentence the word
+    appeared in — and when it is not, that is itself worth knowing, because it means the keyword fired
+    on something incidental.
+
+    Returns `(keyword -> snippet, fallback)`. The fallback is the start of the most specific text we
+    read, and it is what a `no_keyword` row gets: "here is what the company says about itself, and
+    none of Berlin's 527 words appeared in it" is a claim a human can check in seconds.
+
+    Snippets come from the NORMALISED text, so offsets line up with the patterns that matched. That
+    also means the reader sees lower case and collapsed whitespace — fine for judging meaning.
+    """
+    from combined_discovery import branch_classifier as bc
+
+    normalised = {source: bc.normalize(text) for source, text in texts.items()}
+    snippets: dict[str, str] = {}
+    for keyword, source in keywords_by_source.items():
+        pattern = taxonomy.patterns.get(keyword)
+        text = normalised.get(source) or ""
+        match = pattern.search(text) if (pattern and text) else None
+        if not match:
+            continue
+        start = max(0, match.start() - EVIDENCE_WIDTH)
+        end = min(len(text), match.end() + EVIDENCE_WIDTH)
+        snippets[keyword] = f"…{text[start:end]}…" if start or end < len(text) else text
+
+    fallback = ""
+    for source in SOURCE_ORDER:
+        if normalised.get(source):
+            fallback = normalised[source][: EVIDENCE_WIDTH * 2].strip()
+            fallback = f"[{source}] {fallback}…"
+            break
+    return snippets, fallback
+
+
 def keywords_with_source(texts: dict[str, str], taxonomy: Any) -> dict[str, str]:
     """Keyword -> the source it was first found in, most specific source first.
 
@@ -1264,7 +1309,11 @@ def fetch_content(limit: int | None, workers: int) -> None:
         list(pool.map(one, rows))
 
     for row in rows:
-        index = page_cache.get("content-index", row["website"])
+        # Same key `content_pages.content_for` wrote: the selection rules are part of it, so this
+        # count follows the caps and the category patterns instead of reporting a stale choice.
+        index = page_cache.get(
+            "content-index", f"{content_pages.selection_version()}|{row['website']}"
+        )
         found_links += len(((index or {}).get("links")) or [])
 
     print(f"\n{'companies in scope':<40}{len(rows):>7}")
@@ -1316,11 +1365,17 @@ def classify(
             use_pages="page" in sources,
             use_purpose="purpose" in sources,
         )
+        found = keywords_with_source(texts, taxonomy)
+        # Built here, while the texts are in hand, and kept as a handful of short strings rather
+        # than the whole text — this runs over 14,443 companies.
+        snippets, fallback = evidence_snippets(texts, found, taxonomy)
         per_company[company_id] = {
             "texts": sorted(texts),
-            "keywords": keywords_with_source(texts, taxonomy),
+            "keywords": found,
             "had_text": bool(texts),
             "page_text": " ".join(texts.get(s, "") for s in ("services", "homepage")).strip(),
+            "snippets": snippets,
+            "fallback": fallback,
         }
     with_text = sum(1 for v in per_company.values() if v["had_text"])
     log.info("%d companies have text to read", with_text)
@@ -1393,6 +1448,17 @@ def classify(
         # the machinery above.
         cluster = wz_cluster.cluster_for(facts[company_id].get("wz_code"))
 
+        # The words a human needs in order to disagree with this row. Prefer a keyword that belongs
+        # to the field we actually assigned — the others fired for some other field and would explain
+        # the wrong thing. With nothing assigned, show what we read instead, so `no_keyword` is a
+        # checkable claim rather than a blank.
+        for_branch = [
+            k for k in state["snippets"]
+            if result.branch and result.branch in (taxonomy.keyword_branches.get(k) or ())
+        ]
+        chosen = (for_branch or list(state["snippets"]))[:1]
+        evidence = state["snippets"][chosen[0]] if chosen else state["fallback"]
+
         append_jsonl(BRANCHES_PATH, {
             "company_id": company_id,
             "company_name": facts[company_id].get("company_name"),
@@ -1412,6 +1478,10 @@ def classify(
             "runner_up_score": result.runner_up_score,
             "ranked": result.ranked[:5],
             "keywords": result.keywords,
+            # The company's own sentence around the deciding keyword, or the start of whatever text
+            # we read when nothing fired. Written here so `classify-labels` needs no cache and no
+            # database, and so a label can be made without opening the company's website.
+            "evidence": evidence,
             "text_sources": state["texts"],
             "shortlist": result.shortlist,
             "needs_review": result.needs_review,
@@ -1421,6 +1491,13 @@ def classify(
             "llm_reason": verdict.reason if verdict else "",
             "llm_refused": verdict.refused if verdict else "",
             "taxonomy_version": taxonomy.version,
+            # What the keyword weights were computed over. A keyword's weight depends on how many
+            # companies use it, so `--limit 1000` and a full run give the same company DIFFERENT
+            # answers — unlike `fetch-content`, where a limited run is a prefix of the whole. Two
+            # `branches.jsonl` files are otherwise indistinguishable, and "the numbers changed"
+            # would look like the code changed.
+            "scope_companies": len(scope),
+            "df_companies": max(with_text, 1),
             # ---- column 2: the official WZ cluster. A different classification by a different
             # authority, answering a different question. Never mixed with column 1.
             "wz_code": cluster.code if cluster else None,
@@ -1435,6 +1512,21 @@ def classify(
     log.info("Wrote %d companies to %s", len(scope), BRANCHES_PATH)
 
 
+#: Below this many companies, "one keyword carries the whole field" says nothing — a field with two
+#: assignments is 100% one keyword by arithmetic, not by weakness.
+MIN_FIELD_SIZE_FOR_LONE_KEYWORD_WARNING = 5
+
+
+def branch_counts(rows: list[dict[str, Any]]) -> dict[str, int]:
+    """Technologiefeld -> how many companies got it. `technologiefeld` first, `branch` as a fallback
+    for rows written before the column was named."""
+    counts: dict[str, int] = {}
+    for row in rows:
+        key = row.get("technologiefeld") or row.get("branch") or "?"
+        counts[key] = counts.get(key, 0) + 1
+    return counts
+
+
 def classify_report() -> None:
     """What happened. NOT whether it was right — that is `classify-labels-report`."""
     rows = read_jsonl(BRANCHES_PATH)
@@ -1443,6 +1535,15 @@ def classify_report() -> None:
     n = len(rows)
 
     print(f"\n=== {n} companies, two independent columns ===")
+
+    # Which run this file is, spelled out. A keyword's weight depends on how many companies use it,
+    # so the same company can carry different answers in two files and neither is wrong.
+    versions = {r.get("taxonomy_version") for r in rows}
+    corpora = {r.get("df_companies") for r in rows if r.get("df_companies")}
+    print(f"\n  taxonomy+rule version   {', '.join(sorted(str(v) for v in versions if v)) or '?'}")
+    print(f"  keyword weights over    {', '.join(str(c) for c in sorted(corpora)) or '?'} companies with text")
+    if len(versions) > 1 or len(corpora) > 1:
+        print("  !! this file mixes runs — the rows are not comparable; re-run `classify`")
     print(
         "\n  COLUMN 1  Technologiefeld — one of Berlin's 77 fields, or NONE. Only the words a\n"
         "            company published about itself may fill it.\n"
@@ -1512,11 +1613,13 @@ def classify_report() -> None:
     # That is not automatically wrong — `einzelhandel` (208 rows), `spedition` (39) and
     # `steuerberater` (21) each name an industry on their own — but it is where the wrong answers
     # live, and the two groups have to be labelled separately or one hides the other.
-    from_words = [r for r in assigned if r.get("decided_by") != "wz"]
-    single = [r for r in from_words if len(r.get("keywords") or {}) == 1]
+    # Every assignment comes from words the company published; there is no other kind. (This used
+    # to filter out `decided_by == "wz"`, from the reverted version that let a register code fill
+    # this column. The filter was hedging against something the signature now makes impossible.)
+    single = [r for r in assigned if len(r.get("keywords") or {}) == 1]
     print("\n-- how much evidence is behind each assignment --")
-    print(f"{'decided by ONE keyword':<34}{len(single):>7}  {_pct(len(single), max(len(from_words), 1))}")
-    print(f"{'decided by two or more':<34}{len(from_words) - len(single):>7}")
+    print(f"{'decided by ONE keyword':<34}{len(single):>7}  {_pct(len(single), max(len(assigned), 1))}")
+    print(f"{'decided by two or more':<34}{len(assigned) - len(single):>7}")
     lone: dict[str, int] = {}
     for row in single:
         keyword = next(iter(row["keywords"]))
@@ -1534,12 +1637,52 @@ def classify_report() -> None:
         "  comment saying why, NOT by adding a stop-list to the code."
     )
 
+    # The list above says which keywords carry an assignment alone. It does NOT say which FIELD each
+    # one carries, and that is the number that convicts a bad keyword. `sicherheit` produced 27 of
+    # Defence Tech's 35 assignments on its own: not "a common keyword" but "a field that exists
+    # because of one word". Reading it as a share per field is what makes the next one visible while
+    # it is still eight rows instead of thirty-five.
+    # Ranked on ALL the field's one-keyword rows, not just its commonest keyword. Ranking on the
+    # commonest one has a blind spot, and it hid a real case: Wasserstoff took 19 of its 22
+    # assignments from "netz" (10) and "speicher" (9), and neither reached the 50% a single-keyword
+    # ranking looks for. A branch carried by two generic words is in exactly as much trouble as one
+    # carried by one, so the share is the field's total and the words are listed beside it.
+    print("\n-- fields resting on single keywords --")
+    print("  What share of each field was decided by ONE keyword, and which words those were.")
+    print("  High is a warning, not a verdict: 'windenergieanlagen' names an industry and carries")
+    print("  100% of Windenergie correctly. 'netz' means 'online' and carried half of Wasserstoff.")
+    lone_by_field: dict[str, dict[str, int]] = {}
+    for row in single:
+        field = row.get("technologiefeld") or row.get("branch") or "?"
+        keyword = next(iter(row["keywords"]))
+        lone_by_field.setdefault(field, {})
+        lone_by_field[field][keyword] = lone_by_field[field].get(keyword, 0) + 1
+    ranked_fields = []
+    for field, count in branch_counts(assigned).items():
+        if count < MIN_FIELD_SIZE_FOR_LONE_KEYWORD_WARNING:
+            continue
+        keywords = lone_by_field.get(field) or {}
+        carried = sum(keywords.values())
+        if not carried:
+            continue
+        top = ", ".join(
+            f"{k} {n}" for k, n in sorted(keywords.items(), key=lambda kv: -kv[1])[:3]
+        )
+        ranked_fields.append((carried / count, count, carried, field, top))
+    print(f"\n  {'share':>6} {'field':>6} {'lone':>5}   Technologiefeld / the words carrying it")
+    for share, count, carried, field, top in sorted(ranked_fields, reverse=True)[:15]:
+        print(f"  {share:>6.0%} {count:>6} {carried:>5}   {field[:26]:<28}{top[:44]}")
+    print(
+        "\n  Read the words, not the share. For each one ask the only question that matters: does\n"
+        "  it name an INDUSTRY, or an activity every business does? Then check by reading the\n"
+        "  companies it decided — `python scripts/run_combined_discovery.py csv` has them, and the\n"
+        "  wrong ones are obvious ('Inspektion' -> Drohnen was two car dealerships and a repair\n"
+        "  shop). A word that fails goes out of branch_taxonomy.yaml with the count in a comment,\n"
+        "  the same way 'sicherheit' did. NOT into a stop-list in the code."
+    )
+
     print("\n-- the 15 most common Technologiefelder --")
-    branches: dict[str, int] = {}
-    for row in assigned:
-        key = row.get("technologiefeld") or row.get("branch") or "?"
-        branches[key] = branches.get(key, 0) + 1
-    for branch, count in sorted(branches.items(), key=lambda kv: -kv[1])[:15]:
+    for branch, count in sorted(branch_counts(assigned).items(), key=lambda kv: -kv[1])[:15]:
         print(f"{branch[:33]:<34}{count:>7}  {_pct(count, n)}")
     print(
         "\n  Defence Tech must not be near the top. If it is, a keyword is matching inside a German\n"
@@ -1619,22 +1762,38 @@ def classify_report() -> None:
 BRANCH_LABEL_COLUMNS = [
     "bucket", "company_id", "company_name", "website",
     "technologiefeld", "score", "decided_by", "runner_up", "keyword_count", "keywords", "shortlist",
+    # The company's own sentence around the deciding keyword — read THIS before opening a website.
+    # For a `no_keyword` row it is the start of the text we read, so "nothing matched" can be checked
+    # rather than believed.
+    "evidence",
     "llm_reason",
     # The WZ cluster, as CONTEXT only. Do not label it — nobody guessed it, it is a lookup in the
     # official classification. It is here because knowing a company is registered under
     # "56 Gastronomie" helps a human judge whether "Gastgewerbe" is the right technology field.
     "wz_code", "wz_division_title", "wz_section_title",
+    # Which run this row came out of. A label is an answer about a specific classification, and a
+    # keyword's weight depends on how many companies use it — so the same company can carry a
+    # different Technologiefeld in the next run, and a `yes` written about "Handel" says nothing
+    # about a row that now reads "Logistik". Without this column that substitution is invisible.
+    "taxonomy_version",
     # The two a human fills in. Everything to the left is context for the decision.
     #   label   yes | no | unclear — is `branch` the right industry for this company?
     #   notes   anything worth remembering. Never parsed, only read.
     "label", "notes",
+    # Set by `classify-labels`, CLEARED by a human: `yes` when the row this label was written about
+    # has since changed — a different Technologiefeld, or a different bucket, which means a
+    # different QUESTION. The label is kept, because the human's work is not thrown away, and
+    # `classify-labels-report` leaves it out of every number and says how many there are. The
+    # `notes` column says what was originally judged, so re-labelling is a re-read, not a re-do.
+    # Blanking this cell is the only thing that clears it, and it means "I have looked again".
+    "stale",
 ]
 
 BRANCH_LABEL_VALUES = ("yes", "no", "unclear")
 
 
 def branch_label_buckets(rows: list[dict[str, Any]]) -> dict[str, list[dict[str, Any]]]:
-    """Six groups, because there are six different questions and one sample cannot answer them all.
+    """Five groups, because there are five different questions and one sample cannot answer them all.
 
     keyword_decided   the words said it. PRECISION of the whole column, and the main number here.
     model_decided     the model broke a tie. Was breaking it that way right?
@@ -1662,30 +1821,103 @@ def branch_label_buckets(rows: list[dict[str, Any]]) -> dict[str, list[dict[str,
     return buckets
 
 
+def label_staleness(
+    was: Mapping[str, str], bucket: str, technologiefeld: str
+) -> tuple[bool, bool]:
+    """Is a carried-over label still an answer to the question it was written about?
+
+    Returns `(moved, still_stale)`. `moved` means the row changed since it was judged and this is the
+    first run to notice. `still_stale` means it was already flagged and nobody has cleared the flag.
+
+    Pure, and separate from the file handling, because both halves of it were wrong once:
+
+    1. A label used to be keyed on `(bucket, company_id)`, so a company moving from `no_keyword` to
+       `keyword_decided` silently lost its label. It is keyed on the company now, and a move is
+       reported instead of erasing the work.
+    2. The flag used to be recomputed from scratch each run. Writing the row back makes `was` match
+       the current state, so the second run said "unchanged" and the label rejoined the precision
+       count with nobody having re-read it. **Stale is sticky.** Only a human blanking the cell
+       clears it, and that is what "I have looked again" means.
+
+    A changed bucket counts as much as a changed field: `keyword_decided` asks "is this field
+    right", `no_text` asks "does any field fit at all". Those are different questions, and an answer
+    to one is not an answer to the other.
+    """
+    labelled = bool((was.get("label") or "").strip())
+    if not labelled:
+        return False, False
+    moved = (
+        (was.get("bucket") or "") != bucket
+        or (was.get("technologiefeld") or "") != technologiefeld
+    )
+    was_flagged = (was.get("stale") or "").strip().lower() == "yes"
+    return moved, was_flagged and not moved
+
+
+def _stale_note(was: dict[str, str]) -> str:
+    """Say in the `notes` column what this label was originally about.
+
+    Without it, `stale=yes` tells a human their answer no longer applies and not what it applied to,
+    which makes re-labelling a re-do instead of a re-read. Their own note is kept in front.
+    """
+    old_bucket = was.get("bucket") or "?"
+    old_field = was.get("technologiefeld") or "?"
+    old_version = was.get("taxonomy_version") or "?"
+    trail = (
+        f"[labelled {was.get('label', '').strip()} when this was {old_bucket}/{old_field} "
+        f"in run {old_version}]"
+    )
+    note = (was.get("notes") or "").strip()
+    # Do not stack a trail on a trail: re-running this twice must not grow the cell.
+    note = note.split(" [labelled ")[0].strip()
+    return f"{note} {trail}".strip()
+
+
 def branch_labels(per_bucket: int = 10) -> None:
-    """Write (or extend) the hand-labelling worksheet. Never overwrites a label already written."""
+    """Write (or extend) the hand-labelling worksheet. Never overwrites a label already written.
+
+    A label is keyed on the **company** and nothing else. It used to be keyed on the company *and
+    its bucket*, which quietly threw work away: re-classify, a company moves from `no_keyword` to
+    `keyword_decided`, and the row is rebuilt as if it had never been judged. Hand labels are the
+    most expensive data in this project — 40 of them are the only thing that can say whether the
+    Technologiefeld is right — so they are kept and, when what they describe has changed, marked
+    `stale` rather than dropped or silently counted.
+
+    The draw is `per_bucket` rows per bucket, ordered by company id. Company ids are UUIDs, so that
+    ordering is arbitrary but **stable**: the same rows come up every time, and re-running this
+    never swaps a labelled company for a fresh one.
+    """
     rows = read_jsonl(BRANCHES_PATH)
     if not rows:
         raise SystemExit(f"nothing in {BRANCHES_PATH}; run `classify` first")
     buckets = branch_label_buckets(rows)
+    version = next((r.get("taxonomy_version") for r in rows if r.get("taxonomy_version")), "")
 
-    existing: dict[tuple[str, str], dict[str, str]] = {}
+    existing: dict[str, dict[str, str]] = {}
     if BRANCH_LABELS_PATH.exists():
         with BRANCH_LABELS_PATH.open(encoding="utf-8-sig", newline="") as handle:
             for old in csv.DictReader(handle):
-                existing[(old.get("bucket") or "", old.get("company_id") or "")] = old
+                existing[old.get("company_id") or ""] = old
         done = sum(1 for v in existing.values() if (v.get("label") or "").strip())
         log.info("%s has %d rows, %d labelled", BRANCH_LABELS_PATH.name, len(existing), done)
 
     out: list[dict[str, Any]] = []
+    carried = stale_count = stale_kept = 0
     for bucket, entries in buckets.items():
         entries.sort(key=lambda r: r.get("company_id") or "")
         keep = entries[:per_bucket] + [
             e for e in entries[per_bucket:]
-            if (existing.get((bucket, e.get("company_id") or ""), {}).get("label") or "").strip()
+            if (existing.get(e.get("company_id") or "", {}).get("label") or "").strip()
         ]
         for row in keep:
-            was = existing.get((bucket, row.get("company_id") or ""), {})
+            was = existing.get(row.get("company_id") or "", {})
+            field_now = row.get("technologiefeld") or row.get("branch") or ""
+            # Does this label still answer the question it was written about? See
+            # `label_staleness` — the rule lives there so the guard can call it.
+            moved, still = label_staleness(was, bucket, field_now)
+            carried += bool((was.get("label") or "").strip())
+            stale_count += moved
+            stale_kept += still
             out.append({
                 "bucket": bucket,
                 "company_id": row.get("company_id"),
@@ -1694,7 +1926,7 @@ def branch_labels(per_bucket: int = 10) -> None:
                 "wz_code": row.get("wz_code") or "",
                 "wz_division_title": row.get("wz_division_title") or "",
                 "wz_section_title": row.get("wz_section_title") or "",
-                "technologiefeld": row.get("technologiefeld") or row.get("branch") or "",
+                "technologiefeld": field_now,
                 "score": row.get("score") or "",
                 "decided_by": row.get("decided_by") or row.get("outcome"),
                 "runner_up": row.get("runner_up") or "",
@@ -1703,10 +1935,15 @@ def branch_labels(per_bucket: int = 10) -> None:
                 "keyword_count": len(row.get("keywords") or {}),
                 "keywords": ";".join(sorted(row.get("keywords") or {})),
                 "shortlist": ";".join(row.get("shortlist") or []),
+                "evidence": row.get("evidence") or "",
                 "llm_reason": row.get("llm_reason") or "",
+                "taxonomy_version": row.get("taxonomy_version") or version,
                 # Carried over verbatim. This is the human's work.
                 "label": was.get("label", ""),
-                "notes": was.get("notes", ""),
+                # The trail is written ONCE, when the row moves. Rewriting it on a later run would
+                # describe the row's current state as its history, which is worse than no trail.
+                "notes": _stale_note(was) if moved else was.get("notes", ""),
+                "stale": "yes" if (moved or still) else "",
             })
         log.info("%-16s %d rows (%d available)", bucket, len(keep), len(entries))
 
@@ -1717,6 +1954,22 @@ def branch_labels(per_bucket: int = 10) -> None:
         writer.writerows(out)
 
     print(f"\nWrote {len(out)} rows to {BRANCH_LABELS_PATH}")
+    if carried:
+        print(f"Carried {carried} label(s) over from the previous worksheet.")
+    if stale_count:
+        print(
+            f"!! {stale_count} newly marked `stale`: the row changed since it was judged — a\n"
+            "   different Technologiefeld, or a different bucket, which is a different question.\n"
+            "   `notes` says what each one was."
+        )
+    if stale_kept:
+        print(f"   {stale_kept} more were already stale and still are.")
+    if stale_count or stale_kept:
+        print(
+            "   Stale labels are LEFT OUT of every number in classify-labels-report. Re-read the\n"
+            "   row, fix `label` if it changed, then CLEAR the `stale` cell — that is how you say\n"
+            "   you have looked again. Nothing else clears it."
+        )
     print(f"Fill in `label` with one of: {', '.join(BRANCH_LABEL_VALUES)}")
     print("  keyword/model_decided    -> is `technologiefeld` right for this company?")
     print("  torn                     -> can YOU pick one of `shortlist` from the same text? If")
@@ -1736,14 +1989,29 @@ def branch_labels_report() -> None:
     def tally(bucket: str) -> dict[str, int]:
         counts = {v: 0 for v in BRANCH_LABEL_VALUES}
         counts["unlabelled"] = 0
+        counts["stale"] = 0
         for row in rows:
             if (row.get("bucket") or "") != bucket:
                 continue
             value = (row.get("label") or "").strip().lower()
+            # A stale label describes a row that has since changed — a different field, or a
+            # different bucket, which is a different question. Counting it as `yes` or `no` would
+            # be reporting an answer to a question nobody asked. It is set aside, and said out loud.
+            if (row.get("stale") or "").strip().lower() == "yes":
+                counts["stale"] += 1
+                continue
             counts[value if value in counts else "unlabelled"] += 1
         return counts
 
     print(f"\n=== {len(rows)} rows in {BRANCH_LABELS_PATH.name} ===")
+    versions = {(r.get("taxonomy_version") or "?") for r in rows}
+    stale_total = sum(1 for r in rows if (r.get("stale") or "").strip().lower() == "yes")
+    print(f"  classified by run   {', '.join(sorted(versions))}")
+    if stale_total:
+        print(
+            f"  {stale_total} label(s) are STALE — the row changed after it was judged, so they are\n"
+            "  left out of every number below. Re-read them; `notes` says what each one was."
+        )
     for bucket, question in (
         ("keyword_decided", "the words on the page decided it"),
         ("model_decided", "the model broke a tie"),

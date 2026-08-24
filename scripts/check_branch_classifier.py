@@ -17,6 +17,11 @@ expensive one is the first group: allowing a keyword to match inside a German co
 *Sicherheitstechnik* — and **Defence Tech became the most common industry in Osnabrück**. Companies
 where one branch clearly won *fell*, 338 to 316. More matches, worse answers.
 
+Where a rule lives in the code, this file **imports and calls it** rather than restating it. A check
+that rebuilds the rule it is checking agrees with itself no matter what the real code does — which is
+exactly what the model-answer section here used to do, and why `scripts/replay_judge_gate.py` imports
+the website judge's gate instead of copying it.
+
 Run it after touching `branch_classifier.py`, `content_pages.py`, `branch_llm.py` or the taxonomy:
 
     python scripts/check_branch_classifier.py
@@ -43,6 +48,22 @@ from combined_discovery import branch_llm, content_pages, wz_cluster  # noqa: E4
 FAILURES: list[str] = []
 
 
+def _load_runner():
+    """`scripts/run_combined_discovery.py` as a module, without running its CLI.
+
+    It is a script rather than a package, so it cannot simply be imported by name. Only pure
+    functions are called from here — nothing that touches the network, the database or the page
+    cache — so this stays as free as the rest of the file.
+    """
+    import importlib.util
+
+    path = Path(__file__).resolve().parent / "run_combined_discovery.py"
+    spec = importlib.util.spec_from_file_location("_runner_under_check", path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
 def check(label: str, got: object, want: object) -> None:
     ok = got == want
     if not ok:
@@ -62,25 +83,28 @@ def main() -> int:
     # -------------------------------------------------------------------------------------
     # German glues nouns together, so a keyword sits inside longer words that mean something else.
     # This is THE rule of this module.
-    compounds = [
-        ("Unsere Batterierecyclinganlage in Betrieb.", "batterierecycling"),
-        ("Speicherplatz im Rechenzentrum.", "speicher"),
-        ("Automatisierungstechnik vom Fachbetrieb.", "automat"),
-        ("Wir liefern Schienenfahrzeugersatzteile.", "schienenfahrzeuge"),
+    # Each pair is (a compound the keyword hides inside, the keyword standing on its own). Both
+    # halves are needed: the first says the rule works, the second says it has not become a
+    # blocklist. Every keyword used here is asserted to still BE a keyword first — without that,
+    # deleting one from the taxonomy turns its compound test into a check that passes because
+    # nothing can match at all. That happened: "speicher" was a Wasserstoff keyword until it was
+    # deleted on 2026-08-24, and its compound case would have gone on printing `ok` for ever.
+    pairs = [
+        ("Unsere Batterierecyclinganlage in Betrieb.",
+         "Batterierecycling fuer Industriekunden.", "batterierecycling"),
+        ("Wir liefern Schienenfahrzeugersatzteile.",
+         "Wir liefern Schienenfahrzeuge und Signaltechnik.", "schienenfahrzeuge"),
+        ("Industrieanlagenbau seit 1960.",
+         "Wir planen Industrieanlagen.", "industrieanlagen"),
+        ("Holzbauweise mit kurzen Wegen.",
+         "Holzbau vom Fachbetrieb.", "holzbau"),
     ]
-    for text, keyword in compounds:
-        hits = bc.matched_keywords(bc.normalize(text), taxonomy)
-        check(f"{keyword!r} not inside {text[:30]!r}", keyword in hits, False)
-
-    # The same words standing alone must still be found, or the rule has become a blocklist.
-    standalone = [
-        ("Ein Speicher fuer Wasserstoff.", "speicher"),
-        ("Wir liefern Schienenfahrzeuge und Signaltechnik.", "schienenfahrzeuge"),
-        ("Batterierecycling fuer Industriekunden.", "batterierecycling"),
-    ]
-    for text, keyword in standalone:
-        hits = bc.matched_keywords(bc.normalize(text), taxonomy)
-        check(f"{keyword!r} found standing alone", keyword in hits, True)
+    for inside, alone, keyword in pairs:
+        check(f"{keyword!r} is still a keyword at all", keyword in taxonomy.keyword_branches, True)
+        check(f"{keyword!r} not inside {inside[:26]!r}",
+              keyword in bc.matched_keywords(bc.normalize(inside), taxonomy), False)
+        check(f"{keyword!r} found standing alone",
+              keyword in bc.matched_keywords(bc.normalize(alone), taxonomy), True)
 
     # -------------------------------------------------------------------------------------
     section("a word that names a quality is not a keyword for an industry")
@@ -222,25 +246,36 @@ def main() -> int:
     # -------------------------------------------------------------------------------------
     section("a model answer that was not on the menu decides nothing")
     # -------------------------------------------------------------------------------------
-    # branch_llm.choose talks to Ollama, so the check goes at the layer below it: the prompt is a
-    # multiple-choice question and only its own options may be returned. Verified by feeding the
-    # validation the three answers a model can give.
+    # `branch_llm.choose` talks to Ollama, so the check goes at the layer below it: the prompt is a
+    # multiple-choice question and only its own options may be returned. It calls the REAL
+    # validation, `branch_llm.verdict_from_answer` — the one `choose` uses. An earlier version of
+    # this section rebuilt that if/elif inline, which meant it compared a copy against itself and
+    # would have kept printing `ok` after the real rule broke. Same reason `replay_judge_gate.py`
+    # imports the website judge's gate instead of restating it.
     shortlist = ["Bahnindustrie", "Automobilwirtschaft", "Handwerk"]
     for answer, want_branch, want_rejected in (
         ("Bahnindustrie", "Bahnindustrie", False),
         (branch_llm.NONE_ANSWER, None, True),
         ("Raumfahrt-Katzenfutter", None, False),
+        # A model picking option one, in the shapes it actually writes them. None of these is a
+        # fourth option, and refusing them silently turns a correct choice into a lost row.
+        ("bahnindustrie", "Bahnindustrie", False),
+        ("- Bahnindustrie", "Bahnindustrie", False),
+        ('"Handwerk"', "Handwerk", False),
+        ("KEINE", None, True),
+        # Nothing at all is not a rejection of the three. It is a broken answer.
+        ("", None, False),
     ):
-        if answer.lower() == branch_llm.NONE_ANSWER:
-            branch, rejected, refused = None, True, ""
-        elif answer in shortlist:
-            branch, rejected, refused = answer, False, ""
-        else:
-            branch, rejected, refused = None, False, f"off-list: {answer}"
-        check(f"answer {answer[:24]!r} -> branch", branch, want_branch)
-        check(f"answer {answer[:24]!r} -> rejected_all", rejected, want_rejected)
+        verdict = branch_llm.verdict_from_answer(answer, "weil", shortlist)
+        check(f"answer {answer[:24]!r} -> branch", verdict.branch, want_branch)
+        check(f"answer {answer[:24]!r} -> rejected_all", verdict.rejected_all, want_rejected)
         if want_branch is None and not want_rejected:
-            check(f"answer {answer[:24]!r} is refused", bool(refused), True)
+            check(f"answer {answer[:24]!r} is refused", bool(verdict.refused), True)
+    # The value written to the column is the TAXONOMY's spelling, never the model's. "bahnindustrie"
+    # is not a Berlin field name and must not reach a column that may only hold one of the 77.
+    for offered in ("bahnindustrie", "- BAHNINDUSTRIE"):
+        got = branch_llm.verdict_from_answer(offered, "", shortlist).branch
+        check(f"{offered[:20]!r} is normalised to the list's spelling", got in taxonomy.branches, True)
 
     # -------------------------------------------------------------------------------------
     section("finding the services pages on a homepage, without downloading anything")
@@ -278,6 +313,129 @@ def main() -> int:
           max(per_category.values()) <= content_pages.MAX_PER_CATEGORY, True)
     check("no page is listed twice", len(urls), len(set(urls)))
     check("links are found without a network", content_pages.links_from_homepage("", "https://x.de"), [])
+
+    # -------------------------------------------------------------------------------------
+    section("every page that came back gets read")
+    # -------------------------------------------------------------------------------------
+    # The cap fetches TWO pages per category, and an earlier version kept only the first one in each
+    # — so 443 of the 1,372 pages that loaded were downloaded, parsed and thrown away, 32% of the
+    # fetch. The fallback that arrangement existed for, a second page rescuing a first that would
+    # not load, had fired twice.
+    both = content_pages.ContentPages(
+        pages={"leistungen": ["wir bauen schienenfahrzeuge", "und signaltechnik"]},
+        links=[],
+    )
+    check("the second page in a category is still read",
+          bc.matched_keywords(bc.normalize(both.text), taxonomy),
+          {"schienenfahrzeuge", "signaltechnik"})
+    # Order is CATEGORIES order, not dict order, so the same pages always build the same text and a
+    # cached answer stays valid.
+    mixed = content_pages.ContentPages(
+        pages={"ueber_uns": ["zweitens"], "leistungen": ["erstens"]}, links=[],
+    )
+    check("text is assembled in CATEGORIES order", mixed.text, "erstens zweitens")
+    check("a category with no page contributes nothing",
+          content_pages.ContentPages(pages={}, links=[]).text, "")
+
+    # -------------------------------------------------------------------------------------
+    section("the cached page CHOICE carries the rules that made it")
+    # -------------------------------------------------------------------------------------
+    # `content-index` is the one entry in page_cache that is not raw HTML — it stores which pages
+    # were chosen. That cache exists so changing what we derive from a page costs nothing, so the
+    # key has to move when the deriving rules move, or 692 companies quietly serve the old choice
+    # and the change looks like it did nothing.
+    before = content_pages.selection_version()
+    check("the version is stable when nothing changes", content_pages.selection_version(), before)
+    original = content_pages.MAX_PER_CATEGORY
+    try:
+        content_pages.MAX_PER_CATEGORY = original + 1
+        check("...and moves when a cap moves", content_pages.selection_version() != before, True)
+    finally:
+        content_pages.MAX_PER_CATEGORY = original
+    original_pattern = content_pages.CATEGORIES["leistungen"]
+    try:
+        content_pages.CATEGORIES["leistungen"] = __import__("re").compile("nothing-like-it")
+        check("...and when a category pattern changes",
+              content_pages.selection_version() != before, True)
+    finally:
+        content_pages.CATEGORIES["leistungen"] = original_pattern
+    check("...and comes back to the same value", content_pages.selection_version(), before)
+
+    # -------------------------------------------------------------------------------------
+    section("the hyphen knob, off by default")
+    # -------------------------------------------------------------------------------------
+    # The compound rule blocks words German glues together and NOT the ones it hyphenates, so
+    # `Kfz-Zulassung` fires `zulassung` today. Closing that also stops `E-Commerce-Lösungen` matching
+    # `e-commerce`, which is a true positive lost — so it is a knob, and the default is today's
+    # behaviour until somebody measures the trade.
+    check("the default is today's behaviour", bc.HYPHEN_IS_BOUNDARY, False)
+    loose = bc._pattern_for("zulassung", hyphen_is_boundary=False)
+    strict = bc._pattern_for("zulassung", hyphen_is_boundary=True)
+    check("'kfz-zulassung' matches with the knob off", bool(loose.search("kfz-zulassung")), True)
+    check("...and does not with it on", bool(strict.search("kfz-zulassung")), False)
+    check("a standalone word matches either way",
+          (bool(loose.search("die zulassung")), bool(strict.search("die zulassung"))), (True, True))
+    # The cost of turning it on, in one line: a hyphenated compound ABOUT the keyword stops matching.
+    ecom_strict = bc._pattern_for("e-commerce", hyphen_is_boundary=True)
+    check("the knob's price: 'e-commerce-lösungen' stops matching",
+          bool(ecom_strict.search("e-commerce-lösungen")), False)
+    # Flipping it has to change the version stamped into every row, or two runs look identical.
+    check("the rule is part of the taxonomy version",
+          bc.load_taxonomy().version == bc.hashlib.sha256(
+              bc.TAXONOMY_PATH.read_text(encoding="utf-8").encode("utf-8")).hexdigest()[:12],
+          False)
+
+    # -------------------------------------------------------------------------------------
+    section("a hand label is never silently thrown away or silently reused")
+    # -------------------------------------------------------------------------------------
+    # 40 hand labels are the only thing that can say whether the Technologiefeld is right, which
+    # makes them the most expensive data in this project. Both halves of this rule were wrong once.
+    label_staleness = _load_runner().label_staleness
+    unlabelled = {"bucket": "torn", "technologiefeld": "NONE", "label": "", "stale": ""}
+    check("an empty row is not stale", label_staleness(unlabelled, "torn", "NONE"), (False, False))
+
+    same = {"bucket": "keyword_decided", "technologiefeld": "Handel", "label": "yes", "stale": ""}
+    check("an unchanged row keeps its label",
+          label_staleness(same, "keyword_decided", "Handel"), (False, False))
+
+    # The field changed under the label. "yes, Handel is right" is not an answer about "Logistik".
+    check("a changed Technologiefeld is stale",
+          label_staleness(same, "keyword_decided", "Logistik"), (True, False))
+    # The bucket changed, so the QUESTION changed: "is this field right" vs "does any field fit".
+    # This used to erase the label outright, because the merge key included the bucket.
+    check("a changed bucket is stale", label_staleness(same, "no_text", "NONE"), (True, False))
+
+    # Stale is STICKY. Writing the row back makes `was` match the current state, so recomputing from
+    # scratch said "unchanged" on the very next run and the label rejoined the precision count with
+    # nobody having re-read it.
+    flagged = dict(same, stale="yes")
+    check("a flagged row stays flagged next run",
+          label_staleness(flagged, "keyword_decided", "Handel"), (False, True))
+    check("...and blanking the cell is what clears it",
+          label_staleness(dict(flagged, stale=""), "keyword_decided", "Handel"), (False, False))
+
+    # -------------------------------------------------------------------------------------
+    section("a label can be made without opening the company's website")
+    # -------------------------------------------------------------------------------------
+    # 40 hand labels are the gate on this whole column, so the worksheet has to carry the company's
+    # own sentence. Without it a person opens 40 websites and the labelling does not get done.
+    runner = _load_runner()
+    texts = {"services": "Familienbetrieb.  Unser Einzelhandel fuehrt Wein und Feinkost seit 1953."}
+    found = runner.keywords_with_source(texts, taxonomy)
+    snippets, fallback = runner.evidence_snippets(texts, found, taxonomy)
+    check("the deciding keyword is found", "einzelhandel" in found, True)
+    check("...and its sentence comes back with it",
+          "wein und feinkost" in (snippets.get("einzelhandel") or ""), True)
+    # A `no_keyword` row is the one that most needs this: "we read this and none of Berlin's words
+    # appeared" is a claim a person can check in seconds, where a blank cell is not.
+    holding = {"purpose": "Verwaltung eigenen Vermoegens und Beteiligung an anderen Unternehmen"}
+    empty_snippets, holding_fallback = runner.evidence_snippets(holding, {}, taxonomy)
+    check("nothing fired -> no snippets", empty_snippets, {})
+    check("...but the text we read is still shown",
+          "verwaltung eigenen vermoegens" in holding_fallback, True)
+    check("...labelled with which text it was", holding_fallback.startswith("[purpose]"), True)
+    check("no text at all -> nothing claimed", runner.evidence_snippets({}, {}, taxonomy), ({}, ""))
+    check("the worksheet has a column for it", "evidence" in runner.BRANCH_LABEL_COLUMNS, True)
 
     print(f"\n{'FAILED' if FAILURES else 'all checks passed'}")
     for label in FAILURES:

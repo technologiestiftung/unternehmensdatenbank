@@ -62,6 +62,20 @@ rose from 61% to 65%, but `sicherheit` went from 90 companies to 139 — hiding 
 *Arbeitssicherheit* and *Sicherheitstechnik* — and **Defence Tech became the most common industry in
 Osnabrück.** Companies where one branch clearly won *fell*, 338 to 316. More matches, worse answers.
 
+That rule covers compounds German glues together. It does **not** cover the ones German writes with a
+hyphen, and those are just as common:
+
+    Arbeitssicherheit        blocked
+    Instandhaltungsarbeiten  blocked
+    Kfz-Zulassung            fires `zulassung`   -> Pharma & Wirkstoffe
+    Foto-Galerie             fires `galerie`     -> Kunstmarkt
+    Web-App-Entwicklung      fires `app`         -> Digital Health
+
+`HYPHEN_IS_BOUNDARY` closes that hole and is **off by default**, because closing it also stops
+*E-Commerce-Lösungen* matching `e-commerce` and that is a true positive lost. It is a trade, and the
+glued-compound rule above was only trusted because somebody measured it. Measure this one the same
+way before flipping the default.
+
 ## NONE is the answer for most companies, and there are three different reasons for it
 
     assigned     one branch cleared the floor and beat the runner-up. The column gets its name.
@@ -124,6 +138,23 @@ SHORTLIST_SIZE = int(os.getenv("BRANCH_SHORTLIST_SIZE", "3"))
 #: is what puts ä, ö, ü and ß in the class without hand-listing them.
 _WORD_CHAR = "[0-9a-zà-öø-ÿ]"
 
+#: The same class with the hyphen added, which German compounds also use: *IT-Sicherheit*,
+#: *Kfz-Zulassung*, *Foto-Galerie*, *Web-App-Entwicklung*. The rule above stops a keyword hiding
+#: inside a glued compound and does **not** stop it hiding inside a hyphenated one, so today
+#: `Kfz-Zulassung` fires `zulassung` and files a car-registration office under Pharma & Wirkstoffe.
+#: Measured over the 1,372 cached services pages, counting only pages where the keyword never
+#: appears standing alone: `galerie` 24 of 67 pages, `app` 171 of 789, `makler` 4 of 13.
+_WORD_CHAR_WITH_HYPHEN = "[-0-9a-zà-öø-ÿ]"
+
+#: Whether a hyphen counts as being inside a word. **Off by default, which is today's behaviour.**
+#: Closing the hole is not free: it also stops *E-Commerce-Lösungen* matching `e-commerce`, and that
+#: is a true positive lost. So this is a knob rather than a fix, and the decision belongs to the same
+#: three numbers that settled the glued-compound rule — how many companies carry a keyword at all,
+#: the per-keyword company counts, and how many companies end up with a clear winner. Run `classify`
+#: both ways and compare. Do not flip the default without putting that table in
+#: `docs/branch-classification.md`.
+HYPHEN_IS_BOUNDARY = os.getenv("BRANCH_HYPHEN_IS_BOUNDARY", "").strip().lower() in {"1", "true", "yes"}
+
 
 def normalize(value: str | None) -> str:
     """One spelling for text that arrives in several: NFKC, no non-breaking spaces, lower case.
@@ -136,12 +167,16 @@ def normalize(value: str | None) -> str:
     return re.sub(r"\s+", " ", text).strip().lower()
 
 
-def _pattern_for(keyword: str) -> re.Pattern[str]:
+def _pattern_for(keyword: str, *, hyphen_is_boundary: bool | None = None) -> re.Pattern[str]:
     """A keyword as a regex that will not match inside a longer German word.
 
     See "the one rule that must not be relaxed" in the module docstring before widening this.
+    `hyphen_is_boundary` defaults to `HYPHEN_IS_BOUNDARY`, and is a parameter so a measurement can
+    build both patterns in one process instead of running twice.
     """
-    return re.compile(f"(?<!{_WORD_CHAR}){re.escape(keyword)}(?!{_WORD_CHAR})")
+    strict = HYPHEN_IS_BOUNDARY if hyphen_is_boundary is None else hyphen_is_boundary
+    edge = _WORD_CHAR_WITH_HYPHEN if strict else _WORD_CHAR
+    return re.compile(f"(?<!{edge}){re.escape(keyword)}(?!{edge})")
 
 
 @dataclass
@@ -155,8 +190,10 @@ class Taxonomy:
     #: Normalised keyword -> compiled pattern. Built once; matching 527 patterns over 860 pages is
     #: the whole cost of this module and it is measured in seconds.
     patterns: dict[str, re.Pattern[str]]
-    #: First 12 hex of the file's SHA-256. Model answers are cached against it, so editing the list
-    #: invalidates exactly the answers that could have changed.
+    #: First 12 hex of a hash over the file **and** the matching rule in force. Model answers are
+    #: cached against it, so editing the list — or flipping `HYPHEN_IS_BOUNDARY`, which changes what
+    #: every keyword matches — invalidates exactly the answers that could have changed. It is also
+    #: written into every row of `branches.jsonl`, which is what lets two runs be told apart.
     version: str
 
     def branch_names(self) -> list[str]:
@@ -192,7 +229,9 @@ def load_taxonomy(path: Path | None = None) -> Taxonomy:
         branches=clean,
         keyword_branches={k: frozenset(v) for k, v in keyword_branches.items()},
         patterns={k: _pattern_for(k) for k in keyword_branches},
-        version=hashlib.sha256(raw.encode("utf-8")).hexdigest()[:12],
+        version=hashlib.sha256(
+            f"{raw}|hyphen={int(HYPHEN_IS_BOUNDARY)}".encode("utf-8")
+        ).hexdigest()[:12],
     )
 
 

@@ -19,7 +19,11 @@ actually answer.
 Four rules, each enforced in code rather than asked for in the prompt:
 
 1. **The answer has to be one of the three offered, or "keine".** Anything else is discarded and
-   logged. A model that invents a branch name has not chosen; it has generated.
+   logged. A model that invents a branch name has not chosen; it has generated. Matching ignores
+   case and the `- ` a model puts in front of a list item — `bahnindustrie` is option one, not a
+   fourth option — and the branch is then recorded as the *taxonomy* spells it, because that string
+   goes into a column and "bahnindustrie" is not a Berlin field name. The rule lives in
+   `verdict_from_answer`, which the guard script calls rather than reimplements.
 2. **"keine" is a real outcome and it flags the row for a human.** It means the model read the page
    and rejected all three shortlisted branches — which is different from "no keyword fired", and
    the two are never counted together.
@@ -116,6 +120,40 @@ def _cache_key(url: str, shortlist: list[str], taxonomy_version: str) -> str:
     return f"{taxonomy_version}|{OLLAMA_MODEL}|{url}|{'|'.join(shortlist)}"
 
 
+def verdict_from_answer(answer: str, reason: str, shortlist: list[str]) -> BranchVerdict:
+    """Turn what the model said into a verdict. Rules 1 and 2, and the only place they live.
+
+    Pulled out of `choose` so that `scripts/check_branch_classifier.py` can call **this** rather
+    than restate it. A check that rebuilds the rule it is checking agrees with itself whatever the
+    real code does — the same reason `scripts/replay_judge_gate.py` imports the website judge's gate
+    instead of copying it.
+
+    Three answers are possible and they are not three shades of one thing:
+
+    - a branch **from the list** decides the row;
+    - `keine` means the model read the page and rejected all three, which flags the row for a human
+      and is *not* the same as no keyword firing;
+    - anything else decides nothing. A model that invents a branch name has not chosen, it has
+      generated, and the row keeps whatever the keywords said.
+
+    The comparison ignores case and the punctuation a model puts in front of a list item, because
+    `- Bahnindustrie` and `bahnindustrie` are the model picking option one, not the model going
+    off-list. Being strict there does not make the answer safer; it silently converts a correct
+    choice into a refusal, and nothing in the report would say so.
+    """
+    cleaned = (answer or "").strip().strip("-*•\"'` \t").strip()
+    if not cleaned:
+        return BranchVerdict(branch=None, reason=reason, refused="empty answer")
+    if cleaned.casefold() == NONE_ANSWER:
+        return BranchVerdict(branch=None, reason=reason, rejected_all=True)
+    for option in shortlist:
+        if cleaned.casefold() == option.casefold():
+            # The branch as the TAXONOMY spells it, never as the model spelled it. This value is
+            # written to a column, and "bahnindustrie" is not a Berlin field name.
+            return BranchVerdict(branch=option, reason=reason)
+    return BranchVerdict(branch=None, reason=reason, refused=f"off-list: {cleaned[:60]}")
+
+
 def choose(
     *,
     company_name: str,
@@ -166,15 +204,11 @@ def choose(
     answer = str(parsed.get("branche") or "").strip()
     reason = str(parsed.get("begruendung") or "").strip()[:200]
 
-    if answer.lower() == NONE_ANSWER:
-        verdict = BranchVerdict(branch=None, reason=reason, rejected_all=True)
-    elif answer in shortlist:
-        verdict = BranchVerdict(branch=answer, reason=reason)
-    else:
+    verdict = verdict_from_answer(answer, reason, shortlist)
+    if verdict.refused:
         # Rule 1. An off-list answer decides nothing — and it is worth a log line, because a model
         # doing this often means the prompt stopped being a multiple-choice question.
         log.info("branch model answered off-list for %s: %r", url, answer[:60])
-        verdict = BranchVerdict(branch=None, reason=reason, refused=f"off-list: {answer[:60]}")
 
     page_cache.put(
         "branch-llm",

@@ -31,17 +31,28 @@ links, and `imprint_probe.PROBE_PATHS` exists only as the fallback for when that
 per category and four per company keeps the run finite and keeps one company from spending everyone
 else's budget.
 
+**Every page that came back gets read.** The cap fetches two pages per category, so keeping only the
+first one in each was throwing away work already paid for: measured over the cache, 443 of the 1,372
+pages that loaded were second-in-category and their text never reached the matcher — 32% of the
+fetch, 74.6 MB of HTML, re-parsed and discarded on every `classify` run. `ContentPages.pages` holds a
+list per category for that reason.
+
 Two namespaces are used in `page_cache`, and the split matters:
 
-    content:<page url>    the raw HTML of one services or about page
-    content-index:<base>  which pages were chosen for this company, and what category each was
+    content:<page url>              the raw HTML of one services or about page
+    content-index:<version>|<base>  which pages were chosen for this company, and their categories
 
 The index is what makes a second run free: without it, the links have to be parsed again and the
-cache asked page by page. As everywhere else in `page_cache`, only raw HTML is stored — never
-anything derived from it — so changing what gets read out of a page still costs nothing.
+cache asked page by page. It is also the one entry in `page_cache` that is **not** raw HTML — a
+choice of pages is derived from a page — and that cache exists precisely so that changing what we
+derive costs nothing. So the key carries `selection_version()`: a hash of the caps and the
+`CATEGORIES` patterns. Edit either and the affected indexes are rebuilt from homepages already on
+disk, at no bandwidth. Leave the version out and the old choice wins silently, which looks exactly
+like a change that had no effect.
 """
 from __future__ import annotations
 
+import hashlib
 import logging
 import os
 import re
@@ -91,6 +102,28 @@ class ContentLink:
     url: str
     #: The anchor text that matched, kept so a surprising choice can be explained afterwards.
     label: str
+
+
+def selection_version() -> str:
+    """A short hash of everything that decides WHICH pages get picked.
+
+    It goes in the `content-index` cache key, and it has to, because that entry is the one thing in
+    `page_cache` that is not raw HTML. The cache's own rule is that it stores pages and nothing
+    derived from them, so that changing what we read out of a page costs nothing — and a *choice* of
+    pages is derived. Without a version here, widening a `CATEGORIES` pattern or raising a cap would
+    leave 692 companies quietly serving the old selection, and the change would look like it had no
+    effect.
+
+    Same trick as `branch_llm._cache_key` putting the taxonomy's hash in its key: editing the inputs
+    invalidates exactly the entries that could have changed, and nothing else. Rebuilding an index
+    costs no bandwidth — the homepage it is parsed from is already on disk, and the pages it points
+    at are cached under their own URLs.
+    """
+    material = "|".join(
+        [str(MAX_PER_CATEGORY), str(MAX_PER_COMPANY)]
+        + [f"{name}={pattern.pattern}" for name, pattern in CATEGORIES.items()]
+    )
+    return hashlib.sha256(material.encode("utf-8")).hexdigest()[:12]
 
 
 def _same_host(candidate: str, base: str) -> bool:
@@ -195,8 +228,12 @@ def _fetch(url: str) -> str:
 class ContentPages:
     """Every services or about page we have for one company."""
 
-    #: category -> readable text. Only pages that actually came back appear.
-    pages: dict[str, str]
+    #: category -> the readable text of EVERY page in it that came back, in the order they were
+    #: chosen. A list rather than one string because `MAX_PER_CATEGORY` is 2: keeping only the first
+    #: page threw away 443 of the 1,372 pages that had already been downloaded — 32% of the fetch,
+    #: 74.6 MB of HTML — and the fallback that arrangement existed for, a second page rescuing a
+    #: first that would not load, fired twice.
+    pages: dict[str, list[str]]
     #: What was chosen, whether or not it could be fetched. Distinguishes "no such link on the
     #: homepage" from "the link was there and the page would not load".
     links: list[ContentLink]
@@ -206,7 +243,9 @@ class ContentPages:
     @property
     def text(self) -> str:
         """All of it, in CATEGORIES order, as one string for the matcher."""
-        return " ".join(self.pages[c] for c in CATEGORIES if c in self.pages)
+        return " ".join(
+            part for category in CATEGORIES for part in self.pages.get(category) or ()
+        )
 
 
 def content_for(
@@ -220,20 +259,21 @@ def content_for(
     `fetch=False` reports what is already on disk and downloads nothing, which is what makes a
     dry run and a re-run of `classify` free.
     """
-    index = page_cache.get("content-index", base_url)
+    key = f"{selection_version()}|{base_url}"
+    index = page_cache.get("content-index", key)
     if index is not None:
         links = [ContentLink(**entry) for entry in index.get("links") or []]
     else:
         links = links_from_homepage(homepage_html, base_url)
         page_cache.put(
             "content-index",
-            base_url,
+            key,
             {"links": [{"category": x.category, "url": x.url, "label": x.label} for x in links]},
         )
 
     from combined_discovery.url_patterns import visible_text
 
-    pages: dict[str, str] = {}
+    pages: dict[str, list[str]] = {}
     fetched = failed = 0
     for link in links:
         if fetch:
@@ -243,7 +283,7 @@ def content_for(
             html = (cached or {}).get("html") or ""
         if html:
             fetched += 1
-            pages.setdefault(link.category, visible_text(html))
+            pages.setdefault(link.category, []).append(visible_text(html))
         else:
             failed += 1
     return ContentPages(pages=pages, links=links, fetched=fetched, failed=failed)
