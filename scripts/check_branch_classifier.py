@@ -1,9 +1,15 @@
 #!/usr/bin/env python3
 """Regression check for the branch classifier. Free: no API, no model, no database, no network.
 
-A **branch** is an industry plus its technology field, from Berlin's list of 77
-(`airflow/dags/combined_discovery/branch_taxonomy.yaml`). A **keyword** is a word that suggests one.
-A **WZ code** is the official German industry code, mapped by `wz_to_branch.yaml`.
+Two classifications live side by side and must never be mixed:
+
+**Technologiefeld** — one of Berlin's 77 *Technologie- und Anwendungsfelder*
+(`branch_taxonomy.yaml`), or NONE. Only text the company published may fill it. In this file the
+word "branch" always means one of those 77 values.
+
+**WZ cluster** — the official German industry classification the company is registered under
+(`wz_titles.yaml`, read by `wz_cluster.py`). A different question by a different authority. It is
+derived, never decided, so nothing about it needs labelling.
 
 Every case below is a mistake that either happened during the measurements or would have. The
 expensive one is the first group: allowing a keyword to match inside a German compound word made
@@ -19,6 +25,7 @@ Exit code is non-zero on any mismatch, so it works as a pre-commit gate.
 """
 from __future__ import annotations
 
+import inspect
 import sys
 from pathlib import Path
 
@@ -31,7 +38,7 @@ for candidate in (
         break
 
 from combined_discovery import branch_classifier as bc  # noqa: E402
-from combined_discovery import branch_llm, content_pages  # noqa: E402
+from combined_discovery import branch_llm, content_pages, wz_cluster  # noqa: E402
 
 FAILURES: list[str] = []
 
@@ -130,62 +137,67 @@ def main() -> int:
     check("a multi-word keyword weighs more", phrase > single, True)
 
     # -------------------------------------------------------------------------------------
-    section("the WZ code answers first, and 'no branch applies' is an answer")
+    section("the WZ cluster is its own column and can never reach the Technologiefeld")
     # -------------------------------------------------------------------------------------
-    wz = bc.WzMap(mappings={"64.2": None, "94.99": None, "56.1": "Gastgewerbe", "62.10": "Software"})
-    check("longest prefix wins", wz.lookup("94.99.9"), (True, None, "94.99"))
-    check("an exact code maps", wz.lookup("56.1"), (True, "Gastgewerbe", "56.1"))
-    check("a deeper code falls back to its prefix", wz.lookup("62.10.9"), (True, "Software", "62.10"))
-    check("an unmapped code is NOT 'no branch'", wz.lookup("01.11"), (False, None, ""))
-    check("a blank code is unmapped", wz.lookup(None), (False, None, ""))
+    # This is the invariant the whole split exists to protect. An earlier version mapped WZ codes
+    # onto Berlin's fields by hand and filled 2,632 companies' Technologiefeld with values nothing
+    # they published supported. The signature is now the guard: there is no parameter to pass a code
+    # through, so the mistake cannot be made by accident.
+    params = set(inspect.signature(bc.classify).parameters)
+    check("classify() takes no WZ argument", params & {"wz_code", "wz_map", "wz_cluster"}, set())
+    check("...and no WZ mapping loader survives", hasattr(bc, "load_wz_map"), False)
+    check("...nor a WzMap type", hasattr(bc, "WzMap"), False)
+    check("classify() knows nothing about wz_cluster", "wz_cluster" in dir(bc), False)
 
-    holding = bc.classify(
-        taxonomy=taxonomy, df={}, n_companies=860, wz_code="64.21", wz_map=wz,
-        keywords_by_source={"nachhaltigkeit": "homepage"}, had_text=True,
-    )
-    # A holding company whose page happens to say "Nachhaltigkeit" is still a holding company.
-    check("a null mapping gives no_branch_applies", holding.outcome, "no_branch_applies")
-    check("...and it is not confused with unclassified", holding.branch, None)
-    check("...and it counts as decided", holding.decided, True)
+    # A division is the first two characters of whatever code the company carries. No prefix search,
+    # no mapping, no judgement — which is why this column needs no labelling.
+    for code, division in (("56", "56"), ("56.1", "56"), ("56.11", "56"), ("56.11.1", "56"),
+                           ("94.99.9", "94"), ("70.10.4", "70")):
+        got = wz_cluster.cluster_for(code)
+        check(f"{code!r} sits in division {division}", got.division if got else None, division)
 
-    restaurant = bc.classify(
-        taxonomy=taxonomy, df={}, n_companies=860, wz_code="56.10.1", wz_map=wz, had_text=False,
-    )
-    check("the WZ code answers without any text", restaurant.branch, "Gastgewerbe")
-    check("...and says so", restaurant.decided_by, "wz")
+    gastro = wz_cluster.cluster_for("56.11.1")
+    check("...and the division has its official name", gastro.division_title, "Gastronomie")
+    check("...and rolls up to a section letter", gastro.section, "I")
+    check("...with the section's name", gastro.section_title, "GASTGEWERBE")
 
-    # A WZ answer still carries what the words said, or "the register and the website disagree" is a
-    # number that can never be anything but zero — which reads as agreement and is really an
-    # unasked question.
-    both = bc.classify(
-        taxonomy=taxonomy, df={"schienenfahrzeuge": 3}, n_companies=860, wz_code="56.1", wz_map=wz,
-        keywords_by_source={"schienenfahrzeuge": "homepage"}, had_text=True,
-    )
-    check("a WZ answer keeps the keyword ranking", bool(both.ranked), True)
-    check("...and it can disagree with the code", both.ranked[0][0], "Bahnindustrie")
-    check("...while the code still decides", both.branch, "Gastgewerbe")
+    # A company with no code has no cluster. That is not an error and not an empty cluster: nothing
+    # was classified because nothing was registered.
+    for empty in (None, "", "   ", "X"):
+        check(f"no cluster for {empty!r}", wz_cluster.cluster_for(empty), None)
+
+    # A division this edition of wz_titles.yaml does not know still gets its division back, with the
+    # titles empty. "We know where it sits, we cannot name the place" must not look like missing
+    # source data — that is how a stale titles file hides.
+    check("the titles file is loadable at all", bool(wz_cluster.load_clusters().division_titles), True)
+    check("87 divisions are known", len(wz_cluster.load_clusters().division_titles), 87)
+    check("...in 22 sections",
+          len({s for s, _ in wz_cluster.load_clusters().division_sections.values()}), 22)
 
     # -------------------------------------------------------------------------------------
     section("not deciding: four different answers, never added together")
     # -------------------------------------------------------------------------------------
-    empty = bc.WzMap(mappings={})
-    no_text = bc.classify(taxonomy=taxonomy, df={}, n_companies=860, had_text=False, wz_map=empty)
+    no_text = bc.classify(taxonomy=taxonomy, df={}, n_companies=860, had_text=False)
     check("nothing to read", no_text.outcome, "no_text")
     no_keyword = bc.classify(
         taxonomy=taxonomy, df={}, n_companies=860, had_text=True, keywords_by_source={},
-        wz_map=empty,
     )
     check("text but no keyword", no_keyword.outcome, "no_keyword")
+    # Whatever the reason, the column carries the literal NONE — never a blank, never a null. A
+    # blank cell in a handover file is indistinguishable from "nobody ran this yet".
+    check("no_text prints NONE in the column", no_text.value, "NONE")
+    check("no_keyword prints NONE in the column", no_keyword.value, "NONE")
 
     # Two branches, one keyword each, equally weighted -> torn, and not worth a model call: one
     # keyword against one keyword is a coin flip, and a 4B model flipping it costs ten seconds.
     df3 = {"leichtbau": 4, "nanotechnologie": 4}
     torn = bc.classify(
         taxonomy=taxonomy, df=df3, n_companies=860, had_text=True,
-        keywords_by_source={"leichtbau": "homepage"}, wz_map=empty,
+        keywords_by_source={"leichtbau": "homepage"},
     )
     check("a single shared keyword leaves it torn", torn.outcome, "torn")
     check("...with no shortlist to ask about", torn.shortlist, [])
+    check("...and NONE in the column", torn.value, "NONE")
 
     # -------------------------------------------------------------------------------------
     section("the shortlist handed to a model")
@@ -195,7 +207,6 @@ def main() -> int:
     df4 = {k: 3 for k in many}
     spread = bc.classify(
         taxonomy=taxonomy, df=df4, n_companies=860, had_text=True, keywords_by_source=many,
-        wz_map=empty,
     )
     if spread.outcome == "torn":
         check("the shortlist is at most 3 branches", len(spread.shortlist) <= 3, True)

@@ -1,24 +1,32 @@
-"""Which industry is this company in? Decided from its WZ code, or from the words on its website.
+"""Which technology field does this company work in? Decided from the words it publishes. Nothing else.
 
-Two words to define first.
+A **branch** here means one thing and one thing only: a value of Berlin's column *Branche /
+Technologie- und Anwendungsfeld*. There are 77 of them — "Bahnindustrie", "Quantentechnologien",
+"Gastgewerbe" — and each comes with a handful of **keywords**, words that suggest a company belongs
+there. "Schienenfahrzeuge" suggests Bahnindustrie. Both live in `branch_taxonomy.yaml`.
 
-A **branch** (German *Branche*) is an industry plus the technology field it sits in —
-"Bahnindustrie", "Gastgewerbe", "Additive Fertigung". Berlin's economic-development people keep a
-list of 77, each with a handful of **keywords**: words that suggest a company belongs there.
-"Schienenfahrzeuge" suggests Bahnindustrie. Both live in `branch_taxonomy.yaml`.
+A company's answer is one of those 77 values, or **NONE**. There is no third possibility, and the
+only thing that may produce a value is **the company's own text**: its services pages, its homepage,
+its Impressum, or the purpose it registered.
 
-A **WZ code** is the official German industry code. "56.1" is restaurants, "62.10.9" software. It is
-already in `public.companies` for 8,483 of 14,443 companies, and `wz_to_branch.yaml` maps it.
+## What must never write a branch
 
-This module answers in that order, and the order is the whole design:
+A **WZ code** — the official German industry classification, in `public.companies.wz_code` for 8,483
+of 14,443 companies — says what a company is *registered as*. That is a different question, answered
+by a different authority, and it is **not** a technology field. It gets its own column, built by
+`wz_cluster.py`, and this module never sees it: `classify()` takes no WZ argument, and
+`scripts/check_branch_classifier.py` fails if one ever appears.
 
-1. **The WZ code, if there is one.** Deterministic, free, and it works for the 1,943 companies that
-   have no website and no describing text — nothing else in this repo can reach those at all.
-2. **Otherwise the words.** Which of a branch's keywords appear in the company's text, weighted.
+That rule was learned the expensive way. An earlier version mapped WZ codes onto Berlin's fields by
+hand — `56.11.1 → Gastgewerbe`, `43.22.0 → Handwerk` — and filled 2,632 companies' technology field
+with values nothing they published supported, while flattening 22 sections and 87 divisions of good
+official classification to do it. It is the same mistake this repo already documents on the website
+side: a register number on a page proves the page is *about* a company, never that it *is* that
+company's site.
 
 It never fetches anything, never touches a database, and never imports `confidence`. That last one
 is deliberate: `confidence.py` is the only place that decides whether a page *belongs to* a company,
-and the question here — what industry the company is in — must not be able to influence that.
+and the question here — what field the company works in — must not be able to influence that.
 
 ## Why the weights are measured rather than chosen
 
@@ -54,18 +62,23 @@ rose from 61% to 65%, but `sicherheit` went from 90 companies to 139 — hiding 
 *Arbeitssicherheit* and *Sicherheitstechnik* — and **Defence Tech became the most common industry in
 Osnabrück.** Companies where one branch clearly won *fell*, 338 to 316. More matches, worse answers.
 
-## Not deciding is an answer, and there are four different ones
+## NONE is the answer for most companies, and there are three different reasons for it
 
-    assigned            one branch cleared the floor and beat the runner-up
-    no_branch_applies   the WZ code says holding company or housing association. Berlin's list has
-                        no home for those, and saying so is a result, not a gap.
-    torn                keywords fired but two branches are too close to separate
-    no_keyword          there was text and not one keyword appeared in it
-    no_text             there was nothing to read
+    assigned     one branch cleared the floor and beat the runner-up. The column gets its name.
+    torn         keywords fired but two branches are too close to separate
+    no_keyword   there was text and not one keyword appeared in it
+    no_text      there was nothing to read
 
-`no_keyword` and `no_text` must never be added together, and neither may be added to
-`no_branch_applies`. That is the same distinction `run_combined_discovery.tier_status` draws between
-`no_result` and `never_tried`, for the same reason: collapsing them turns a blank into a claim.
+The last three all print `NONE` in the column, because `NONE` is what the column is allowed to
+contain. The *reason* is kept beside it and **the three are never added together**: "we had no text"
+is not evidence that a company has no technology field. Same distinction
+`run_combined_discovery.tier_status` draws between `no_result` and `never_tried`, for the same
+reason — collapsing them turns a blank into a claim.
+
+Expect `NONE` to be the common case. Measured over 14,443 companies: **974 (6.7%)** get a value, and
+every one of them is backed by words the company published about itself. Berlin's list was built for
+Berlin's technology economy; most of a Lower Saxony town is not in it, and saying `NONE` is the
+correct answer rather than a failure.
 """
 from __future__ import annotations
 
@@ -84,7 +97,6 @@ log = logging.getLogger(__name__)
 
 HERE = Path(__file__).resolve().parent
 TAXONOMY_PATH = Path(os.getenv("BRANCH_TAXONOMY_PATH") or HERE / "branch_taxonomy.yaml")
-WZ_MAP_PATH = Path(os.getenv("WZ_BRANCH_MAP_PATH") or HERE / "wz_to_branch.yaml")
 
 #: How high a branch's score has to be before it is called the answer. Calibrated against homepage
 #: text; richer text moves every score up, so re-check it after changing what gets read.
@@ -97,6 +109,11 @@ MIN_MARGIN = float(os.getenv("BRANCH_MIN_MARGIN", "1.5"))
 #: row stays torn rather than becoming a model call. One keyword against one keyword is a coin flip,
 #: and asking a 4B model to flip it costs ten seconds and buys a confident-sounding guess.
 MIN_KEYWORDS_FOR_MODEL = int(os.getenv("BRANCH_MIN_KEYWORDS_FOR_MODEL", "2"))
+
+#: The literal value the Technologiefeld column carries when no branch was established. Spelled
+#: out rather than left empty, because an empty cell in a handover file is indistinguishable from
+#: "nobody has run this yet" — and those are very different claims.
+NONE = "NONE"
 
 #: How many branches a model is ever offered. Three plus "none of these" is a question a small model
 #: can answer; 77 is one it guesses at.
@@ -179,52 +196,6 @@ def load_taxonomy(path: Path | None = None) -> Taxonomy:
     )
 
 
-@dataclass
-class WzMap:
-    """WZ code prefix -> branch name, or None for "no branch applies"."""
-
-    #: Prefix -> branch name or None. Present-with-None and absent are different answers.
-    mappings: dict[str, str | None]
-
-    def lookup(self, code: str | None) -> tuple[bool, str | None, str]:
-        """(is the code mapped, the branch or None, the prefix that matched).
-
-        Matched by **longest prefix**. Our codes arrive at three depths — "64.2", "64.21", "94.99"
-        and "94.99.9" all occur in the same column — so a company's "94.99.9" has to fall back to
-        the entry for "94.99" when there is no more specific one. Exact matching alone would leave
-        most of the table unmapped while looking like the mapping was incomplete.
-
-        The first element of the tuple is what separates "mapped to no branch" from "not mapped",
-        which are the two states this whole module is careful about.
-        """
-        text = (code or "").strip()
-        if not text:
-            return False, None, ""
-        best = ""
-        for prefix in self.mappings:
-            if text.startswith(prefix) and len(prefix) > len(best):
-                best = prefix
-        if not best:
-            return False, None, ""
-        return True, self.mappings[best], best
-
-
-def load_wz_map(path: Path | None = None) -> WzMap:
-    """Read `wz_to_branch.yaml`. A missing file is fine — it means Stage A has not been filled in."""
-    import yaml
-
-    target = path or WZ_MAP_PATH
-    if not target.exists():
-        log.info("no %s yet; WZ codes will not be used", target.name)
-        return WzMap(mappings={})
-    data = yaml.safe_load(target.read_text(encoding="utf-8")) or {}
-    mappings = data.get("mappings")
-    if mappings is None:
-        raise ValueError(f"{target} has no `mappings:` block")
-    return WzMap(mappings={str(k).strip(): (v.strip() if isinstance(v, str) else None)
-                           for k, v in mappings.items()})
-
-
 # ---------------------------------------------------------------------------------------
 # Matching
 # ---------------------------------------------------------------------------------------
@@ -281,11 +252,11 @@ def keyword_weight(
 class Assignment:
     """The answer for one company, and enough of the reasoning to argue with it."""
 
-    #: assigned | no_branch_applies | torn | no_keyword | no_text
+    #: assigned | torn | no_keyword | no_text. The last three all print NONE in the column.
     outcome: str
     branch: str | None = None
     score: float = 0.0
-    #: wz | keywords | model — what actually decided it.
+    #: keywords | model — what actually decided it. Never a WZ code; see the module docstring.
     decided_by: str = ""
     runner_up: str | None = None
     runner_up_score: float = 0.0
@@ -293,8 +264,6 @@ class Assignment:
     ranked: list[tuple[str, float]] = field(default_factory=list)
     #: The keywords that fired, and which text they were found in.
     keywords: dict[str, str] = field(default_factory=dict)
-    #: The WZ prefix that matched, when the WZ code answered.
-    wz_prefix: str = ""
     #: True when a human should look at this row. Set for a model verdict of "none of these".
     needs_review: bool = False
     #: What a language model would be asked to choose between, when one is worth asking.
@@ -302,7 +271,12 @@ class Assignment:
 
     @property
     def decided(self) -> bool:
-        return self.outcome in ("assigned", "no_branch_applies")
+        return self.outcome == "assigned"
+
+    @property
+    def value(self) -> str:
+        """What goes in the column: a Berlin branch name, or the literal NONE. Never anything else."""
+        return self.branch or NONE
 
 
 def score_branches(
@@ -329,21 +303,16 @@ def classify(
     n_companies: int,
     keywords_by_source: Mapping[str, str] | None = None,
     had_text: bool = False,
-    wz_code: str | None = None,
-    wz_map: WzMap | None = None,
 ) -> Assignment:
-    """The answer for one company.
+    """The answer for one company: one of Berlin's 77 fields, or NONE.
 
-    The WZ code wins when it has something to say, because it is a statement of fact from a register
-    rather than an inference from marketing copy. When it maps to nothing, the words get their turn;
-    when it maps explicitly to "no branch", that IS the answer and the words are not consulted — a
-    holding company whose page happens to say "Nachhaltigkeit" is still a holding company.
+    **There is deliberately no WZ parameter.** A company's official industry code is a different
+    classification answering a different question, and it belongs in its own column — see
+    `wz_cluster.py` and the module docstring. If you are about to add one here to lift the coverage
+    number, that is precisely the change this signature exists to prevent.
 
-    **The words are scored even when the WZ code has already won**, and the ranking is carried on the
-    answer. It costs nothing — the keywords were matched before this function was called — and it is
-    the only way to see where the register and the website disagree. Returning early instead makes
-    that count structurally zero, which reads like agreement and is really an unasked question. Those
-    rows are what decides how hard the eventual resolution rule has to be.
+    Everything this needs was computed before the call: `keywords_by_source` maps each keyword that
+    fired to the text it was found in, and `df` says how many companies use each keyword.
     """
     keywords_by_source = dict(keywords_by_source or {})
     ranked = (
@@ -351,19 +320,6 @@ def classify(
         if keywords_by_source else []
     )
     from_words = [(b, round(s, 3)) for b, s in ranked]
-
-    if wz_map is not None:
-        mapped, branch, prefix = wz_map.lookup(wz_code)
-        if mapped and branch:
-            return Assignment(
-                outcome="assigned", branch=branch, decided_by="wz", wz_prefix=prefix,
-                keywords=keywords_by_source, ranked=from_words,
-            )
-        if mapped:
-            return Assignment(
-                outcome="no_branch_applies", decided_by="wz", wz_prefix=prefix,
-                keywords=keywords_by_source, ranked=from_words,
-            )
 
     if not had_text:
         return Assignment(outcome="no_text")

@@ -681,29 +681,49 @@ def report(limit: int | None = None) -> None:
     print()
 
 
-def _branch_columns(row: dict[str, Any] | None) -> dict[str, Any]:
-    """The branch half of one CSV row. Empty when `classify` has not run for this company.
+#: The two independent classifications, as CSV columns. Named so that a reader of the file can never
+#: mistake one for the other, which is exactly what went wrong when they shared a column.
+_TECHNOLOGIEFELD_COLUMNS = (
+    "technologiefeld", "technologiefeld_reason", "technologiefeld_score",
+    "technologiefeld_text_source", "technologiefeld_decided_by", "technologiefeld_keywords",
+    "technologiefeld_runner_up", "technologiefeld_needs_review",
+)
+_WZ_COLUMNS = ("wz_code", "wz_division", "wz_division_title", "wz_section", "wz_section_title")
 
-    `branch_source` names the text the keywords came from — `services`, `homepage`, `imprint` or
-    `purpose` — or `wz` when the register's industry code answered and no text was needed.
+
+def _branch_columns(row: dict[str, Any] | None) -> dict[str, Any]:
+    """Both classifications for one company. All blank when `classify` has never run for it.
+
+    **Column 1, Technologiefeld**: one of Berlin's 77 fields, or the literal `NONE`. Nothing else can
+    appear. `technologiefeld_reason` says which of `assigned`, `torn`, `no_keyword` or `no_text`
+    produced it, because "the keywords were too close to call" and "we had nothing to read" are
+    different facts and a reader needs to see which applies.
+    `technologiefeld_text_source` names the text the keywords were found in — `services`, `homepage`,
+    `imprint` or `purpose`. Every one of those is text the company published about itself.
+
+    **Column 2, WZ cluster**: the official classification the company is registered under. Derived
+    from `wz_code` with no judgement: the division is the code's first two characters, the section is
+    the letter that owns the division.
+
+    The two are never combined, and neither is evidence about the other.
     """
     if not row:
-        return {c: "" for c in (
-            "branch", "branch_score", "branch_source", "branch_decided_by", "branch_keywords",
-            "branch_runner_up", "branch_needs_review",
-        )}
+        return {c: "" for c in _TECHNOLOGIEFELD_COLUMNS + _WZ_COLUMNS}
     keywords = row.get("keywords") or {}
-    sources = ["wz"] if row.get("decided_by") == "wz" else sorted(set(keywords.values()))
     return {
-        # `outcome` rather than a blank when nothing was assigned: "torn" and "no_text" are
-        # different facts and a reader of this file needs to see which one applies.
-        "branch": row.get("branch") or f"({row.get('outcome')})",
-        "branch_score": row.get("score") or "",
-        "branch_source": "+".join(sources),
-        "branch_decided_by": row.get("decided_by") or "",
-        "branch_keywords": ";".join(sorted(keywords)),
-        "branch_runner_up": row.get("runner_up") or "",
-        "branch_needs_review": "yes" if row.get("needs_review") else "",
+        "technologiefeld": row.get("technologiefeld") or row.get("branch") or "",
+        "technologiefeld_reason": row.get("outcome") or "",
+        "technologiefeld_score": row.get("score") or "",
+        "technologiefeld_text_source": "+".join(sorted(set(keywords.values()))),
+        "technologiefeld_decided_by": row.get("decided_by") or "",
+        "technologiefeld_keywords": ";".join(sorted(keywords)),
+        "technologiefeld_runner_up": row.get("runner_up") or "",
+        "technologiefeld_needs_review": "yes" if row.get("needs_review") else "",
+        "wz_code": row.get("wz_code") or "",
+        "wz_division": row.get("wz_division") or "",
+        "wz_division_title": row.get("wz_division_title") or "",
+        "wz_section": row.get("wz_section") or "",
+        "wz_section_title": row.get("wz_section_title") or "",
     }
 
 
@@ -724,10 +744,12 @@ CSV_COLUMNS = [
     "judge_verdict", "judge_reason", "band_without_judge", "judge_changed_band",
     # What the application already serves for this company, and whether we agree with it.
     "db_website", "db_website_source", "db_website_confidence", "agrees_with_db",
-    # Which industry the company is in, from `classify`. Blank for every row when that has never
-    # been run — which is not the same as "this company has no industry".
-    "branch", "branch_score", "branch_source", "branch_decided_by", "branch_keywords",
-    "branch_runner_up", "branch_needs_review",
+    # Two independent classifications from `classify`, and they must stay independent: the
+    # Technologiefeld is Berlin's field list filled from what the company published, the WZ cluster
+    # is the official register classification. Blank for every row when `classify` has never run —
+    # which is not the same as "this company has no industry".
+    *_TECHNOLOGIEFELD_COLUMNS,
+    *_WZ_COLUMNS,
 ]
 
 
@@ -1050,25 +1072,32 @@ def labels_report() -> None:
 
 
 # ---------------------------------------------------------------------------------------
-# Which industry is each company in
+# Which industry is each company in — TWO columns, and they must never be mixed
 # ---------------------------------------------------------------------------------------
 #
-# A BRANCH is an industry plus its technology field — "Bahnindustrie", "Gastgewerbe" — from Berlin's
-# list of 77 in `combined_discovery/branch_taxonomy.yaml`. A KEYWORD is a word that suggests one. A
-# WZ CODE is the official German industry code, already in `public.companies` for 8,483 companies
-# and mapped by `combined_discovery/wz_to_branch.yaml`.
-#
-# Three text sources, in falling order of how much they tell us and rising order of coverage:
+# COLUMN 1, the TECHNOLOGIEFELD. Berlin's column "Branche / Technologie- und Anwendungsfeld": 77
+# values in `combined_discovery/branch_taxonomy.yaml`, each with KEYWORDS that suggest it. A company
+# has one of those 77 or it has NONE, and the only thing that may fill it is text the company
+# published about itself. Four such texts, richest first:
 #
 #   services   /leistungen, /ueber-uns, /produkte — fetched by `fetch-content`, richest text
 #   homepage   already cached by `run`. 68% carry at least one keyword
 #   imprint    already cached by `run`. 44%. Kept because on 72 companies it adds a keyword
 #   purpose    `business_purpose` from the register. 11% of 7,478, but the matches are cleaner
 #
-# and the WZ code, which is not text at all and answers first when it can.
+# COLUMN 2, the WZ CLUSTER. The official German industry classification the company is registered
+# under, from `public.companies.wz_code` for 8,483 companies. The division is the code's first two
+# characters and the section is the letter above it, both from `combined_discovery/wz_titles.yaml`.
+# Derived, never decided — see `combined_discovery/wz_cluster.py`.
+#
+# A WZ CODE MAY NEVER FILL THE TECHNOLOGIEFELD. An earlier version mapped one onto the other and gave
+# 2,632 companies a technology field that nothing they published supported, while flattening 22
+# sections and 87 divisions of good official classification to do it. `--source wz` is refused, and
+# `branch_classifier.classify()` has no parameter to pass a code through.
 #
 # `classify` makes NO web requests. Everything it reads is already on disk, which is what makes
-# re-running it after a taxonomy edit cost seconds. `fetch-content` is the only part that downloads.
+# re-running it after a taxonomy edit cost two minutes. `fetch-content` is the only part that
+# downloads.
 
 BRANCHES_PATH = OUT_DIR / "branches.jsonl"
 BRANCH_LABELS_PATH = OUT_DIR / "branch_labels_todo.csv"
@@ -1263,14 +1292,14 @@ def classify(
     any company can be scored.
     """
     from combined_discovery import branch_classifier as bc
-    from combined_discovery import branch_llm
+    from combined_discovery import branch_llm, wz_cluster
 
     taxonomy = bc.load_taxonomy()
-    wz_map = bc.load_wz_map() if "wz" in sources else None
+    clusters = wz_cluster.load_clusters()
     log.info(
-        "%d branches, %d keywords, taxonomy %s | WZ mappings: %d",
+        "%d Technologiefelder, %d keywords, taxonomy %s | %d WZ divisions in %d sections",
         len(taxonomy.branches), len(taxonomy.keyword_branches), taxonomy.version,
-        len(wz_map.mappings) if wz_map else 0,
+        len(clusters.division_titles), len({s for s, _ in clusters.division_sections.values()}),
     )
 
     rows = {r["company_id"]: r for r in sample_rows(limit) if r.get("company_id")}
@@ -1323,8 +1352,6 @@ def classify(
             n_companies=max(with_text, 1),
             keywords_by_source=state["keywords"],
             had_text=state["had_text"],
-            wz_code=facts[company_id].get("wz_code"),
-            wz_map=wz_map,
         )
 
         # What the answer would have been without the pages `fetch-content` downloaded. The same
@@ -1340,8 +1367,6 @@ def classify(
                     k: s for k, s in state["keywords"].items() if s != "services"
                 },
                 had_text=state["had_text"],
-                wz_code=facts[company_id].get("wz_code"),
-                wz_map=wz_map,
             )
 
         verdict = None
@@ -1363,13 +1388,23 @@ def classify(
                 # firing, and a human should see it.
                 result.needs_review = True
 
+        # The second column, attached to every company whether or not any text was read. It is a
+        # lookup in the official classification, not a decision, so it neither needs nor gets any of
+        # the machinery above.
+        cluster = wz_cluster.cluster_for(facts[company_id].get("wz_code"))
+
         append_jsonl(BRANCHES_PATH, {
             "company_id": company_id,
             "company_name": facts[company_id].get("company_name"),
             "website": rows.get(company_id, {}).get("website"),
-            "wz_code": facts[company_id].get("wz_code"),
-            "wz_prefix": result.wz_prefix,
+            # ---- column 1: Berlin's Technologie- und Anwendungsfeld, from the company's own words
+            # `technologiefeld` is what a consumer reads: a Berlin name or the literal NONE, never
+            # anything else. `outcome` says WHY when it is NONE, and the three reasons stay apart.
+            "technologiefeld": result.value,
             "outcome": result.outcome,
+            # `branch` is null where `technologiefeld` is the string "NONE", and the difference is
+            # deliberate: null is for code that needs to test "was a field established", the string
+            # is for a human reading a column that must never contain a blank cell.
             "branch": result.branch,
             "score": result.score,
             "decided_by": result.decided_by,
@@ -1386,6 +1421,13 @@ def classify(
             "llm_reason": verdict.reason if verdict else "",
             "llm_refused": verdict.refused if verdict else "",
             "taxonomy_version": taxonomy.version,
+            # ---- column 2: the official WZ cluster. A different classification by a different
+            # authority, answering a different question. Never mixed with column 1.
+            "wz_code": cluster.code if cluster else None,
+            "wz_division": cluster.division if cluster else None,
+            "wz_division_title": cluster.division_title if cluster else None,
+            "wz_section": cluster.section if cluster else None,
+            "wz_section_title": cluster.section_title if cluster else None,
         })
 
     if use_llm:
@@ -1400,22 +1442,32 @@ def classify_report() -> None:
         raise SystemExit(f"nothing in {BRANCHES_PATH}; run `classify` first")
     n = len(rows)
 
-    print(f"\n=== Branch classification over {n} companies ===\n")
+    print(f"\n=== {n} companies, two independent columns ===")
+    print(
+        "\n  COLUMN 1  Technologiefeld — one of Berlin's 77 fields, or NONE. Only the words a\n"
+        "            company published about itself may fill it.\n"
+        "  COLUMN 2  WZ cluster — the official German industry classification the company is\n"
+        "            registered under. A different question, by a different authority.\n"
+        "\n  They are reported apart because they ARE apart. Neither is a check on the other."
+    )
+
+    print(f"\n\n########## COLUMN 1: Technologiefeld ##########\n")
     outcomes: dict[str, int] = {}
     for row in rows:
         outcomes[row.get("outcome") or "?"] = outcomes.get(row.get("outcome") or "?", 0) + 1
-    order = ("assigned", "no_branch_applies", "torn", "no_keyword", "no_text")
-    print("-- the five outcomes, and they are five different claims --")
+    order = ("assigned", "torn", "no_keyword", "no_text")
+    print("-- one field, or NONE for one of three different reasons --")
     for outcome in order:
-        print(f"{outcome:<34}{outcomes.get(outcome, 0):>7}  {_pct(outcomes.get(outcome, 0), n)}")
+        label = "a Berlin field" if outcome == "assigned" else f"NONE: {outcome}"
+        print(f"{label:<34}{outcomes.get(outcome, 0):>7}  {_pct(outcomes.get(outcome, 0), n)}")
     for outcome, count in outcomes.items():
         if outcome not in order:
             print(f"{outcome:<34}{count:>7}  {_pct(count, n)}")
     print(
-        "\n  `no_branch_applies` is an ANSWER: the register says holding company or housing\n"
-        "  association and Berlin's technology list has no home for it. `no_keyword` means we read\n"
-        "  text and found nothing. `no_text` means we had nothing to read. Adding any two of those\n"
-        "  together turns a blank into a claim."
+        "\n  `torn` means keywords fired and two fields were too close to separate. `no_keyword`\n"
+        "  means we read the company's text and not one keyword appeared. `no_text` means we had\n"
+        "  nothing to read at all. Adding any two of those together turns a blank into a claim —\n"
+        "  and none of them says the company has no technology field."
     )
 
     assigned = [r for r in rows if r.get("outcome") == "assigned"]
@@ -1425,12 +1477,12 @@ def classify_report() -> None:
         deciders[row.get("decided_by") or "?"] = deciders.get(row.get("decided_by") or "?", 0) + 1
     for decider, count in sorted(deciders.items(), key=lambda kv: -kv[1]):
         print(f"{decider:<34}{count:>7}  {_pct(count, n)}")
+    print("\n  `keywords` and `model` are the only two possible values here. A WZ code cannot")
+    print("  appear, by construction — branch_classifier.classify() has no parameter for one.")
 
     print("\n-- which text the keywords came from --")
     from_source: dict[str, int] = {}
     for row in assigned:
-        if row.get("decided_by") == "wz":
-            continue
         for source in (row.get("keywords") or {}).values():
             from_source[source] = from_source.get(source, 0) + 1
     for source, count in sorted(from_source.items(), key=lambda kv: -kv[1]):
@@ -1482,10 +1534,11 @@ def classify_report() -> None:
         "  comment saying why, NOT by adding a stop-list to the code."
     )
 
-    print("\n-- the 15 most common branches --")
+    print("\n-- the 15 most common Technologiefelder --")
     branches: dict[str, int] = {}
     for row in assigned:
-        branches[row.get("branch") or "?"] = branches.get(row.get("branch") or "?", 0) + 1
+        key = row.get("technologiefeld") or row.get("branch") or "?"
+        branches[key] = branches.get(key, 0) + 1
     for branch, count in sorted(branches.items(), key=lambda kv: -kv[1])[:15]:
         print(f"{branch[:33]:<34}{count:>7}  {_pct(count, n)}")
     print(
@@ -1507,28 +1560,70 @@ def classify_report() -> None:
         "  delete these from the taxonomy, and do not add a stop-list."
     )
 
-    # Where the register and the website disagree. These are the rows worth reading by hand.
-    disagree = [
-        r for r in rows
-        if r.get("decided_by") == "wz" and r.get("branch")
-        and r.get("ranked") and r["ranked"][0][0] != r.get("branch")
-    ]
-    print(f"\n{'WZ code and the words disagree':<34}{len(disagree):>7}")
-    for row in disagree[:8]:
-        print(
-            f"    {(row.get('company_name') or '')[:30]:<30} "
-            f"wz={row.get('branch')} words={row['ranked'][0][0]}"
-        )
-
     review = sum(1 for r in rows if r.get("needs_review"))
     print(f"\n{'flagged for a human to look at':<34}{review:>7}")
+
+    # -----------------------------------------------------------------------------------------
+    print(f"\n\n########## COLUMN 2: WZ cluster ##########\n")
+    # -----------------------------------------------------------------------------------------
+    # A lookup in the official classification, not a decision. Nothing here was judged by anybody,
+    # so there is nothing to label and nothing to be right or wrong about — only present or absent.
+    coded = [r for r in rows if r.get("wz_division")]
+    print(f"{'companies with a WZ code':<34}{len(coded):>7}  {_pct(len(coded), n)}")
+    print(f"{'…with no code at all':<34}{n - len(coded):>7}  {_pct(n - len(coded), n)}")
+    divisions = {r["wz_division"] for r in coded}
+    sections = {r.get("wz_section") for r in coded if r.get("wz_section")}
+    print(f"{'distinct divisions present':<34}{len(divisions):>7}")
+    print(f"{'distinct sections present':<34}{len(sections):>7}")
+    untitled = sum(1 for r in coded if not r.get("wz_division_title"))
+    if untitled:
+        print(f"{'!! divisions with no title':<34}{untitled:>7}  wz_titles.yaml is older than the data")
+
+    print("\n-- the 15 biggest divisions (Abteilungen) --")
+    per_division: dict[tuple[str, str], int] = {}
+    for row in coded:
+        key = (row["wz_division"], row.get("wz_division_title") or "?")
+        per_division[key] = per_division.get(key, 0) + 1
+    for (code, title), count in sorted(per_division.items(), key=lambda kv: -kv[1])[:15]:
+        print(f"  {code:<4}{title[:44]:<46}{count:>6}  {_pct(count, n)}")
+
+    print("\n-- rolled up to sections (Abschnitte) --")
+    per_section: dict[tuple[str, str], int] = {}
+    for row in coded:
+        key = (row.get("wz_section") or "?", (row.get("wz_section_title") or "?")[:44])
+        per_section[key] = per_section.get(key, 0) + 1
+    for (letter, title), count in sorted(per_section.items(), key=lambda kv: -kv[1]):
+        # Printed as the classification writes them, in capitals. `.title()` mangles "IT-Beratung".
+        print(f"  {letter:<4}{title[:44]:<46}{count:>6}  {_pct(count, n)}")
+
+    # -----------------------------------------------------------------------------------------
+    print(f"\n\n########## BOTH COLUMNS ##########\n")
+    # -----------------------------------------------------------------------------------------
+    both = sum(1 for r in rows if r.get("outcome") == "assigned" and r.get("wz_division"))
+    field_only = sum(1 for r in rows if r.get("outcome") == "assigned" and not r.get("wz_division"))
+    wz_only = sum(1 for r in rows if r.get("outcome") != "assigned" and r.get("wz_division"))
+    neither = n - both - field_only - wz_only
+    print(f"{'a Technologiefeld and a WZ cluster':<40}{both:>7}  {_pct(both, n)}")
+    print(f"{'a Technologiefeld only':<40}{field_only:>7}  {_pct(field_only, n)}")
+    print(f"{'a WZ cluster only':<40}{wz_only:>7}  {_pct(wz_only, n)}")
+    print(f"{'neither':<40}{neither:>7}  {_pct(neither, n)}")
+    print(
+        "\n  This is coverage, NOT agreement. The two columns answer different questions, so they\n"
+        "  cannot agree or disagree and nothing here should ever be reported as either. A company\n"
+        "  registered under '68 Grundstücks- und Wohnungswesen' with the Technologiefeld NONE is\n"
+        "  fully and correctly described by both columns."
+    )
     print()
 
 
 BRANCH_LABEL_COLUMNS = [
-    "bucket", "company_id", "company_name", "website", "wz_code",
-    "branch", "score", "decided_by", "runner_up", "keyword_count", "keywords", "shortlist",
+    "bucket", "company_id", "company_name", "website",
+    "technologiefeld", "score", "decided_by", "runner_up", "keyword_count", "keywords", "shortlist",
     "llm_reason",
+    # The WZ cluster, as CONTEXT only. Do not label it — nobody guessed it, it is a lookup in the
+    # official classification. It is here because knowing a company is registered under
+    # "56 Gastronomie" helps a human judge whether "Gastgewerbe" is the right technology field.
+    "wz_code", "wz_division_title", "wz_section_title",
     # The two a human fills in. Everything to the left is context for the decision.
     #   label   yes | no | unclear — is `branch` the right industry for this company?
     #   notes   anything worth remembering. Never parsed, only read.
@@ -1541,8 +1636,7 @@ BRANCH_LABEL_VALUES = ("yes", "no", "unclear")
 def branch_label_buckets(rows: list[dict[str, Any]]) -> dict[str, list[dict[str, Any]]]:
     """Six groups, because there are six different questions and one sample cannot answer them all.
 
-    wz_decided        the register's industry code said it. Is that branch right?
-    keyword_decided   the words said it. PRECISION of the cheap path, and the main number here.
+    keyword_decided   the words said it. PRECISION of the whole column, and the main number here.
     model_decided     the model broke a tie. Was breaking it that way right?
     torn              two branches too close to call. **Label these before paying for the model** —
                       they are exactly the rows it would be asked about, and if a human cannot
@@ -1554,12 +1648,12 @@ def branch_label_buckets(rows: list[dict[str, Any]]) -> dict[str, list[dict[str,
     of the draw comes from `no_text`, which is the least informative of the three.
     """
     buckets: dict[str, list[dict[str, Any]]] = {
-        "wz_decided": [], "keyword_decided": [], "model_decided": [],
+        "keyword_decided": [], "model_decided": [],
         "torn": [], "no_keyword": [], "no_text": [],
     }
     for row in rows:
         if row.get("outcome") == "assigned":
-            key = {"wz": "wz_decided", "keywords": "keyword_decided", "model": "model_decided"}.get(
+            key = {"keywords": "keyword_decided", "model": "model_decided"}.get(
                 row.get("decided_by") or "", "keyword_decided"
             )
             buckets[key].append(row)
@@ -1598,7 +1692,9 @@ def branch_labels(per_bucket: int = 10) -> None:
                 "company_name": row.get("company_name"),
                 "website": row.get("website") or "",
                 "wz_code": row.get("wz_code") or "",
-                "branch": row.get("branch") or "",
+                "wz_division_title": row.get("wz_division_title") or "",
+                "wz_section_title": row.get("wz_section_title") or "",
+                "technologiefeld": row.get("technologiefeld") or row.get("branch") or "",
                 "score": row.get("score") or "",
                 "decided_by": row.get("decided_by") or row.get("outcome"),
                 "runner_up": row.get("runner_up") or "",
@@ -1622,7 +1718,7 @@ def branch_labels(per_bucket: int = 10) -> None:
 
     print(f"\nWrote {len(out)} rows to {BRANCH_LABELS_PATH}")
     print(f"Fill in `label` with one of: {', '.join(BRANCH_LABEL_VALUES)}")
-    print("  wz/keyword/model_decided -> is `branch` the right industry for this company?")
+    print("  keyword/model_decided    -> is `technologiefeld` right for this company?")
     print("  torn                     -> can YOU pick one of `shortlist` from the same text? If")
     print("                              not, no model can. Write which one in `notes`.")
     print("  no_keyword / no_text     -> look the company up. `yes` if some branch on the list")
@@ -1649,7 +1745,6 @@ def branch_labels_report() -> None:
 
     print(f"\n=== {len(rows)} rows in {BRANCH_LABELS_PATH.name} ===")
     for bucket, question in (
-        ("wz_decided", "the register's industry code decided it"),
         ("keyword_decided", "the words on the page decided it"),
         ("model_decided", "the model broke a tie"),
     ):
@@ -1754,11 +1849,12 @@ def main() -> None:
     p_classify = sub.add_parser("classify", help="work out each company's branch")
     p_classify.add_argument("--limit", type=int, default=None)
     p_classify.add_argument(
-        "--source", default="wz,page,purpose",
+        "--source", default="page,purpose",
         help=(
-            "comma-separated: wz, page, purpose. Default all three. `wz` is the register's industry "
-            "code and answers first; `page` is the cached website text; `purpose` is the register's "
-            "description of the business."
+            "comma-separated: page, purpose. Default both. These are the texts the company itself "
+            "published: `page` is its cached website, `purpose` the business purpose it registered. "
+            "There is deliberately no `wz` source — a WZ code is a different classification and "
+            "gets its own column, never the Technologiefeld."
         ),
     )
     p_classify.add_argument(
@@ -1796,9 +1892,15 @@ def main() -> None:
         fetch_content(args.limit, args.workers)
     elif args.command == "classify":
         sources = {s.strip() for s in args.source.split(",") if s.strip()}
-        unknown = sources - {"wz", "page", "purpose"}
+        unknown = sources - {"page", "purpose"}
         if unknown:
-            raise SystemExit(f"unknown source(s): {sorted(unknown)}")
+            # `wz` used to be accepted here and filled the Technologiefeld from the register's
+            # industry code. It is refused on purpose now: that is a different classification
+            # and it gets its own column. See combined_discovery/wz_cluster.py.
+            raise SystemExit(
+                f"unknown source(s): {sorted(unknown)}. The Technologiefeld is filled only from "
+                "text the company published: page, purpose."
+            )
         classify(args.limit, sources, args.llm)
     elif args.command == "classify-report":
         classify_report()

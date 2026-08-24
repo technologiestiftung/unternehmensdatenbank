@@ -143,49 +143,52 @@ changing `confidence.py`, the judge gate, or anything that reads a page. In shor
 Local model setup — native Windows Ollama with `OLLAMA_IGPU_ENABLE=1`, which is **74× faster** than
 the Docker one because the host had paged the WSL2 VM's memory to disk: vault `Local Model Setup`.
 
-## Branch classification — which industry a company is in
+## Industry classification — TWO columns, and they must never be mixed
 
-A **branch** is an industry plus its technology field ("Bahnindustrie", "Gastgewerbe"), from Berlin's
-list of 77. A **WZ code** is the official German industry code, already in `public.companies` for
-8,483 companies. Full detail and every number:
-[docs/branch-classification.md](docs/branch-classification.md).
+| | Technologiefeld | WZ cluster |
+|---|---|---|
+| the question | what field does it **work in**? | what is it **registered as**? |
+| from | words the company published | its official WZ code |
+| values | one of Berlin's 77, or `NONE` | 76 divisions in 20 sections |
+| filled for | **974** companies (6.7%) | **8,483** (58.7%) |
+| judgement | keyword weights, thresholds | **none** — a lookup |
+
+Full detail and every number: [docs/branch-classification.md](docs/branch-classification.md).
+Command-by-command: [docs/running-branch-classification.md](docs/running-branch-classification.md).
 
 ```powershell
-python scripts/wz_branch_worksheet.py write --top 100   # 100 codes = 5,845 companies (69%)
-python scripts/run_combined_discovery.py fetch-content  # 1,567 pages, once, then cached
-python scripts/run_combined_discovery.py classify --source wz,page,purpose
+python scripts/check_branch_classifier.py                                # free, first
+python scripts/run_combined_discovery.py fetch-content                   # once, 1,567 pages
+python scripts/run_combined_discovery.py classify --source page,purpose   # 2 min, no network
 python scripts/run_combined_discovery.py classify-report
 ```
 
-1. **The WZ code answers first, and it does 84% of the work.** With 93 codes mapped: **3,118**
-   companies assigned and **3,151** told "no branch applies" — 6,269 of 14,443 answered, against 974
-   from keywords alone. The codes are **WZ 2025**, not 2008; official titles are checked in at
-   `combined_discovery/wz_titles.yaml` (2,008 codes), so nothing depends on the spreadsheet. It is deterministic, free, and it reaches the **1,943** companies
-   that have a code and no describing text at all. `null` in `wz_to_branch.yaml` means "no branch
-   applies" — holding companies and landlords genuinely have none, and that is an answer, not a gap.
-2. **Both lists are YAML, not tables.** They are edited by hand and need comments; a table would mean
-   a migration per edit, or an unversioned table that makes last month's run impossible to reproduce.
-3. **Never match a keyword inside a German compound.** Allowing it took `sicherheit` from 90 pages to
-   139 — it hides in *Arbeitssicherheit* — and made Defence Tech the biggest industry in Osnabrück,
-   while clear winners *fell* 338 → 316.
-4. **Read the homepage, not the Impressum** (68% carry a keyword against 44%) — and better still the
+1. **A WZ code may never fill the Technologiefeld.** An earlier version mapped one onto the other and
+   gave 2,632 companies a technology field that nothing they published supported, while flattening 22
+   sections and 87 divisions of good official classification to do it. `classify()` now has **no WZ
+   parameter at all**, and the guard fails if one reappears. Same class of error as "a register number
+   proves a page is *about* a company, never that it *is* its site".
+2. **`NONE` is the normal Technologiefeld and not a failure**, with three reasons kept apart: `torn`
+   400, `no_keyword` 6,365, `no_text` 6,704. Never add two of them together.
+3. **The WZ cluster needs no mapping and no human.** Division = `wz_code[:2]`, section = the letter
+   above it, both from `wz_titles.yaml` (2,008 codes, **WZ 2025** — `70.10.4` and `62.10.9` do not
+   exist in WZ 2008, so a 2008 table mismatches silently).
+4. **Never match a keyword inside a German compound.** Allowing it took `sicherheit` from 90 pages to
+   139 — it hides in *Arbeitssicherheit* — and made Defence Tech the biggest field in Osnabrück, while
+   clear winners *fell* 338 → 316.
+5. **Read the homepage, not the Impressum** (68% carry a keyword against 44%) — and better still the
    pages it links to. 644 of 766 homepages link to `/leistungen` or `/ueber-uns`; fetching them gave
-   92% keyword coverage and **136 companies a branch nothing else would have found.**
-5. **Keywords decide; the model only breaks ties, from three options.** Asked to pick from all 77 it
-   files everything under "Dienstleistung". 10.3 s a page on `qwen3.5:4b`, so it is off by default.
-6. **`classify` makes zero web requests** and takes two minutes over all 14,443 companies. That is
+   **136** companies a field nothing else found.
+6. **Keywords decide; the model only breaks ties, from three options.** Asked to pick from all 77 it
+   files everything under "Dienstleistung". 10.3 s a page, so it is off by default.
+7. **`classify` makes zero web requests** and takes two minutes over all 14,443 companies. That is
    what makes arguing with the taxonomy cheap; `fetch-content` is the only part that downloads.
 
-Where the register and the website disagree: **361 companies**, printed by `classify-report`. Reading
-them, the register is usually right — which is both why it goes first and the size of the eventual
-resolution rule.
+Not yet known: **whether the Technologiefeld is right.** 974 companies have one and no row is
+hand-checked. `classify-labels` writes the 40-row worksheet; only `classify-labels-report` reports
+precision. The WZ column needs no labelling — nobody guessed it.
 
-Not yet known: **whether any of it is right.** 3,118 companies have a branch and no row is
-hand-checked, and 2,632 of those rest on a WZ mapping drafted in one pass.
-`classify-labels` writes the 40-row worksheet; only `classify-labels-report` says anything about
-precision.
-
-## Five facts that have misled people repeatedly
+## Six facts that have misled people repeatedly
 
 - **`website_url` is a view column, not a table column.** V9 dropped it from `companies`. Enriched
   fields live in `company_canonical_field_sources` and are read through `public.v_companies_enriched`.
@@ -193,6 +196,10 @@ precision.
   company's site.** Registry pages, insolvency trackers and directories all quote them.
   `search_common.is_own_site_candidate` is the single predicate for that call; a looser one anywhere
   else is the recurring bug here. It reappeared in the judge, where a directory scored 0.805.
+- **An official industry code says what a company is REGISTERED AS, never which technology field
+  it WORKS IN.** The two are separate columns — Technologiefeld and WZ cluster — and mapping one
+  onto the other gave 2,632 companies a field nothing they published supported. Structurally
+  prevented now: `branch_classifier.classify()` has no WZ parameter.
 - **A word that names a quality is not a word that names an industry, and no measurement separates
   them.** `sicherheit` appears in 1.8% of our texts, `einzelhandel` in 3.0%; only one is decisive.
   Berlin's sheet filed `Sicherheit` under Defence Tech, and it produced 27 of that branch's 35

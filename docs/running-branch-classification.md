@@ -1,0 +1,221 @@
+# How to run the industry classification, and what you should see
+
+Every command here is run from the repo root on Windows, in PowerShell. Concepts and the reasoning
+behind the numbers are in [branch-classification.md](branch-classification.md); this file is just the
+order to type things in.
+
+Two columns come out of this, and they are separate on purpose:
+
+- **Technologiefeld** — one of Berlin's 77 technology and application fields, or `NONE`. Filled only
+  from words the company published about itself.
+- **WZ cluster** — the official German industry classification the company is registered under.
+  Derived from its WZ code with no judgement at all.
+
+## 0. What has to be running
+
+| | needed for | how to start it |
+|---|---|---|
+| Postgres | everything (it reads `public.companies`) | `docker compose up -d postgres` |
+| nothing else | steps 1–5 | — |
+| Ollama | only the optional step 7 | it runs natively on Windows |
+
+Airflow is **not** involved. This is a script, it writes nothing to the database, and it can be
+stopped and re-run at any point.
+
+## 1. The guards — free, and always first
+
+```powershell
+python scripts/check_branch_classifier.py
+python scripts/check_combined_discovery.py
+```
+
+No network, no database, no model, about a second each. **Expect `all checks passed`** and
+`all combined-discovery checks passed`. If the first one fails, stop: it means either a keyword now
+matches inside a German compound word, or something has tried to let a WZ code fill the
+Technologiefeld. Both are bugs this project has already paid for once.
+
+## 2. Fetch the pages that actually describe the businesses — once
+
+```powershell
+python scripts/run_combined_discovery.py fetch-content
+```
+
+This is **the only step that touches the internet.** It reads the homepages already on disk, finds
+the links they offer to `/leistungen`, `/ueber-uns`, `/produkte` and similar, and downloads them under
+a cap of 2 per category and 4 per company.
+
+Expect, over the 902 companies with a website:
+
+```
+companies in scope                          902
+no homepage in the cache                    136
+homepage but no services-style link         188
+pages chosen                               1598
+…that came back                            1567
+…that would not load                         31
+```
+
+About **2 minutes 51 seconds** at eight threads. Running it again downloads **nothing** — everything
+is cached. To try it small first, use `--limit 100`, which means 100 companies *that have a website*,
+not the first 100 of the table.
+
+## 3. Classify — two minutes, no network at all
+
+```powershell
+python scripts/run_combined_discovery.py classify --source page,purpose
+```
+
+Reads every company's text from disk, counts which Berlin keywords appear, weights them, and attaches
+the WZ cluster to every row. Expect:
+
+```
+77 Technologiefelder, 526 keywords, taxonomy 4d7e5d81c795 | 87 WZ divisions in 22 sections
+14443 companies in scope
+7739 companies have text to read
+249 of 526 keywords appear at least once
+Wrote 14443 companies to …\combined_discovery\branches.jsonl
+```
+
+Roughly **2 minutes 30 seconds**, and **zero web requests**. That is what makes it cheap to edit
+`branch_taxonomy.yaml` and simply run this again.
+
+`--source` accepts `page` and `purpose`, which are the two kinds of text a company publishes about
+itself. **`--source wz` is deliberately refused** — a WZ code is a different classification and gets
+its own column, never the Technologiefeld.
+
+## 4. Read the scorecard
+
+```powershell
+python scripts/run_combined_discovery.py classify-report
+```
+
+It prints three blocks. **Column 1, Technologiefeld:**
+
+```
+a Berlin field                        974    6.7%
+NONE: torn                            400    2.8%
+NONE: no_keyword                     6365   44.1%
+NONE: no_text                        6704   46.4%
+```
+
+`NONE` is the normal answer, not a failure — Berlin's list is a technology taxonomy and most of
+Osnabrück is trades and restaurants. The three reasons are counted apart on purpose: *"we had no text
+to read"* is not evidence that a company has no technology field.
+
+Also in this block: which text the keywords came from (`purpose` 719 hits, `services` 527, `homepage`
+289, `imprint` 59), whether the downloaded services pages paid for themselves (**136** companies got a
+field only because of them), the 15 most common fields, and — worth reading every time — the keywords
+that carried a whole assignment on their own, **777 of the 974**.
+
+**Column 2, WZ cluster:**
+
+```
+companies with a WZ code             8483   58.7%
+…with no code at all                 5960   41.3%
+distinct divisions present             76
+distinct sections present              20
+```
+
+then the 15 biggest divisions and the section rollup. Nothing here was decided by anybody, so there is
+nothing to argue with — only present or absent.
+
+**Both columns** ends with coverage: 864 companies have both, 110 a Technologiefeld only, 7,619 a WZ
+cluster only, 5,850 neither. That is coverage and **not** agreement: the two columns answer different
+questions and cannot agree or disagree.
+
+### Two things in that report that mean "go and fix something"
+
+1. **`Defence Tech` near the top of the field list** — a keyword is matching inside a German compound
+   again.
+2. **`!! divisions with no title`** — `wz_titles.yaml` is older than the data. Rebuild it:
+   `python scripts/import_wz_titles.py <the WZ .xlsx>`.
+
+## 5. The spreadsheet to hand over
+
+```powershell
+python scripts/run_combined_discovery.py csv
+```
+
+Writes `airflow/data/combined_discovery/combined_discovery_urls.csv`. The two column groups sit side
+by side and never mix:
+
+| column | what it holds |
+|---|---|
+| `technologiefeld` | a Berlin field, or the literal `NONE`. Never blank, never anything else. |
+| `technologiefeld_reason` | `assigned`, `torn`, `no_keyword` or `no_text` |
+| `technologiefeld_keywords` | the words that decided it, so any row can be argued with |
+| `technologiefeld_text_source` | `services`, `homepage`, `imprint` or `purpose` |
+| `wz_code` | the official code the company is registered under |
+| `wz_division` / `wz_division_title` | e.g. `56` / `Gastronomie` |
+| `wz_section` / `wz_section_title` | e.g. `I` / `GASTGEWERBE` |
+
+A useful sanity read: sort by `technologiefeld` and look at a few rows against their `wz_division`.
+They will often say different things about the same company, and that is correct.
+
+## 6. The only step that says whether any of this is RIGHT
+
+Everything above counts what happened. None of it says whether the Technologiefeld is correct, because
+that needs a person.
+
+```powershell
+python scripts/run_combined_discovery.py classify-labels
+```
+
+Writes 40 rows to `airflow/data/combined_discovery/branch_labels_todo.csv` in five groups of ten:
+`keyword_decided`, `model_decided`, `torn`, `no_keyword`, `no_text`. Fill in the **`label`** column
+with `yes`, `no` or `unclear`, and use `notes` freely.
+
+- `keyword_decided` — is `technologiefeld` right for this company? This is the precision number.
+- `torn` — can *you* pick one of `shortlist` from the same text? **Do this group first:** if a person
+  cannot, the model in step 7 cannot either, and you have saved yourself 52 minutes.
+- `no_keyword` / `no_text` — look the company up. `yes` if some field on Berlin's list does fit it,
+  `no` if genuinely none does. This is the ceiling.
+
+The `wz_*` columns are in the file as **context, not for labelling** — nobody guessed them. Knowing a
+company is registered under `56 Gastronomie` helps you judge whether `Gastgewerbe` is right.
+
+Re-running merges: a label already written is never overwritten. Then:
+
+```powershell
+python scripts/run_combined_discovery.py classify-labels-report
+```
+
+## 7. Optional: the local model, for the ties only
+
+Only worth it if step 6 says the `torn` rows are separable by a human.
+
+```powershell
+$env:OLLAMA_MODEL = "qwen3.5:4b"
+python scripts/run_combined_discovery.py classify --source page --llm
+python scripts/run_combined_discovery.py classify-report
+```
+
+**10.3 seconds per page** and 302 rows qualify, so about **52 minutes**, paid once — answers are cached
+against the page and the taxonomy version. The model only ever chooses between the **three** fields
+the keywords shortlisted, plus "keine"; an answer that was not on the menu is thrown away, and "keine"
+flags the row for a human.
+
+## 8. When Berlin's list changes
+
+```powershell
+python scripts/import_branch_taxonomy.py "path\to\ALLE_Abfrage_Labels.csv" --out C:\temp\new.yaml
+```
+
+Writes somewhere else so you can `git diff` it against the live `branch_taxonomy.yaml` — the live file
+carries hand edits and comments that a straight overwrite would destroy. Then edit the live file by
+hand, re-run the guard and step 3, and compare the report.
+
+Editing a keyword costs one `classify` run: two minutes, no downloads.
+
+## Everything that gets written, and where
+
+| file | written by | in git? |
+|---|---|---|
+| `airflow/data/combined_discovery/branches.jsonl` | `classify` | no, gitignored |
+| `…/combined_discovery_urls.csv` | `csv` | no |
+| `…/branch_labels_todo.csv` | `classify-labels`, then you | no |
+| `…/pages/content/…` | `fetch-content` | no |
+| `airflow/dags/combined_discovery/branch_taxonomy.yaml` | you, by hand | **yes** |
+| `airflow/dags/combined_discovery/wz_titles.yaml` | `import_wz_titles.py` | **yes** |
+
+Nothing here writes to Postgres. It only reads `public.companies`.

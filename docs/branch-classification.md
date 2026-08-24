@@ -1,116 +1,124 @@
-# Which industry is each company in?
+# Two columns: Technologiefeld and WZ cluster
 
-We have 14,443 companies, mostly just a name and an address. This is about filling in one more
-field: the industry. Everything here is free — no paid API, and the language model is optional and
-runs on the laptop.
+We have 14,443 companies, mostly just a name and an address. This is about adding two industry
+columns. Everything here is free — no paid API, and the language model is optional and runs on the
+laptop.
+
+**They are two columns because they are two different questions**, and the single most expensive
+mistake made here was answering one with the other.
+
+| | Technologiefeld | WZ cluster |
+|---|---|---|
+| the question | which technology or application field does this company **work in**? | what is it **registered as**? |
+| who decides | Berlin's economic-development list of 77 fields | the Statistisches Bundesamt |
+| filled from | words the company published about itself | the company's official WZ code |
+| possible values | one of the 77, or `NONE` | 76 divisions in 20 sections |
+| companies with a value | **974** (6.7%) | **8,483** (58.7%) |
+| any judgement involved | yes: keyword weights, thresholds | **none** — it is a lookup |
+
+Neither is a check on the other. A company registered under *68 Grundstücks- und Wohnungswesen* whose
+Technologiefeld is `NONE` is fully and correctly described by both columns.
 
 ## The words
 
-- **Branch** (German *Branche*) — an industry plus the technology field it sits in. "Bahnindustrie".
-  "Gastgewerbe". "Additive Fertigung". Berlin's economic-development people keep a list of 77.
-- **Keyword** — a word that suggests a company is in a branch. "Schienenfahrzeuge" suggests
-  Bahnindustrie. The Berlin list gives each branch a handful: 527 distinct words in total, 5 per
-  branch in the middle case and 35 for the busiest.
-- **WZ code** — the official German industry code, *Klassifikation der Wirtschaftszweige*. `56.1` is
-  restaurants, `62.10.9` software, `64.2` holding companies. Somebody else already did this work and
-  the Northdata export brought it along for 8,483 of our companies.
-- **The page cache** — every web page the discovery pipeline downloaded, gzipped on disk. It exists
-  so that changing *what we read out of a page* costs minutes instead of hours.
+- **Technologiefeld** — short for Berlin's column *Branche / Technologie- und Anwendungsfeld*. 77
+  values: "Bahnindustrie", "Quantentechnologien", "Gastgewerbe", "Handwerk". A company has one of
+  those or it has `NONE`.
+- **Keyword** — a word that suggests a Technologiefeld. "Schienenfahrzeuge" suggests Bahnindustrie.
+  The Berlin list gives each field a handful; 526 distinct words in total.
+- **WZ code** — the official German industry code, *Klassifikation der Wirtschaftszweige*. `56.11.1`
+  is "Restaurants mit Bedienung". The Northdata export brought one along for 8,483 companies.
+- **Division** (*Abteilung*) — the first two characters of a WZ code, e.g. `56 Gastronomie`. 87 exist,
+  76 occur here. **Section** (*Abschnitt*) — the letter above it, e.g. `I GASTGEWERBE`. 22 exist, 20
+  occur here.
+- **The page cache** — every web page the discovery pipeline downloaded, gzipped on disk, so that
+  changing *what we read out of a page* costs minutes instead of hours.
 
 Where things live:
 
 | | |
 |---|---|
-| Berlin's branch list | `airflow/dags/combined_discovery/branch_taxonomy.yaml` |
-| WZ code → branch | `airflow/dags/combined_discovery/wz_to_branch.yaml` |
-| what every WZ code means | `airflow/dags/combined_discovery/wz_titles.yaml` (2,008 codes) |
-| the matcher | `airflow/dags/combined_discovery/branch_classifier.py` |
+| Berlin's 77 fields and their keywords | `airflow/dags/combined_discovery/branch_taxonomy.yaml` |
+| every WZ code and its official name | `airflow/dags/combined_discovery/wz_titles.yaml` (2,008 codes) |
+| the keyword matcher | `airflow/dags/combined_discovery/branch_classifier.py` |
+| the WZ cluster lookup | `airflow/dags/combined_discovery/wz_cluster.py` |
 | fetching better pages | `airflow/dags/combined_discovery/content_pages.py` |
 | the optional tie-break | `airflow/dags/combined_discovery/branch_llm.py` |
 | the commands | `scripts/run_combined_discovery.py classify …` |
 | the free guard | `scripts/check_branch_classifier.py` |
 
-## Why the lists are YAML files and not database tables
+## The mistake this design exists to prevent
 
-Three reasons, and they are the same three every time this question comes up.
+An earlier version had **one** column and filled it from both sources. A hand-written mapping turned
+a WZ code into a Technologiefeld: `56.11.1 → Gastgewerbe`, `43.22.0 → Handwerk`, `70.20.0 →
+Dienstleistung`. It looked like a triumph — 3,118 companies with a field instead of 974.
 
-1. **A human edits them, often.** 277 of the 527 keywords never matched a single company here. Those
-   lines will be argued about. In YAML a changed keyword is a changed line in `git diff`. The same
-   list in a spreadsheet cell is 35 comma-separated words on one line, and a diff of that line tells
-   you nothing.
-2. **YAML takes a comment, and the comment is the point.** "Sicherheit removed: it produced 27 of
-   this branch's 35 assignments and they were a bed shop, a lift company and an estate agent." That
-   sentence has nowhere to live in a table row, and without it somebody adds the keyword back.
-3. **A table cannot be reproduced.** Schema changes here are forward-only and immutable, so every
-   edit to the list would need its own migration — or the list becomes a table people edit directly,
-   and then last month's classification can never be re-run.
+It was wrong twice.
 
-If a web interface ever needs the lists, load the YAML into a table at that point. The YAML stays the
-source of truth.
+1. **It laundered one classification's answer into the other's voice.** "Fazenda Restaurantbetriebe
+   GmbH" was given the Technologiefeld *Gastgewerbe* because its WZ code says restaurant. Nothing the
+   company published said it. 2,632 of the 3,118 filled values were like that, and no column in the
+   output said which were which.
+2. **It threw the WZ classification away.** WZ has 22 sections and 87 divisions of its own, official
+   and complete. Squeezing it through a 77-value Berlin list flattened all of that to gain a coverage
+   number.
 
-## Three stages, in the order they should be built
+This is the same class of error the website side already documents: *a register number on a page
+proves the page is about a company, never that it is that company's site.* Here: **an official
+industry code says what a company is registered as, never which technology field it works in.**
 
-### Stage A — the WZ code
+The fix is structural rather than a rule to remember. `branch_classifier.classify()` **has no
+parameter for a WZ code**, so the mapping cannot be reintroduced by accident, and
+`check_branch_classifier.py` fails if that parameter ever reappears.
 
-The cheapest signal in the project. One SQL query, no downloads, no model, and it reaches companies
-nothing else can:
+## Column 2 first, because it is the easy one
+
+`wz_cluster.cluster_for(code)` and that is the whole feature:
+
+- the **division** is `wz_code[:2]`, so `56.11.1`, `56.1` and `56` all land in `56`;
+- the **section** is the letter that owns that division, looked up in `wz_titles.yaml`.
+
+No mapping, no threshold, no human. Nothing to label, because nobody guessed anything.
 
 | | |
 |---|---|
-| companies with a WZ code | **8,483** of 14,443 |
-| distinct codes | 756 |
-| covered by the 25 most common codes | 3,563 (42%) |
-| covered by the 100 most common | **5,845 (69%)** |
-| have a code but **no** describing text at all | **1,943** |
+| companies with a WZ code | **8,483** (58.7%) |
+| …with none at all | 5,960 (41.3%) |
+| distinct divisions present | **76** |
+| distinct sections present | **20** |
 
-So a hand-written mapping of 100 codes answers for 5,845 companies. That is six times what the whole
-website path produces.
+The biggest divisions are a portrait of the region:
 
-**Matched by longest prefix**, because the codes arrive at three different depths — `64.2`, `64.21`,
-`94.99` and `94.99.9` all occur in the same column. A company's `94.99.9` falls back to the entry for
-`94.99`. Exact matching alone would leave most of the table unmapped and look like the mapping was
-unfinished.
-
-**"No branch applies" is written down explicitly**, and this matters more than it sounds. The biggest
-codes are holding companies (508), membership organisations (383), property management (369) and
-landlords (189). Berlin's list was built for a technology economy and has no home for any of them.
-Writing `null` records that as a decision. Leaving it blank invites somebody to file 508 holding
-companies under Finanzwirtschaft to make a coverage number look better.
-
-Only **3 of the 78** rows in Berlin's sheet even hint at a WZ code, so nothing can be converted
-automatically. `scripts/wz_branch_worksheet.py write` prints the 100 codes with company counts,
-three example names, and — the column that makes the sheet fillable — **the official title of the
-code**. Deciding whether *Unternehmensberatung* is a branch is a judgement; deciding whether
-*70.20.0* is one is a lookup. `apply` reads the sheet back and refuses any branch name that is not
-in the taxonomy, so a typo cannot reach the mapping.
-
-**Our codes are WZ 2025, not WZ 2008.** All 100 of the most common ones match the 2025 edition
-*exactly*, including three-suffix codes like `70.10.4` and `62.10.9` that the 2008 edition does not
-contain at all. Anybody mapping these against a 2008 table will mismatch silently, which is the
-worst way to be wrong. The official titles are checked in at
-`airflow/dags/combined_discovery/wz_titles.yaml` — **2,008 codes, grouped by section, editable by
-hand**, so nothing in the repo depends on a spreadsheet sitting in somebody's Downloads folder.
-`wz_branch_worksheet.py titles <xlsx>` rebuilds it, which is needed once per WZ edition rather than
-once per run. The .xlsx itself stays out of the repo: a 75 KB binary cannot be reviewed in a pull
-request, and a YAML file can.
-
-### The gap the mapping refuses to paper over
-
-Seven codes were left **deliberately blank** rather than mapped or marked `none`:
-
-| codes | companies | why |
+| division | companies | |
 |---|---|---|
-| `62.10`, `62.10.9`, `62.20.1`, `62.90.0` | ~250 | Programmierung and IT-Beratung. Berlin's list has *Künstliche Intelligenz*, *Games*, *FinTech*, *GovTech*, *Cybersicherheit* — and **no general software branch at all** |
-| `35.11`, `35.11.1`, `35.11.2` | ~230 | Elektrizitätserzeugung aus **nicht erneuerbaren** Energieträgern. The list has Solarenergie, Windenergie, Fernwärme and no conventional generation |
+| 64 | 969 | Erbringung von Finanzdienstleistungen |
+| 68 | 923 | Grundstücks- und Wohnungswesen |
+| 47 | 647 | Einzelhandel |
+| 94 | 626 | Interessenvertretungen, kirchliche Vereinigungen |
+| 46 | 573 | Großhandel |
+| 70 | 492 | Verwaltung und Führung von Unternehmen |
+| 43 | 400 | Vorbereitende Baustellenarbeiten, Bauinstallation |
+| 62 | 340 | IT-Dienstleistungen |
+| 35 | 246 | Energieversorgung |
+| 56 | 233 | Gastronomie |
 
-Blank means `apply` skips them and they fall through to the keyword path. `none` would have claimed
-Berlin's list is complete, and a forced branch would have been wrong for 480 companies. The gap is
-the finding, and it belongs to whoever owns the taxonomy.
+Rolled up, the four biggest sections are `G Handel` (1,220), `L Finanz- und
+Versicherungsdienstleistungen` (1,159), `N Wissenschaftliche und technische Dienstleistungen` (1,038)
+and `M Grundstücks- und Wohnungswesen` (923).
 
-### Stage B0 — get the right pages first
+`wz_titles.yaml` is checked in — 2,008 codes with a machine-readable `sections:` block, and the
+section headings kept as comments so the file reads top to bottom. **Our codes are WZ 2025, not WZ
+2008**: `70.10.4` and `62.10.9` do not exist in the 2008 edition at all, so anyone checking against a
+2008 table will mismatch silently. `scripts/import_wz_titles.py <xlsx>` rebuilds it, once per WZ
+edition; the .xlsx itself stays out of the repo because a 75 KB binary cannot be reviewed in a pull
+request and a YAML file can.
 
-The pipeline downloads two pages per company: the homepage, and the **Impressum** — the legal contact
-page every German business website must have. Neither is where a business describes what it does. The
+## Column 1: the Technologiefeld, from what the company published
+
+### Stage 1 — get the right pages
+
+The pipeline downloads two pages per company: the homepage, and the **Impressum**, the legal contact
+page every German business website must have. Neither is where a business says what it does — an
 Impressum is a name, an address and a register number. Measured over the 699 companies where we have
 both:
 
@@ -118,218 +126,129 @@ both:
 |---|---|---|
 | average characters | 6,386 | 5,245 |
 | at least one keyword | **474 (68%)** | 311 (44%) |
-| total keyword hits | **1,130** | 569 |
 
-So the homepage wins, and the Impressum still earns its place: on 72 companies it contributes a
-keyword the homepage lacks.
-
-But the real text is on `/leistungen`, `/ueber-uns` and `/produkte` — and **the homepage already
-links there.** Finding those links costs nothing, because the homepage is on disk:
+The homepage wins; the Impressum still earns its place, contributing a keyword the homepage lacks on
+72 companies. But the real text is on `/leistungen`, `/ueber-uns` and `/produkte` — and the homepage
+already links there, so **finding those links costs nothing**:
 
 | | |
 |---|---|
 | cached homepages | 766 of 902 |
-| …that link to a services or about-style page | **644 (84%)** |
+| …linking to a services or about-style page | **644 (84%)** |
+| pages fetched, capped at 2 per category and 4 per company | **1,567** in 2 min 51 s |
+| companies given a Technologiefeld **only** by those pages | **136** |
+| …given a different one | 18 |
 
-Fetching them, capped at 2 per category and 4 per company, was **1,598 pages chosen and 1,567
-fetched** for all 902 companies, in 2 minutes 51 seconds at eight threads. And it paid:
+**Follow the links, never guess the paths**: `/leistungen` 404s on every site that calls it
+`/de/unternehmen/leistungen`. And note that more text is not monotonically more answers — richer pages
+spread keywords over more fields, so some companies moved from a clear winner to a visible tie. That
+is probably better precision, but precision is not measured yet.
 
-| on the 79 companies measured first | |
-|---|---|
-| now carry at least one keyword | **73 (92%)**, against the homepage's 68% |
-| assigned a branch | 44 |
-| …**only** because of these pages | **39** |
-
-Over all 902: **136 companies got a branch only from these pages** and 18 got a different one.
-
-Two things to keep in mind about that. First, **follow the links, never guess the paths**: a fixed
-list asking for `/leistungen` gets a 404 from every site that calls it `/de/unternehmen/leistungen`.
-The repo already learned this from the other direction — `url_discovery.http_client.fetch_impressum`
-follows the homepage's own links and the fixed path list is only its fallback. Second, **more text is
-not monotonically more answers.** Richer pages spread keywords over more branches, so companies that
-had one keyword and a clear winner now have four keywords and a contest: assignments stayed flat at
-about 990 while ties rose from 360 to 400. Whether that is worse or better is a precision question,
-and precision is not known yet — see the end.
-
-### Stage B — count the keywords, weighted
-
-Read the company's text — services pages first, then homepage, then Impressum, then the register's
-`business_purpose` — and see which branch's keywords appear.
+### Stage 2 — count the keywords, weighted
 
 **A keyword matches only with a word boundary on both sides. Never inside a German compound.** German
 glues nouns together, so `Batterierecycling` really does sit inside `Batterierecyclinganlage`, and
-allowing that looks like free coverage. It is not. Measured: pages with at least one keyword rose from
-61% to 65%, but `sicherheit` went from 90 companies to 139 — it hides inside *Arbeitssicherheit* and
-*Sicherheitstechnik* — and **Defence Tech became the most common industry in Osnabrück.** Companies
-with a clear winner *fell*, 338 to 316. More matches, worse answers. `scripts/check_branch_classifier.py`
-pins this shut.
+allowing it looks like free coverage. Measured: pages with at least one keyword rose 61% → 65%, but
+`sicherheit` went from 90 companies to 139 — it hides in *Arbeitssicherheit* and *Sicherheitstechnik*
+— and **Defence Tech became the most common industry in Osnabrück**, while companies with a clear
+winner *fell* 338 → 316. More matches, worse answers.
 
-Then two weights, both **measured from the data** rather than chosen:
+Then two weights, both **measured from the data**:
 
-1. **How many companies use the word at all.** `log(companies / (1 + how many use it))`. A word on
-   500 of 7,739 companies is worth almost nothing; a word on 3 is worth a lot.
-2. **How many branches claim the word.** `schienenfahrzeuge` belongs to Bahnindustrie alone and
-   carries its full value. `sensorik` is claimed by seven branches and gives each a seventh.
+1. **How many companies use the word at all** — `log(companies / (1 + df))`. A word on 500 of 7,739
+   companies is worth almost nothing; a word on 3 is worth a lot. Counted per **company**, not per
+   page, or a company with four cached pages inflates its own words fourfold.
+2. **How many fields claim the word** — `schienenfahrzeuge` belongs to Bahnindustrie alone and keeps
+   its full value; `sensorik` is claimed by seven and gives each a seventh.
 
-A multi-word keyword scores higher on top of that: "european train control system" appearing is far
-stronger evidence than "steuerung" appearing.
+A multi-word keyword scores higher on top of that. Same rule as `name_frequency.common_words` for
+company names: genericness is measured, never hand-listed.
 
-This is the same rule the repo already follows twice — `name_frequency.common_words` counts words in
-company names instead of listing them, and `common_email_domains` counts mail providers instead of
-listing them. Genericness is measured, never hand-written.
-
-**Not deciding is an answer, and there are five of them.** From the full run, with the WZ mapping in
-place:
+### The outcome, and the three reasons for NONE
 
 | | | |
 |---|---|---|
-| `assigned` | **3,118** (21.6%) | 2,632 of them by the WZ code, 486 by the words |
-| `no_branch_applies` | **3,151** (21.8%) | the register says holding company or association |
-| `torn` | 167 | keywords fired, two branches too close to separate |
-| `no_keyword` | 2,607 | we read text and not one keyword appeared |
-| `no_text` | 5,400 | we had nothing to read |
+| a Berlin field | **974** (6.7%) | |
+| `NONE` | 400 | `torn` — keywords fired, two fields too close to separate |
+| `NONE` | 6,365 | `no_keyword` — we read the text, no keyword appeared |
+| `NONE` | 6,704 | `no_text` — nothing to read |
 
-So **6,269 of 14,443 companies (43%) now have a definite answer**, against 974 (6.7%) before Stage A
-existed. The WZ code is doing 84% of the assigning.
+**Never add any two of those together.** "We had no text" is not evidence that a company has no
+technology field. All three print `NONE` in the column and keep their reason beside them, in
+`technologiefeld_reason`.
 
-**Never add any two of those together.** `no_text` is not evidence that a company has no industry,
-and `no_branch_applies` is an answer rather than a gap. This is the same distinction the website side
-draws between `no_result` and `never_tried`, for the same reason: collapsing them turns a blank into
-a claim.
+Where the keywords came from, counting hits on the 974: `purpose` 719, `services` 527, `homepage` 289,
+`imprint` 59. The business purpose from the register is the most productive single source and costs one
+SQL query.
 
-Where the keywords came from, counting hits on assigned companies: `purpose` 396, `services` 188,
-`homepage` 108, `imprint` 22. The register's own description of the business is the most productive
-text source, and it costs one SQL query. Those numbers are *lower* than before Stage A existed
-(722/566/320/72) for a good reason: the WZ code now answers first for most of those companies, so
-the words are only asked where the register was silent.
+**Expect `NONE` to be the common case, and do not treat it as failure.** Berlin's list was built for
+Berlin's technology economy; 277 of 526 keywords match nothing here at all, and the fields that come
+out on top are Handel (242), Gastgewerbe (96), Logistik (56) and Freiberufler (56). A Lower Saxony
+town of trades and restaurants is mostly not in a technology taxonomy, and the WZ column is what
+describes those companies instead.
 
-### Where the register and the website disagree
+### Stage 3 — a local model, only for the ties
 
-**361 companies.** The report prints them because they are the interesting rows, and reading them
-says which source to trust:
+`branch_llm.py` asks `qwen3.5:4b` to choose, and every part of it is a restriction: **three fields
+plus "keine", never 77** (asked to pick from all of them it reached for the vaguest label — a
+drain-cleaning firm came back "Dienstleistung"); only where at least two keywords fired above the
+score floor; `think` off and `temperature` 0 (with thinking on it spent its whole output budget
+reasoning and returned an empty string 3 times out of 3); `num_ctx` set explicitly (Ollama's default
+truncates a long prompt *silently*, and the page text at the end is what gets cut); an answer that was
+not on the menu is discarded; and "keine" flags the row for a human.
 
-| company | WZ code says | the words say |
-|---|---|---|
-| Elektro Horstmann | Handwerk | Nachhaltige Wirtschaft |
-| Echterhoff Holding | Bauindustrie | Soziale Unternehmen |
-| HI Nord Planungsgesellschaft | Freiberufler | Wassertechnologien |
-| CoffeeLogX | Handel | Gastgewerbe |
+Cost: **10.3 s a page**, 302 rows qualify, so about **52 minutes**, once — answers are cached against
+the page and the taxonomy's version hash. Off by default.
 
-In most of these the register is plainly right, which is the evidence behind putting the WZ code
-first. It is also the size of the job when branch eventually becomes a real field: the coordinator
-will need a rule for 361 rows out of 14,443, not for thousands.
+### The one thing no measurement can decide
 
-### Stage C — a local model, only for the ties
+`sicherheit` appears in 1.8% of our texts, `einzelhandel` in 3.0%. `einzelhandel` names an industry;
+`sicherheit` names a quality. **Document frequency cannot tell them apart**, and no other property of
+this corpus can either.
 
-`branch_llm.py` asks `qwen3.5:4b` to choose, and everything about it is a restriction:
-
-- **Three branches plus "keine", never 77.** Asked to pick from all 77, the model reached for the
-  vaguest label available — a drain-cleaning firm came back as "Dienstleistung". A 77-way choice from
-  a 4B model is a guess in a confident voice, and this repo has the precedent: a whole paragraph of
-  prompt could not stop the same model failing the Brücklyn case in `llm_judge`.
-- **Only where there is something to arbitrate**: at least two keywords fired and the leader is above
-  the score floor. One keyword against one keyword is a coin flip, and paying ten seconds to flip it
-  buys nothing.
-- **`think` off, `temperature` 0.** With thinking on, the model spent its entire output budget on
-  reasoning tokens and returned an **empty string** three times out of three.
-- **`num_ctx` set explicitly.** Ollama's own default is small and it truncates a longer prompt
-  *silently* — a ~2,400-token prompt reported 1,546 prompt tokens, and the part cut off was the page
-  text at the end. The model would have answered confidently about a page it never saw.
-- **An answer that was not on the menu decides nothing.** It is logged and discarded.
-- **"keine" flags the row for a human.** The model read the page and rejected all three, which is not
-  the same as no keyword firing.
-
-Cost, measured on this laptop: **10.3 s a page** on `qwen3.5:4b`, 18 s on `qwen3.5:9b`. 302 rows
-currently qualify, so about **52 minutes**, once — every answer is cached against the page and the
-taxonomy's version hash, so editing a keyword only re-asks the rows whose shortlist changed.
-
-It is off by default and should stay off until the labels below say the ties are worth breaking.
-
-## The one thing no measurement can decide
-
-`sicherheit` appears in 1.8% of our texts. `einzelhandel` appears in 3.0%. `einzelhandel` names an
-industry; `sicherheit` names a quality, and on a German business page it means *Arbeitssicherheit* or
-*Datensicherheit*. **Document frequency cannot tell them apart, and neither can any other property of
-this corpus.**
-
-Berlin's sheet lists `Sicherheit` under Defence Tech. Left in, it produced 27 of that branch's 35
+Berlin's sheet listed `Sicherheit` under Defence Tech. Left in, it produced 27 of that field's 35
 assignments on its own: a bed shop, a lift company, an estate agent, a transport firm, a home-help
-service, a dental laboratory. It was removed from `branch_taxonomy.yaml` on 2026-08-20 with the
-measurement written next to it. Defence Tech keeps 14 keywords that do name the industry.
+service, a dental laboratory. It was deleted from `branch_taxonomy.yaml` with the measurement in a
+comment beside it. Defence Tech keeps 14 keywords that do name the industry.
 
-Two rules follow, and they pull in opposite directions on purpose:
+Two rules that pull opposite ways on purpose:
 
-1. **Do not add a stop-list to the code.** A word being common is already handled by the arithmetic,
-   measured rather than opined. `classify-report` prints the keywords that fired on the most
-   companies precisely so nobody feels the need.
-2. **Do delete a keyword that is wrong for its branch** — in the YAML, with a comment saying what it
-   cost. That is a judgement about German, not about this data set, and a person has to make it.
+1. **Do not add a stop-list to the code.** Commonness is already handled by the arithmetic, measured
+   rather than opined. `classify-report` prints the most-fired keywords so nobody feels the need.
+2. **Do delete a keyword that is wrong for its field** — in the YAML, with a comment saying what it
+   cost. That is a judgement about German, and a person has to make it.
 
-`classify-report` has a section built for exactly this decision: the keywords that carried a whole
-assignment on their own. 777 of the 974 assignments rest on one keyword, and the list is mostly
-sound — `einzelhandel` (206), `spedition` (40), `gastronomie` (40), `windenergieanlagen` (26),
-`steuerberater` (24). Read it as a to-do list.
+`classify-report` prints the keywords carrying a whole assignment alone — **777 of the 974** — as a
+to-do list. Most are sound: `einzelhandel` 206, `spedition` 40, `gastronomie` 40, `windenergieanlagen`
+26, `steuerberater` 24.
 
 ## Running it
 
-Free, and they must pass before anything else:
+Step-by-step, with what each command prints:
+[running-branch-classification.md](running-branch-classification.md). The short version:
 
 ```powershell
-python scripts/check_branch_classifier.py
-python scripts/check_combined_discovery.py
-```
-
-Stage A, once, with a person in the middle:
-
-```powershell
-python scripts/wz_branch_worksheet.py titles path/to/gliederung-klassifikation-wz.xlsx
-python scripts/wz_branch_worksheet.py write --top 100
-# fill in the `branch` column of airflow/data/combined_discovery/wz_branch_todo.csv
-python scripts/wz_branch_worksheet.py apply
-```
-
-Stage B0 — the only part that touches the network. It pays once and caches:
-
-```powershell
-python scripts/run_combined_discovery.py fetch-content --limit 100   # trial: ~190 pages, 35 s
-python scripts/run_combined_discovery.py fetch-content               # all: 1,567 pages, 2m51s
-```
-
-Stage B, and the report. **No web requests at all** — about two minutes for all 14,443 companies,
-which is what makes editing the taxonomy cheap:
-
-```powershell
-python scripts/run_combined_discovery.py classify --source wz,page,purpose
+python scripts/check_branch_classifier.py                               # free, must pass first
+python scripts/run_combined_discovery.py fetch-content                  # once: 1,567 pages
+python scripts/run_combined_discovery.py classify --source page,purpose  # 2 min, no network
 python scripts/run_combined_discovery.py classify-report
-python scripts/run_combined_discovery.py csv       # branch columns join into the handover CSV
+python scripts/run_combined_discovery.py csv
 ```
 
-Stage C, only when the labels justify it:
-
-```powershell
-$env:OLLAMA_MODEL = "qwen3.5:4b"
-python scripts/run_combined_discovery.py classify --source page --llm
-```
+`--source wz` is **refused**: the Technologiefeld is filled only from text the company published. The
+WZ cluster is attached to every row regardless, whether or not any text was read.
 
 ## What is not known yet
 
-**Nobody has checked whether any of this is right.** Every number above counts what happened. Not one
-says whether the branch is correct, because that needs a human looking at companies. That matters more
-now than before: 2,632 of the 3,118 assignments come from a WZ mapping whose first draft was written
-in one pass, so the `wz_decided` bucket is the one to read first:
+**Nobody has checked whether the Technologiefeld is right.** 974 companies have one and not a single
+row is hand-labelled. `classify-labels` writes 40 rows in five buckets; `classify-labels-report` is
+the only thing that reports precision. Start with `torn`: those are the rows the model would be asked
+about, and if a person cannot separate two fields from the same text, a 4B model will not either.
 
-```powershell
-python scripts/run_combined_discovery.py classify-labels        # 40 rows, six groups
-# fill in the `label` column by hand
-python scripts/run_combined_discovery.py classify-labels-report
-```
+The WZ column needs no labelling — it is a lookup, not a guess. The only way it can be wrong is if
+`wz_titles.yaml` is older than the data, and the report prints a warning line when a division has no
+title.
 
-The `torn` group is the one to fill in first. Those are the rows the model would be asked about, from
-the same text, and if a person cannot separate `Filmwirtschaft` from `Freiberufler` for Kotte & Cie.
-then 52 minutes of model time will not either.
-
-And the honest caveat over all of it: **the list is Berlin's, the companies are Osnabrück's.** 277 of
-527 keywords match nothing here, and the branches that come out on top are Handel, Gastgewerbe,
-Freiberufler and Logistik — not Quantum or 5G. Pointing a technology taxonomy built for Berlin at a
-Lower Saxony town full of trades and restaurants has a ceiling, and no classifier can lift it. Better
-input can: the WZ codes, and the pages the businesses write about themselves.
+Nothing is written to Postgres. Making either column a real field means an observation, a Flyway
+migration, and a rule for the coordinator — and for the Technologiefeld that should wait until the
+labels exist.

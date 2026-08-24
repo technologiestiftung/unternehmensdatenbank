@@ -1,29 +1,107 @@
-# The official name of every WZ code — the German industry classification.
+# The official German industry classification: what every WZ code means.
 #
-# WZ stands for Klassifikation der Wirtschaftszweige. A code names an industry: "56.1" is
-# restaurants, "62.10.9" software development, "64.2" holding companies. `public.companies` carries
-# one for 8,483 of 14,443 companies, courtesy of the Northdata export, and `wz_to_branch.yaml` maps
-# those codes onto Berlin's branches. This file is what makes that mapping readable: deciding
-# whether *Unternehmensberatung* is a branch is a judgement, deciding whether *70.20.0* is one is a
-# lookup nobody should have to do.
+# WZ stands for Klassifikation der Wirtschaftszweige. A code names an industry: "56.11.1" is
+# "Restaurants mit Bedienung", "64.2" is "Beteiligungsgesellschaften". public.companies carries one
+# for 8,483 of 14,443 companies.
+#
+# THIS IS A DIFFERENT CLASSIFICATION FROM branch_taxonomy.yaml, AND THE TWO MUST NOT BE MIXED.
+# branch_taxonomy.yaml holds Berlin's 77 "Technologie- und Anwendungsfelder", which say what field a
+# company WORKS IN. A WZ code says what it is REGISTERED AS. Neither can be derived from the other,
+# and an earlier version of this project mapped WZ codes onto Berlin's fields and thereby made 2,632
+# companies look like they had been assigned a technology field when nothing they published said so.
+# The two now live in two separate columns. Keep it that way.
 #
 # THIS EDITION IS WZ 2025. All 100 of the most common codes in our table match it exactly, including
 # codes like "70.10.4" and "62.10.9" that WZ 2008 does not contain at all. Anyone checking these
 # against a 2008 table will mismatch silently, which is the worst way to be wrong.
 #
+# Two blocks:
+#
+#   sections:  Abschnitt (a letter) -> its title and the Abteilungen it owns. This is what makes a
+#              company's section a lookup rather than a guess.
+#   codes:     every code -> its official title.
+#
+# A code's level is its shape, so it is not stored: a letter is an Abschnitt, two digits an
+# Abteilung, "nn.n" a Gruppe, "nn.nn" a Klasse, "nn.nn.n" the German Unterklasse.
+#
 # Checked in on purpose, so nothing depends on a spreadsheet in somebody's Downloads folder. Source:
 # Statistisches Bundesamt, "Gliederung der Klassifikation der Wirtschaftszweige", rebuilt with
 #
-#     python scripts/wz_branch_worksheet.py titles <the .xlsx>
+#     python scripts/import_wz_titles.py <the .xlsx>
 #
-# which is needed once per WZ edition, not once per run. Edit this file by hand in between — a
-# clearer wording for a vague official title is an improvement, and a comment explaining what a code
-# actually covers in practice is worth more here than anywhere else.
+# which is needed once per WZ edition, not once per run. Edit by hand in between: a clearer wording
+# for a vague official title is an improvement, and a comment saying what a code covers in practice
+# is worth more here than anywhere else.
 #
-# The level of a code is its shape, so it is not stored: a letter is a section, two digits a
-# division, "nn.n" a group, "nn.nn" a class, "nn.nn.n" the German sub-class.
-#
-# 2008 codes.
+# 22 sections, 87 divisions, 2008 codes.
+
+sections:
+  "A":
+    title: "LAND- UND FORSTWIRTSCHAFT, FISCHEREI"
+    divisions: ["01", "02", "03"]
+  "B":
+    title: "BERGBAU UND GEWINNUNG VON STEINEN UND ERDEN"
+    divisions: ["05", "06", "07", "08", "09"]
+  "C":
+    title: "VERARBEITENDES GEWERBE"
+    divisions: ["10", "11", "12", "13", "14", "15", "16", "17", "18", "19", "20", "21", "22", "23", "24", "25", "26", "27", "28", "29", "30", "31", "32", "33"]
+  "D":
+    title: "ENERGIEVERSORGUNG"
+    divisions: ["35"]
+  "E":
+    title: "WASSERVERSORGUNG; ABWASSER- UND ABFALLENTSORGUNG UND BESEITIGUNG VON UMWELTVERSCHMUTZUNGEN"
+    divisions: ["36", "37", "38", "39"]
+  "F":
+    title: "BAUGEWERBE"
+    divisions: ["41", "42", "43"]
+  "G":
+    title: "HANDEL"
+    divisions: ["46", "47"]
+  "H":
+    title: "VERKEHR UND LAGEREI"
+    divisions: ["49", "50", "51", "52", "53"]
+  "I":
+    title: "GASTGEWERBE"
+    divisions: ["55", "56"]
+  "J":
+    title: "VERLAGSWESEN, RUNDFUNK SOWIE ERSTELLUNG UND VERBREITUNG VON MEDIENINHALTEN"
+    divisions: ["58", "59", "60"]
+  "K":
+    title: "TELEKOMMUNIKATION, SOFTWAREENTWICKLUNG, IT-BERATUNG UND ERBRINGUNG SONSTIGER DIENSTLEISTUNGEN DER INFORMATIONSTECHNOLOGIE UND DER COMPUTERINFRASTRUKTUR"
+    divisions: ["61", "62", "63"]
+  "L":
+    title: "ERBRINGUNG VON FINANZ- UND VERSICHERUNGSDIENSTLEISTUNGEN"
+    divisions: ["64", "65", "66"]
+  "M":
+    title: "GRUNDSTÜCKS- UND WOHNUNGSWESEN"
+    divisions: ["68"]
+  "N":
+    title: "ERBRINGUNG VON WISSENSCHAFTLICHEN UND TECHNISCHEN DIENSTLEISTUNGEN"
+    divisions: ["69", "70", "71", "72", "73", "74", "75"]
+  "O":
+    title: "ERBRINGUNG VON SONSTIGEN WIRTSCHAFTLICHEN DIENSTLEISTUNGEN"
+    divisions: ["77", "78", "79", "80", "81", "82"]
+  "P":
+    title: "ÖFFENTLICHE VERWALTUNG, VERTEIDIGUNG; SOZIALVERSICHERUNG"
+    divisions: ["84"]
+  "Q":
+    title: "ERZIEHUNG UND UNTERRICHT"
+    divisions: ["85"]
+  "R":
+    title: "GESUNDHEITS- UND SOZIALWESEN"
+    divisions: ["86", "87", "88"]
+  "S":
+    title: "KUNST, SPORT UND ERHOLUNG"
+    divisions: ["90", "91", "92", "93"]
+  "T":
+    title: "ERBRINGUNG VON SONSTIGEN DIENSTLEISTUNGEN"
+    divisions: ["94", "95", "96"]
+  "U":
+    title: "PRIVATE HAUSHALTE MIT HAUSPERSONAL SOWIE HERSTELLUNG VON WAREN UND ERBRINGUNG VON DIENSTLEISTUNGEN DURCH PRIVATE HAUSHALTE FÜR DEN EIGENBEDARF OHNE AUSGEPRÄGTEN SCHWERPUNKT"
+    divisions: ["97", "98"]
+  "V":
+    title: "EXTERRITORIALE ORGANISATIONEN UND KÖRPERSCHAFTEN"
+    divisions: ["99"]
 
 codes:
 
