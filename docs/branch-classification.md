@@ -13,7 +13,8 @@ mistake made here was answering one with the other.
 | who decides | Berlin's economic-development list of 77 fields | the Statistisches Bundesamt |
 | filled from | words the company published about itself | the company's official WZ code |
 | possible values | one of the 77, or `NONE` | 76 divisions in 20 sections |
-| companies with a value | **909** (6.3%) | **8,483** (58.7%) |
+| companies with a value | **346** (2.4% of the table, **38%** of those with a website) | **8,483** (58.7%) |
+| what it needs first | a website we actually found | only the WZ code |
 | any judgement involved | yes: keyword weights, thresholds | **none** — it is a lookup |
 
 Neither is a check on the other. A company registered under *68 Grundstücks- und Wohnungswesen* whose
@@ -203,22 +204,26 @@ Then two weights, both **measured from the data**:
 A multi-word keyword scores higher on top of that. Same rule as `name_frequency.common_words` for
 company names: genericness is measured, never hand-listed.
 
-### The outcome, and the three reasons for NONE
+### The outcome, and the four reasons for NONE
 
 | | | |
 |---|---|---|
-| a Berlin field | **909** (6.3%) | |
-| `NONE` | 400 | `torn` — keywords fired, two fields too close to separate |
+| a Berlin field | **346** (2.4%) | |
+| `NONE` | 563 | `no_website` — the register text named a field, no website was found |
+| `NONE` | 272 | `torn` — keywords fired, two fields too close to separate |
 | `NONE` | 6,558 | `no_keyword` — we read the text, no keyword appeared |
 | `NONE` | 6,704 | `no_text` — nothing to read |
 
 **Never add any two of those together.** "We had no text" is not evidence that a company has no
-technology field. All three print `NONE` in the column and keep their reason beside them, in
+technology field. All four print `NONE` in the column and keep their reason beside them, in
 `technologiefeld_reason`.
 
-Where the keywords came from, counting hits on the 909: `purpose` 625, `services` 519, `homepage` 226,
-`imprint` 59. The business purpose from the register is the most productive single source and costs one
-SQL query.
+`no_website` is the newest and the one to argue about. The register purpose is the most productive
+single source there is — counting hits across the whole run, `purpose` 625, `services` 519, `homepage`
+226, `imprint` 49 — and it costs one SQL query. On its own, though, it says what a company is
+*permitted* to do. Requiring a website cost **563 answers**, and the withheld field is kept in
+`withheld_branch` and sampled into the labelling worksheet so the trade can be judged rather than
+assumed.
 
 **Expect `NONE` to be the common case, and do not treat it as failure.** Berlin's list was built for
 Berlin's technology economy; 265 of the 500 keywords match nothing here at all, and the fields that come
@@ -257,7 +262,7 @@ Two rules that pull opposite ways on purpose:
 2. **Do delete a keyword that is wrong for its field** — in the YAML, with a comment saying what it
    cost. That is a judgement about German, and a person has to make it.
 
-`classify-report` prints the keywords carrying a whole assignment alone — **701 of the 909** — as a
+`classify-report` prints the keywords carrying a whole assignment alone — **77% of them** — as a
 to-do list. Most are sound: `einzelhandel` 206, `spedition` 40, `gastronomie` 40, `windenergieanlagen`
 26, `steuerberater` 24.
 
@@ -298,7 +303,7 @@ WZ cluster is attached to every row regardless, whether or not any text was read
 
 ## What is not known yet
 
-**Nobody has checked whether the Technologiefeld is right.** 909 companies have one and not a single
+**Nobody has checked whether the Technologiefeld is right.** 346 companies have one and not a single
 row is hand-labelled. `classify-labels` writes 40 rows in five buckets; `classify-labels-report` is
 the only thing that reports precision. Start with `torn`: those are the rows the model would be asked
 about, and if a person cannot separate two fields from the same text, a 4B model will not either.

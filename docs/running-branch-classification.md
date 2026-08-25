@@ -103,20 +103,27 @@ python scripts/run_combined_discovery.py classify-report
 It prints three blocks. **Column 1, Technologiefeld:**
 
 ```
-a Berlin field                        909    6.3%
+a Berlin field                        346    2.4%
+NONE: no_website                      563    3.9%
 NONE: torn                            272    1.9%
 NONE: no_keyword                     6558   45.4%
 NONE: no_text                        6704   46.4%
 ```
 
 `NONE` is the normal answer, not a failure — Berlin's list is a technology taxonomy and most of
-Osnabrück is trades and restaurants. The three reasons are counted apart on purpose: *"we had no text
+Osnabrück is trades and restaurants. The four reasons are counted apart on purpose: *"we had no text
 to read"* is not evidence that a company has no technology field.
+
+**`no_website` is the expensive one.** A Technologiefeld requires a website, so 563 fields the
+register text named are withheld. The report prints them, and the block below the outcomes gives the
+denominator that actually describes this column: 346 of the **902 companies with a website**, which
+is 38% — not 2.4% of a table most of which this column can never reach.
 
 Also in this block: which text the keywords came from (`purpose` 625 hits, `services` 519, `homepage`
 226, `imprint` 49), whether the downloaded services pages paid for themselves (**157** companies got a
 field only because of them), the 15 most common fields, and — worth reading every time — the keywords
-that carried a whole assignment on their own, **701 of the 909**.
+that carried a whole assignment on their own, and what the website rule withheld — 563
+fields the register text named and no website confirmed.
 
 **Column 2, WZ cluster:**
 
@@ -210,11 +217,21 @@ that needs a person.
 python scripts/run_combined_discovery.py classify-labels
 ```
 
-Writes 40 rows to `airflow/data/combined_discovery/branch_labels_todo.csv` in five groups of ten:
-`keyword_decided`, `model_decided`, `torn`, `no_keyword`, `no_text`. Fill in the **`label`** column
-with `yes`, `no` or `unclear`, and use `notes` freely.
+Writes 50 rows to `airflow/data/combined_discovery/branch_labels_todo.csv` in six groups of ten:
+`keyword_decided`, `model_decided`, `no_website`, `torn`, `no_keyword`, `no_text`. Fill in the
+**`label`** column with `yes`, `no` or `unclear`, and use `notes` freely.
+
+> **Excel will change the delimiter and not tell you.** On a German locale it saves CSV with `;`
+> instead of `,`. The file still opens and still has every row, so nothing looks wrong — but a
+> comma-based reader then sees the whole header as one column. That already happened here, and
+> `classify-labels-report` would have reported nothing at all rather than failing. The reader now
+> sniffs the delimiter and logs which one it found, so an Excel round trip is safe. If you see
+> `is ';'-delimited (Excel does this)` in the log, that is the fix working, not a problem.
 
 - `keyword_decided` — is `technologiefeld` right for this company? This is the precision number.
+- `no_website` — `withheld_branch` is what the company's **register text** claims and no website
+  confirmed. Is that claim right? `yes` here means requiring a website cost a good answer, and 563
+  answers were withheld, so this bucket is how you find out whether that rule was worth it.
 - `torn` — can *you* pick one of `shortlist` from the same text? **Do this group first:** if a person
   cannot, the model in step 7 cannot either, and you have saved yourself 52 minutes.
 - `no_keyword` / `no_text` — look the company up. `yes` if some field on Berlin's list does fit it,
