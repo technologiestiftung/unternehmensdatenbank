@@ -76,15 +76,31 @@ hyphen, and those are just as common:
 glued-compound rule above was only trusted because somebody measured it. Measure this one the same
 way before flipping the default.
 
-## NONE is the answer for most companies, and there are three different reasons for it
+## A field requires a website
+
+A company with no website found gets **no Technologiefeld**, however clearly its register purpose
+reads. The purpose is the *Gegenstand des Unternehmens* filed with the commercial register: it says
+what a company is **permitted** to do, and a great deal of it is boilerplate — "Handel mit Waren
+aller Art", "Verwaltung eigenen Vermögens". A website that answers is evidence the company actually
+trades.
+
+The price was measured before the rule went in and it is steep: **909 assignments became 346**, and
+the 563 withheld were led by Handel 229, Gastgewerbe 64, Logistik 47 and Windenergie 25 — many from
+purposes as specific as "Import und Export von Anlagen aus dem Bereich der Photovoltaik". So the
+withheld answer is **kept**, in `Assignment.withheld_branch`, and counted in its own outcome. It is
+never the column's value. That way the next round of hand labels can say whether withholding it was
+right, instead of a code change having closed the question.
+
+## NONE is the answer for most companies, and there are four different reasons for it
 
     assigned     one branch cleared the floor and beat the runner-up. The column gets its name.
+    no_website   a branch won on the register text alone and no website was ever found
     torn         keywords fired but two branches are too close to separate
     no_keyword   there was text and not one keyword appeared in it
     no_text      there was nothing to read
 
-The last three all print `NONE` in the column, because `NONE` is what the column is allowed to
-contain. The *reason* is kept beside it and **the three are never added together**: "we had no text"
+The last four all print `NONE` in the column, because `NONE` is what the column is allowed to
+contain. The *reason* is kept beside it and **the four are never added together**: "we had no text"
 is not evidence that a company has no technology field. Same distinction
 `run_combined_discovery.tier_status` draws between `no_result` and `never_tried`, for the same
 reason — collapsing them turns a blank into a claim.
@@ -291,9 +307,13 @@ def keyword_weight(
 class Assignment:
     """The answer for one company, and enough of the reasoning to argue with it."""
 
-    #: assigned | torn | no_keyword | no_text. The last three all print NONE in the column.
+    #: assigned | no_website | torn | no_keyword | no_text. The last four all print NONE.
     outcome: str
     branch: str | None = None
+    #: The field this company WOULD have received, when `no_website` withheld it. Never the answer —
+    #: `branch` stays None and `value` stays NONE — but keeping it is what makes the gate's cost
+    #: reportable and lets a person label whether withholding it was right.
+    withheld_branch: str | None = None
     score: float = 0.0
     #: keywords | model — what actually decided it. Never a WZ code; see the module docstring.
     decided_by: str = ""
@@ -342,6 +362,7 @@ def classify(
     n_companies: int,
     keywords_by_source: Mapping[str, str] | None = None,
     had_text: bool = False,
+    has_website: bool = False,
 ) -> Assignment:
     """The answer for one company: one of Berlin's 77 fields, or NONE.
 
@@ -349,6 +370,12 @@ def classify(
     classification answering a different question, and it belongs in its own column — see
     `wz_cluster.py` and the module docstring. If you are about to add one here to lift the coverage
     number, that is precisely the change this signature exists to prevent.
+
+    `has_website` is a gate on evidence rather than a second classification, which is why it is
+    allowed here where a WZ code is not: it never contributes a value, it only withholds one. It
+    defaults to **False**, deliberately — a caller that knows nothing about websites must not hand
+    out fields. Adding that default is what made the guard fail the moment the rule went in, which
+    is the behaviour you want from a default.
 
     Everything this needs was computed before the call: `keywords_by_source` maps each keyword that
     fired to the text it was found in, and `df` says how many companies use each keyword.
@@ -382,6 +409,13 @@ def classify(
         "keywords": keywords_by_source,
     }
     if clear:
+        if not has_website:
+            # The gate, applied AFTER the winner is known rather than before the text is read. That
+            # ordering is the whole point: a company with no website and nothing to read stays
+            # `no_text`, a torn one stays `torn`, and `no_website` counts only the answers this rule
+            # actually took away. Applying it earlier would swallow the other reasons and make every
+            # number incomparable with the ones measured before it existed.
+            return Assignment(outcome="no_website", withheld_branch=best, **common)
         return Assignment(outcome="assigned", branch=best, decided_by="keywords", **common)
     return Assignment(
         outcome="torn",

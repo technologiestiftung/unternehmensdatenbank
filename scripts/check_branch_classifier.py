@@ -30,8 +30,10 @@ Exit code is non-zero on any mismatch, so it works as a pre-commit gate.
 """
 from __future__ import annotations
 
+import csv
 import inspect
 import sys
+import tempfile
 from pathlib import Path
 
 for candidate in (
@@ -224,6 +226,49 @@ def main() -> int:
     check("...and NONE in the column", torn.value, "NONE")
 
     # -------------------------------------------------------------------------------------
+    section("a Technologiefeld requires a website")
+    # -------------------------------------------------------------------------------------
+    # A register purpose says what a company is PERMITTED to do, and much of it is boilerplate
+    # ("Handel mit Waren aller Art"). A live website is evidence it actually trades. So from
+    # 2026-08-25 a company with no website found gets no Technologiefeld — 563 of 909 assignments
+    # withheld, which is a big price and the reason the withheld answer is kept and counted rather
+    # than deleted.
+    decisive = {"einzelhandel": "purpose"}
+    df_site = {"einzelhandel": 200}
+    kwargs = dict(taxonomy=taxonomy, df=df_site, n_companies=7739, had_text=True,
+                  keywords_by_source=decisive)
+
+    with_site = bc.classify(**kwargs, has_website=True)
+    check("with a website, a decisive keyword assigns", with_site.outcome, "assigned")
+    check("...to the field the keyword names", with_site.branch, "Handel")
+
+    # The same inputs, one flag apart.
+    without = bc.classify(**kwargs, has_website=False)
+    check("without a website, the same row is withheld", without.outcome, "no_website")
+    check("...the column carries NONE", without.value, "NONE")
+    check("...`branch` stays None so nothing downstream mistakes it", without.branch, None)
+    check("...but what it WOULD have been is kept", without.withheld_branch, "Handel")
+    check("...with the evidence, so it can be labelled", sorted(without.keywords), ["einzelhandel"])
+
+    # The default is fail-CLOSED. A caller that knows nothing about websites must not hand out
+    # fields; it has to say so. This default is what the guard caught when the gate was added.
+    check("has_website defaults to False",
+          bc.classify(**kwargs).outcome, "no_website")
+
+    # The gate must not cannibalise the other three reasons, or every number measured before it
+    # existed becomes incomparable. It applies ONLY where the answer would have been `assigned`.
+    check("no website and nothing to read is still no_text",
+          bc.classify(taxonomy=taxonomy, df={}, n_companies=860, had_text=False,
+                      has_website=False).outcome, "no_text")
+    check("no website and text but no keyword is still no_keyword",
+          bc.classify(taxonomy=taxonomy, df={}, n_companies=860, had_text=True,
+                      keywords_by_source={}, has_website=False).outcome, "no_keyword")
+    check("no website and a tie is still torn",
+          bc.classify(taxonomy=taxonomy, df={"leichtbau": 4}, n_companies=860, had_text=True,
+                      keywords_by_source={"leichtbau": "homepage"},
+                      has_website=False).outcome, "torn")
+
+    # -------------------------------------------------------------------------------------
     section("the shortlist handed to a model")
     # -------------------------------------------------------------------------------------
     many = {k: "homepage" for k in
@@ -231,6 +276,7 @@ def main() -> int:
     df4 = {k: 3 for k in many}
     spread = bc.classify(
         taxonomy=taxonomy, df=df4, n_companies=860, had_text=True, keywords_by_source=many,
+        has_website=True,
     )
     if spread.outcome == "torn":
         check("the shortlist is at most 3 branches", len(spread.shortlist) <= 3, True)
@@ -436,6 +482,37 @@ def main() -> int:
     check("...labelled with which text it was", holding_fallback.startswith("[purpose]"), True)
     check("no text at all -> nothing claimed", runner.evidence_snippets({}, {}, taxonomy), ({}, ""))
     check("the worksheet has a column for it", "evidence" in runner.BRANCH_LABEL_COLUMNS, True)
+
+    # -------------------------------------------------------------------------------------
+    section("a worksheet survives a trip through Excel")
+    # -------------------------------------------------------------------------------------
+    # Excel on a German locale saves CSV with SEMICOLONS, silently. It happened: 40 rows came back
+    # from a save as `;`-delimited, csv.DictReader's comma default read the whole header as one
+    # column name, and classify-labels-report would have reported nothing rather than failing. Hand
+    # labels are the most expensive data in this project; losing them to a delimiter is unacceptable.
+    header = ["bucket", "company_name", "technologiefeld", "label", "notes"]
+    row = ["keyword_decided", "Karl Widera, Gaststättenbetriebe", "Gastgewerbe", "yes", "a, b"]
+    with tempfile.TemporaryDirectory() as tmp:
+        wanted = None
+        for delimiter, name in ((",", "comma.csv"), (";", "semicolon.csv")):
+            path = Path(tmp) / name
+            with path.open("w", encoding="utf-8-sig", newline="") as handle:
+                writer = csv.writer(handle, delimiter=delimiter)
+                writer.writerow(header)
+                writer.writerow(row)
+            got = runner.read_label_csv(path)
+            check(f"{delimiter!r}-delimited: one row, five columns",
+                  (len(got), len(got[0])), (1, 5))
+            # The company name and the note both contain a comma. A naive split on "," mangles them;
+            # a real csv reader does not, which is why the fix sniffs the delimiter instead of
+            # splitting the line itself.
+            check(f"{delimiter!r}-delimited: a quoted comma survives",
+                  got[0]["company_name"], "Karl Widera, Gaststättenbetriebe")
+            check(f"{delimiter!r}-delimited: the label is readable", got[0]["label"], "yes")
+            if wanted is None:
+                wanted = got
+            else:
+                check("both delimiters give identical rows", got, wanted)
 
     print(f"\n{'FAILED' if FAILURES else 'all checks passed'}")
     for label in FAILURES:

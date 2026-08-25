@@ -34,6 +34,7 @@ from __future__ import annotations
 
 import argparse
 import csv
+import io
 import json
 import logging
 import os
@@ -112,6 +113,28 @@ LIMIT %s
 """
 
 _WRITE_LOCK = threading.Lock()
+
+
+def read_label_csv(path: Path) -> list[dict[str, str]]:
+    """Read a hand-labelling worksheet back, whatever Excel did to it on the way.
+
+    Excel on a German (or French, or Dutch) locale writes CSV with **semicolons**, and it does that
+    silently on save — the file still opens, still has the right rows, and `csv.DictReader`'s comma
+    default then parses the whole header as one column name. That happened here: 40 labelled-ready
+    rows came back as 2 columns and `classify-labels-report` would have reported nothing at all
+    rather than failing.
+
+    So the delimiter is sniffed from the header rather than assumed, and only from these two
+    candidates — a real `csv` reader still handles quoting, so a company name containing a comma
+    survives either way. Writing stays comma-delimited, because that is the portable form; tolerating
+    the round trip on read is what makes an Excel visit harmless.
+    """
+    text = path.read_text(encoding="utf-8-sig")
+    header = text.splitlines()[0] if text else ""
+    delimiter = ";" if header.count(";") > header.count(",") else ","
+    if delimiter != ",":
+        log.info("%s is %r-delimited (Excel does this); reading it as such", path.name, delimiter)
+    return list(csv.DictReader(io.StringIO(text), delimiter=delimiter))
 
 
 def read_jsonl(path: Path) -> list[dict[str, Any]]:
@@ -945,9 +968,8 @@ def labels(limit: int | None = None, per_bucket: int = 20) -> None:
 
     existing: dict[tuple[str, str], dict[str, str]] = {}
     if LABELS_PATH.exists():
-        with LABELS_PATH.open(encoding="utf-8-sig", newline="") as handle:
-            for old in csv.DictReader(handle):
-                existing[(old.get("bucket") or "", old.get("company_id") or "")] = old
+        for old in read_label_csv(LABELS_PATH):
+            existing[(old.get("bucket") or "", old.get("company_id") or "")] = old
         labelled = sum(1 for v in existing.values() if (v.get("label") or "").strip())
         log.info("Found %d rows in %s, %d already labelled", len(existing), LABELS_PATH.name, labelled)
 
@@ -997,8 +1019,7 @@ def labels_report() -> None:
     """Read the worksheet back and print the three numbers it exists to produce."""
     if not LABELS_PATH.exists():
         raise SystemExit(f"no {LABELS_PATH}; run `labels` first")
-    with LABELS_PATH.open(encoding="utf-8-sig", newline="") as handle:
-        rows = list(csv.DictReader(handle))
+    rows = read_label_csv(LABELS_PATH)
 
     def bucket(name: str) -> list[dict[str, str]]:
         return [r for r in rows if (r.get("bucket") or "") == name]
@@ -1401,12 +1422,17 @@ def classify(
     asked = 0
     for company_id in scope:
         state = per_company[company_id]
+        # A Technologiefeld requires a website. The register purpose may still be what DECIDES the
+        # field — it does for 15 companies — but a company we never found a website for gets NONE
+        # with the reason `no_website`, and what it would have been is kept beside it.
+        has_website = bool(rows.get(company_id, {}).get("website"))
         result = bc.classify(
             taxonomy=taxonomy,
             df=df,
             n_companies=max(with_text, 1),
             keywords_by_source=state["keywords"],
             had_text=state["had_text"],
+            has_website=has_website,
         )
 
         # What the answer would have been without the pages `fetch-content` downloaded. The same
@@ -1422,6 +1448,10 @@ def classify(
                     k: s for k, s in state["keywords"].items() if s != "services"
                 },
                 had_text=state["had_text"],
+                # The counterfactual asks what the SERVICES PAGES bought, so it has to hold the
+                # website gate constant. Leaving this at its default would turn every row into
+                # `no_website` and report that the downloads bought nothing.
+                has_website=has_website,
             )
 
         verdict = None
@@ -1472,6 +1502,10 @@ def classify(
             # deliberate: null is for code that needs to test "was a field established", the string
             # is for a human reading a column that must never contain a blank cell.
             "branch": result.branch,
+            # What the register text claimed and no website confirmed. Set only on `no_website`
+            # rows, and never the column's value — it exists so the gate's price can be counted and
+            # so a person can label whether withholding the answer was right.
+            "withheld_branch": result.withheld_branch,
             "score": result.score,
             "decided_by": result.decided_by,
             "runner_up": result.runner_up,
@@ -1556,8 +1590,8 @@ def classify_report() -> None:
     outcomes: dict[str, int] = {}
     for row in rows:
         outcomes[row.get("outcome") or "?"] = outcomes.get(row.get("outcome") or "?", 0) + 1
-    order = ("assigned", "torn", "no_keyword", "no_text")
-    print("-- one field, or NONE for one of three different reasons --")
+    order = ("assigned", "no_website", "torn", "no_keyword", "no_text")
+    print("-- one field, or NONE for one of four different reasons --")
     for outcome in order:
         label = "a Berlin field" if outcome == "assigned" else f"NONE: {outcome}"
         print(f"{label:<34}{outcomes.get(outcome, 0):>7}  {_pct(outcomes.get(outcome, 0), n)}")
@@ -1565,11 +1599,54 @@ def classify_report() -> None:
         if outcome not in order:
             print(f"{outcome:<34}{count:>7}  {_pct(count, n)}")
     print(
-        "\n  `torn` means keywords fired and two fields were too close to separate. `no_keyword`\n"
-        "  means we read the company's text and not one keyword appeared. `no_text` means we had\n"
-        "  nothing to read at all. Adding any two of those together turns a blank into a claim —\n"
-        "  and none of them says the company has no technology field."
+        "\n  `no_website` means the register text named a field and no website was ever found, so\n"
+        "  the field was withheld. `torn` means keywords fired and two fields were too close to\n"
+        "  separate. `no_keyword` means we read the company's text and not one keyword appeared.\n"
+        "  `no_text` means we had nothing to read at all. Adding any two of those together turns a\n"
+        "  blank into a claim — and none of them says the company has no technology field."
     )
+
+    # The denominator that describes what this column actually does. A Technologiefeld now requires a
+    # website, and a website was found for 902 of 14,443 companies — so measuring against the whole
+    # table reports the website pipeline's coverage a second time and reads like failure.
+    with_site = sum(1 for r in rows if r.get("website"))
+    if with_site:
+        print("\n-- measured against the companies this column can reach --")
+        print(f"{'companies with a website':<34}{with_site:>7}  {_pct(with_site, n)} of the table")
+        print(f"{'…given a Berlin field':<34}{outcomes.get('assigned', 0):>7}  "
+              f"{_pct(outcomes.get('assigned', 0), with_site)} of those")
+        if outcomes.get("assigned", 0) > with_site:
+            # More fields than websites is arithmetically impossible under the rule, so this file was
+            # written before it existed. Worth saying out loud: every number above is from the old
+            # behaviour and none of it is comparable.
+            print(
+                "\n  !! more fields than websites — this file predates the website rule, so the\n"
+                "     counts above are the OLD behaviour. Re-run `classify`."
+            )
+        print(
+            "\n  Read the second line, not the first. A field requires a website, so the table-wide\n"
+            "  percentage is really a report on website discovery, which has its own scorecard."
+        )
+
+    # What the website gate took away. Printed every run and on purpose: a rule whose cost is
+    # invisible stops being a decision and becomes an assumption. These are answers the company's own
+    # register text supported and no website confirmed.
+    withheld = [r for r in rows if r.get("outcome") == "no_website" and r.get("withheld_branch")]
+    if withheld:
+        print("\n-- what the website gate withheld --")
+        print(f"{'fields withheld for want of a website':<40}{len(withheld):>7}")
+        counts: dict[str, int] = {}
+        for row in withheld:
+            counts[row["withheld_branch"]] = counts.get(row["withheld_branch"], 0) + 1
+        for field, count in sorted(counts.items(), key=lambda kv: -kv[1])[:8]:
+            print(f"    {field[:34]:<36}{count:>5}")
+        print(
+            "\n  A register purpose says what a company is PERMITTED to do, and much of it is\n"
+            "  boilerplate — 'Handel mit Waren aller Art'. A website that answers is evidence it\n"
+            "  trades. That is the trade this rule makes, and it is a big one: these would all have\n"
+            "  been fields before it. The `no_website` rows in the labelling worksheet are the only\n"
+            "  thing that can say whether withholding them was right — `classify-labels-report`."
+        )
 
     assigned = [r for r in rows if r.get("outcome") == "assigned"]
     print("\n-- what decided it --")
@@ -1761,7 +1838,12 @@ def classify_report() -> None:
 
 BRANCH_LABEL_COLUMNS = [
     "bucket", "company_id", "company_name", "website",
-    "technologiefeld", "score", "decided_by", "runner_up", "keyword_count", "keywords", "shortlist",
+    "technologiefeld",
+    # Empty except on `no_website` rows, where it is the field the register text claimed and no
+    # website confirmed. `technologiefeld` stays NONE for those — this column is what you are being
+    # asked to judge in that bucket, and without it the row says nothing.
+    "withheld_branch",
+    "score", "decided_by", "runner_up", "keyword_count", "keywords", "shortlist",
     # The company's own sentence around the deciding keyword — read THIS before opening a website.
     # For a `no_keyword` row it is the start of the text we read, so "nothing matched" can be checked
     # rather than believed.
@@ -1793,22 +1875,25 @@ BRANCH_LABEL_VALUES = ("yes", "no", "unclear")
 
 
 def branch_label_buckets(rows: list[dict[str, Any]]) -> dict[str, list[dict[str, Any]]]:
-    """Five groups, because there are five different questions and one sample cannot answer them all.
+    """Six groups, because there are six different questions and one sample cannot answer them all.
 
     keyword_decided   the words said it. PRECISION of the whole column, and the main number here.
     model_decided     the model broke a tie. Was breaking it that way right?
+    no_website        the register text named a field and no website was found, so it was withheld.
+                      **Was the withheld field right?** This bucket is the price of the website gate.
+                      Mostly `yes` here means the gate is throwing away good answers.
     torn              two branches too close to call. **Label these before paying for the model** —
                       they are exactly the rows it would be asked about, and if a human cannot
                       separate them from the same text, a 4B model will not either.
     no_keyword        we read text and no keyword appeared. Does this company have a branch anyway?
     no_text           we had nothing to read. THE CEILING: what better input would be buying.
 
-    `torn`, `no_keyword` and `no_text` get their own buckets rather than one. Sampled together, 46%
-    of the draw comes from `no_text`, which is the least informative of the three.
+    `no_website`, `torn`, `no_keyword` and `no_text` get their own buckets rather than one. Sampled
+    together, 46% of the draw comes from `no_text`, which is the least informative of the four.
     """
     buckets: dict[str, list[dict[str, Any]]] = {
         "keyword_decided": [], "model_decided": [],
-        "torn": [], "no_keyword": [], "no_text": [],
+        "no_website": [], "torn": [], "no_keyword": [], "no_text": [],
     }
     for row in rows:
         if row.get("outcome") == "assigned":
@@ -1895,9 +1980,8 @@ def branch_labels(per_bucket: int = 10) -> None:
 
     existing: dict[str, dict[str, str]] = {}
     if BRANCH_LABELS_PATH.exists():
-        with BRANCH_LABELS_PATH.open(encoding="utf-8-sig", newline="") as handle:
-            for old in csv.DictReader(handle):
-                existing[old.get("company_id") or ""] = old
+        for old in read_label_csv(BRANCH_LABELS_PATH):
+            existing[old.get("company_id") or ""] = old
         done = sum(1 for v in existing.values() if (v.get("label") or "").strip())
         log.info("%s has %d rows, %d labelled", BRANCH_LABELS_PATH.name, len(existing), done)
 
@@ -1927,6 +2011,7 @@ def branch_labels(per_bucket: int = 10) -> None:
                 "wz_division_title": row.get("wz_division_title") or "",
                 "wz_section_title": row.get("wz_section_title") or "",
                 "technologiefeld": field_now,
+                "withheld_branch": row.get("withheld_branch") or "",
                 "score": row.get("score") or "",
                 "decided_by": row.get("decided_by") or row.get("outcome"),
                 "runner_up": row.get("runner_up") or "",
@@ -1972,6 +2057,9 @@ def branch_labels(per_bucket: int = 10) -> None:
         )
     print(f"Fill in `label` with one of: {', '.join(BRANCH_LABEL_VALUES)}")
     print("  keyword/model_decided    -> is `technologiefeld` right for this company?")
+    print("  no_website               -> `withheld_branch` is what the company's REGISTER TEXT")
+    print("                              claims and no website confirmed. Is that claim right?")
+    print("                              `yes` here means the website rule cost a good answer.")
     print("  torn                     -> can YOU pick one of `shortlist` from the same text? If")
     print("                              not, no model can. Write which one in `notes`.")
     print("  no_keyword / no_text     -> look the company up. `yes` if some branch on the list")
@@ -1983,8 +2071,7 @@ def branch_labels_report() -> None:
     """Read the worksheet back. The only thing here that says whether the answer was RIGHT."""
     if not BRANCH_LABELS_PATH.exists():
         raise SystemExit(f"no {BRANCH_LABELS_PATH}; run `classify-labels` first")
-    with BRANCH_LABELS_PATH.open(encoding="utf-8-sig", newline="") as handle:
-        rows = list(csv.DictReader(handle))
+    rows = read_label_csv(BRANCH_LABELS_PATH)
 
     def tally(bucket: str) -> dict[str, int]:
         counts = {v: 0 for v in BRANCH_LABEL_VALUES}
@@ -2027,6 +2114,24 @@ def branch_labels_report() -> None:
             print(f"\n  PRECISION {counts['yes']}/{decided} = {100.0 * counts['yes'] / decided:.0f}%")
         else:
             print("\n  PRECISION unknown — nothing in this group is labelled yet")
+
+    # The price of the website gate, in correctness rather than in count. `yes` here means the
+    # register text was right and the rule threw a good answer away.
+    gate = tally("no_website")
+    decided = gate["yes"] + gate["no"]
+    print("\n-- the website rule: was the withheld field right anyway? --")
+    print(f"{'yes, the register text was right':<38}{gate['yes']:>5}")
+    print(f"{'no, it was wrong':<38}{gate['no']:>5}")
+    print(f"{'unclear':<38}{gate['unclear']:>5}")
+    print(f"{'not yet labelled':<38}{gate['unlabelled']:>5}")
+    if decided:
+        print(f"\n  WITHHELD-BUT-RIGHT {gate['yes']}/{decided} = "
+              f"{100.0 * gate['yes'] / decided:.0f}%")
+        print("  Scale that across the 563 withheld rows before defending the rule. High means the")
+        print("  register purpose is good evidence and requiring a website is costing real answers;")
+        print("  low means the boilerplate argument holds and the rule is doing its job.")
+    else:
+        print("\n  UNKNOWN — nothing in this group is labelled, so the website rule is unmeasured.")
 
     torn = tally("torn")
     decided = torn["yes"] + torn["no"]
