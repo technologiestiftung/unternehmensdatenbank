@@ -175,6 +175,13 @@ def main() -> int:
     check("...nor a WzMap type", hasattr(bc, "WzMap"), False)
     check("classify() knows nothing about wz_cluster", "wz_cluster" in dir(bc), False)
 
+    # The same argument, for the register status. `DISCOVERY_ACTIVE_ONLY` may stop the runner spending
+    # a model call on a company the register lists as `erloschen` — 53.1% of this table — but whether
+    # a company still exists says nothing about which field it worked in, and a keyword found on its
+    # pages means what it always meant. So the flag reaches the runner and never the classifier.
+    check("classify() takes no register status either",
+          params & {"register_status", "status", "active_only", "is_active"}, set())
+
     # A division is the first two characters of whatever code the company carries. No prefix search,
     # no mapping, no judgement — which is why this column needs no labelling.
     for code, division in (("56", "56"), ("56.1", "56"), ("56.11", "56"), ("56.11.1", "56"),

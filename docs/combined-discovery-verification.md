@@ -27,6 +27,31 @@ verification problem: for **665 of the 954 companies with no website we had alre
 and refused it.** Only 289 never yielded a live page at all, and those are the ones no amount of
 better reading can reach.
 
+## Over half the companies were never worth asking about
+
+Measured 27 August 2026, when `register_status` was promoted out of `metadata` into its own column.
+The register says whether a company still exists, and for this table it mostly says no:
+
+| | `aktiv` | `erloschen` | `in Liquidation` |
+|---|---|---|---|
+| companies | 6,298 (43.6%) | **7,673 (53.1%)** | 472 (3.3%) |
+| of the 902 websites found | 866 | 29 | 7 |
+| of the 842 in the `high` band | 813 | 22 | 7 |
+| Technologiefeld `assigned` (346) | 335 | 9 | 2 |
+| purpose-column model answers (567) | 335 | 232 | — |
+
+So **56.4% of every URL guess, page download, judge call and tie-break went to a company that no
+longer trades**, and returned 4.0% of the websites. `DISCOVERY_ACTIVE_ONLY=1` skips them; it is off by
+default because it changes which companies a limited run selects (see `SAMPLE_SQL`), so the numbers
+above are the *unfiltered* baseline and a filtered run is only comparable to another filtered run.
+
+Two things worth noticing beyond the runtime. First, the hit rate on `in Liquidation` companies is the
+same as on live ones — all 7 of their websites are `high` — which is what you would expect of a
+business that is winding down but still trading; they are counted as inactive anyway, because 472
+companies of work is not worth 7 websites. Second, a dissolved company's domain is the classic
+resold-domain case, so those 29 `erloschen` websites deserve more suspicion than their confidence
+scores carry. Nobody has labelled them.
+
 ## The bottleneck is now the model, not the network
 
 With the page cache warm the median company costs **0.8 seconds**, down from 10.1. The remaining ~69

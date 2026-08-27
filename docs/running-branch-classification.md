@@ -193,6 +193,36 @@ delete the individual keywords instead. If it rises, flip the default and put th
 `docs/branch-classification.md`. Either way the run's `taxonomy+rule version` line at the top of the
 report changes, so the two files can never be confused.
 
+## 4c. Optional: stop spending model time on companies that no longer exist
+
+`register_status` says whether the register still lists a company. Over this table, **7,673 of 14,443
+are `erloschen`** — dissolved — and 472 more are `in Liquidation`. `DISCOVERY_ACTIVE_ONLY=1` stops any
+**new** model call being spent on them:
+
+```powershell
+$env:DISCOVERY_ACTIVE_ONLY = "1"
+python scripts/run_combined_discovery.py classify --source page,purpose
+python scripts/run_combined_discovery.py classify-purpose
+Remove-Item Env:\DISCOVERY_ACTIVE_ONLY
+```
+
+What it does and does not do, because the difference matters:
+
+1. **Keywords still score every company.** Both files still hold one row per company, all 14,443, so
+   every outcome count still sums to the table. The keyword pass is free — it is the model that costs
+   minutes.
+2. **A verdict already in the cache is still applied.** Only a new call is withheld. A re-run
+   therefore never rewrites the file as though the model had never spoken, which would drop the
+   counts with nothing to explain why.
+3. **Column 3 is where the money is.** A register purpose outlives the company that filed it, so 232
+   of the 567 model answers in `purpose_branches.jsonl` — 41% — went to a dead company. Column 1
+   needs a website and dead companies mostly have none, so there it saves 11 calls of 346.
+4. **Rows the model is not asked about stay exactly as the keywords left them** — `torn` or
+   `no_keyword`, which is what a refused or unreachable model already produces. No new outcome, no
+   count moving for a reason nobody can see.
+5. `register_status` is written on every row of both files whether the flag is on or not, so any count
+   in either report can be sliced by it after the fact.
+
 ## 5. The spreadsheet to hand over
 
 ```powershell

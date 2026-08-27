@@ -48,6 +48,15 @@ OUTPUT_COLUMNS = [
     "established_at",
     "postcode",
     "city",
+    # The register's own verdict on whether the company still exists: aktiv, erloschen or in
+    # Liquidation. It is also in `metadata_json` as `status` (the raw record keeps everything), but it
+    # gets its own column because the discovery stages filter on it and reading a JSONB key per row is
+    # not what an indexed filter is for. Over Osnabrück, 53% came back `erloschen`.
+    #
+    # THE MANUAL LOAD MUST MAP THIS COLUMN. There is no loader script in this repo — the CSV goes
+    # into Postgres by hand — and the discovery filter is `= 'aktiv'`, which excludes NULL. Forget it
+    # and an active-only run finds nothing to do at all. See docs/data-model.md.
+    "register_status",
     "metadata_json",
 ]
 
@@ -244,6 +253,7 @@ def main() -> int:
                     "established_at": (data.get("Eintragung Datum") or "").strip() or None,
                     "postcode": (data.get("PLZ") or "").strip() or None,
                     "city": (data.get("Ort") or "").strip() or None,
+                    "register_status": (data.get("Status") or "").strip() or None,
                     "metadata_json": json.dumps(metadata, ensure_ascii=False),
                 }
             )

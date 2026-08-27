@@ -59,6 +59,29 @@ docker compose up -d airflow-scheduler airflow-dag-processor airflow-apiserver a
 The flag names are `ENABLE_` plus the DAG name in capitals: `ENABLE_URL_DISCOVERY`,
 `ENABLE_MISTRAL_SEARCH_DISCOVERY`, and so on.
 
+### Step 1b — optional: skip the companies that no longer exist
+
+**7,673 of the 14,443 companies in this table are `erloschen`** — dissolved — and 472 more are `in
+Liquidation`. Between them they yielded 36 of the 902 websites ever found, 4.0%. One flag makes every
+discovery DAG ignore them:
+
+```
+DISCOVERY_ACTIVE_ONLY=true
+```
+
+It applies to every DAG at once, because they all pick their companies through the same five queries
+in `source_enrichment_common.py`. Restart the Airflow containers as above for it to take effect.
+
+Two warnings, both learned the hard way:
+
+1. **It is not a subset.** The batch limit applies *after* the filter, so a run of 50 companies with
+   the flag on is 50 **live** companies — different companies, not fewer. Measured on the sampling
+   order used by the combined-discovery script, `--limit 200` unfiltered holds 78 live companies while
+   `--limit 200` filtered holds 200, overlapping by exactly those 78. The saving appears on a full
+   pass over the table (14,443 → 6,298), not on a limited one.
+2. **Nothing in this repo's published numbers was measured with it on.** Compare a filtered run only
+   against another filtered run.
+
 ### Step 2 — unpause it in Airflow
 
 Separate from the flag. Airflow will not start a paused DAG even if the flag is true.

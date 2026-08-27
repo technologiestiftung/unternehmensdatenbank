@@ -41,6 +41,10 @@ x-airflow-common: &airflow-common
     NOMINATIM_DELAY_S: ${NOMINATIM_DELAY_S:-2.0}
     DB_COMMIT_BATCH_SIZE: ${DB_COMMIT_BATCH_SIZE:-250}
     SOURCE_ENRICHMENT_BATCH_SIZE: ${SOURCE_ENRICHMENT_BATCH_SIZE:-50}
+    # Skip companies whose register_status is not 'aktiv' — 56.4% of the Osnabrück table. Off by
+    # default because it changes which companies every stage sees, and all published numbers were
+    # measured unfiltered. See source_enrichment_common.ACTIVE_ONLY.
+    DISCOVERY_ACTIVE_ONLY: ${DISCOVERY_ACTIVE_ONLY:-false}
     ENABLE_MISTRAL_SEARCH_DISCOVERY: ${ENABLE_MISTRAL_SEARCH_DISCOVERY:-false}
     ENABLE_CLAUDE_SEARCH_DISCOVERY: ${ENABLE_CLAUDE_SEARCH_DISCOVERY:-false}
     MISTRAL_API_KEY: ${MISTRAL_API_KEY:-}

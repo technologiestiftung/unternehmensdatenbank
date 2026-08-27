@@ -104,11 +104,26 @@ os.environ.setdefault("COMBINED_PAGE_CACHE_DIR", str(PAGE_CACHE_PATH))
 
 #: Same ordering as scripts/ac_measurement.py, for the same reason: md5 of the id spreads the
 #: sample across the whole table, and it is stable, so every run sees the same companies.
+#:
+#: `{active_only}` is where `DISCOVERY_ACTIVE_ONLY` lands, and it is worth being blunt about what it
+#: does to this query: **it changes WHICH companies a given `--limit` selects, and it does not make a
+#: limited run cheaper.** The order is `md5(id)` over whatever survives the WHERE, so the limit is
+#: applied *after* the filter: measured on this table, `--limit 200` unfiltered holds 78 live
+#: companies, while `--limit 200` filtered holds 200 live companies and overlaps the first set by
+#: exactly those 78. That is 122 companies of NEW work, not a saving.
+#:
+#: The saving is real only where the limit stops binding — a full run, 14,443 companies down to
+#: 6,298. On a limited run the flag buys density instead: every company processed is one that might
+#: still have a website. Two consequences, both of which have bitten someone in this repo already:
+#: keyword weights are computed over whatever was scoped (`df_companies`), so a filtered run scores
+#: the same company differently; and every number in `docs/` was measured with the flag off, so a
+#: filtered run compares only against another filtered run.
 SAMPLE_SQL = """
 SELECT id::text, company_name, address, postcode, city, registration_number,
        legal_form, wz_code, business_purpose
-FROM public.companies
+FROM public.companies c
 WHERE company_name IS NOT NULL
+  {active_only}
 ORDER BY md5(id::text)
 LIMIT %s
 """
@@ -320,16 +335,54 @@ def all_company_names() -> list[str]:
         connection.close()
 
 
+def active_only() -> bool:
+    """Whether to skip companies the register no longer lists as `aktiv`.
+
+    One definition of the flag, in `source_enrichment_common`, read through here so the script and
+    the DAGs can never end up with two env var names that drift apart. Read lazily, like every other
+    import from that module, because it pulls in psycopg2.
+    """
+    from source_enrichment_common import ACTIVE_ONLY
+
+    return ACTIVE_ONLY
+
+
 def load_sample(limit: int) -> list[Any]:
-    from source_enrichment_common import CompanyCandidate, get_connection
+    from source_enrichment_common import _ACTIVE_ONLY_SQL, CompanyCandidate, get_connection
+
+    # `_ACTIVE_ONLY_SQL` is one fixed literal or the empty string, chosen by an env var — a `%s`
+    # parameter can be neither, so it is formatted in. The limit stays bound. SAMPLE_SQL aliases
+    # `public.companies` as `c` purely so this one shared fragment drops in verbatim, rather than a
+    # second spelling of the same predicate existing here to be kept in sync.
+    sql = SAMPLE_SQL.format(active_only=_ACTIVE_ONLY_SQL)
 
     connection = get_connection()
     try:
         with connection, connection.cursor() as cur:
-            cur.execute(SAMPLE_SQL, (limit,))
+            cur.execute(sql, (limit,))
             rows = cur.fetchall()
+            # A filter that removes EVERYTHING is not a quiet no-op, it is a broken import. The
+            # Berlin CSV goes into Postgres by hand and `register_status` is a new column in that
+            # copy list; forget it and every row is NULL, `= 'aktiv'` excludes NULL, and this would
+            # otherwise report a clean, fast, complete run over zero companies.
+            if active_only() and not rows:
+                cur.execute("SELECT count(*) FROM public.companies")
+                total = cur.fetchone()[0]
+                if total:
+                    raise SystemExit(
+                        f"DISCOVERY_ACTIVE_ONLY is on and matched 0 of {total:,} companies. "
+                        "register_status is probably NULL for the whole table — the manual CSV load "
+                        "has to map that column. See docs/data-model.md."
+                    )
     finally:
         connection.close()
+    if active_only():
+        log.info(
+            "DISCOVERY_ACTIVE_ONLY: %d companies, all of them aktiv. This is a DIFFERENT sample "
+            "from an unfiltered --limit %d, not a subset of it — the limit applies after the "
+            "filter, so a limited run does more work rather than less. The saving is on a full run.",
+            len(rows), limit,
+        )
     return [
         CompanyCandidate(
             id=r[0], company_name=r[1], address=r[2], postcode=r[3], city=r[4],
@@ -1200,15 +1253,20 @@ PURPOSE_BRANCHES_PATH = OUT_DIR / "purpose_branches.jsonl"
 #: Read in this order, so a keyword found in several texts is credited to the most specific one.
 SOURCE_ORDER = ("services", "homepage", "imprint", "purpose")
 
+#: Note what is NOT here: `DISCOVERY_ACTIVE_ONLY` does not filter this query, deliberately. The
+#: keyword pass is free — two minutes over 14,443 companies, no network — and both classification
+#: files are expected to carry one row per company in the table, so dropping the dead ones here would
+#: shrink `branches.jsonl` and `purpose_branches.jsonl` and make every outcome count stop summing to
+#: the table. `register_status` is selected instead, and only the MODEL CALLS are gated on it.
 COMPANY_FACTS_SQL = """
-SELECT id::text, company_name, wz_code, business_purpose
+SELECT id::text, company_name, wz_code, business_purpose, register_status
 FROM public.companies
 WHERE company_name IS NOT NULL
 """
 
 
 def load_company_facts() -> dict[str, dict[str, Any]]:
-    """Company id -> name, WZ code and register purpose, for the whole table.
+    """Company id -> name, WZ code, register purpose and register status, for the whole table.
 
     The whole table rather than the sample: the WZ code answers for companies that have no website
     at all, and those are exactly the ones the website path can never reach.
@@ -1223,7 +1281,13 @@ def load_company_facts() -> dict[str, dict[str, Any]]:
     finally:
         connection.close()
     return {
-        r[0]: {"company_name": r[1], "wz_code": r[2], "business_purpose": r[3]} for r in rows
+        r[0]: {
+            "company_name": r[1],
+            "wz_code": r[2],
+            "business_purpose": r[3],
+            "register_status": r[4],
+        }
+        for r in rows
     }
 
 
@@ -1489,6 +1553,19 @@ def classify(
         else:
             log.info("The tie-break model is ON: %s", reason)
 
+    # Which rows may not spend a NEW model call. Every company is still scored by keywords and still
+    # gets a line in the file — this decides only where the slow part is allowed to run. Computed
+    # once rather than per row, because the flag is one env var and this loop is 14,443 long.
+    skip_model_for = {
+        company_id: facts[company_id].get("register_status") != "aktiv" for company_id in scope
+    } if active_only() else {}
+    if skip_model_for:
+        log.info(
+            "DISCOVERY_ACTIVE_ONLY: %d of %d companies are not aktiv — keywords still score them, "
+            "the model is not asked anything new about them",
+            sum(1 for skip in skip_model_for.values() if skip), len(scope),
+        )
+
     BRANCHES_PATH.parent.mkdir(parents=True, exist_ok=True)
     if BRANCHES_PATH.exists():
         BRANCHES_PATH.unlink()  # a full re-score, not an increment: every weight may have moved
@@ -1530,12 +1607,16 @@ def classify(
 
         verdict = None
         if use_llm and result.shortlist and state["page_text"]:
+            # A dead company gets no NEW model call when the flag is on — 11 of the 346 fields ever
+            # assigned went to one, and the model is the slow part of this command. A verdict already
+            # in the cache is still applied, which is what `cached_only` means.
             verdict = branch_llm.choose(
                 company_name=facts[company_id].get("company_name") or "",
                 text=state["page_text"],
                 shortlist=result.shortlist,
                 url=rows.get(company_id, {}).get("website") or company_id,
                 taxonomy_version=taxonomy.version,
+                cached_only=skip_model_for.get(company_id, False),
             )
             asked += 0 if verdict.cached else 1
             if verdict.branch:
@@ -1567,6 +1648,10 @@ def classify(
             "company_id": company_id,
             "company_name": facts[company_id].get("company_name"),
             "website": rows.get(company_id, {}).get("website"),
+            # Does the register still list this company? 53.1% of Osnabrück is `erloschen`, and every
+            # count this file has ever produced was measured over those too. Written on every row so
+            # that is answerable from the file, whether or not the run filtered anything.
+            "register_status": facts[company_id].get("register_status"),
             # ---- column 1: Berlin's Technologie- und Anwendungsfeld, from the company's own words
             # `technologiefeld` is what a consumer reads: a Berlin name or the literal NONE, never
             # anything else. `outcome` says WHY when it is NONE, and the three reasons stay apart.
@@ -1989,6 +2074,18 @@ def classify_purpose(
                     pb.MIN_PURPOSE_CHARS,
                 )
 
+    # Rows barred from a NEW model call because the register no longer lists them as `aktiv`. Same
+    # shape and same rule as column 1: keywords still score every company, every company still gets a
+    # line, only the slow part is withheld.
+    skip_model_for = {
+        company_id: facts[company_id].get("register_status") != "aktiv" for company_id in scope
+    } if active_only() else {}
+    if skip_model_for:
+        log.info(
+            "DISCOVERY_ACTIVE_ONLY: %d of %d companies are not aktiv — no new model call for them",
+            sum(1 for skip in skip_model_for.values() if skip), len(scope),
+        )
+
     counts: dict[str, int] = {}
     asked = served_from_cache = 0
     started_at = time.time()
@@ -2018,6 +2115,13 @@ def classify_purpose(
             # Named companies jump the queue; everything else is frozen out of NEW calls. A cached
             # answer is still applied below either way, so this never loses work already paid for.
             if only_ids is not None and company_id not in only_ids:
+                tier_on = False
+
+            # Same mechanism, different reason: a company the register no longer lists as `aktiv`
+            # buys no NEW call. It is worth 41% of this command's model time — 232 of the 567 answers
+            # in the file went to a dead company, because a register purpose survives the company
+            # that filed it. Both tiers are covered, since both arrive through `tier_on`.
+            if skip_model_for.get(company_id):
                 tier_on = False
 
             # **An answer already paid for is applied on EVERY run, tier flag or not.** Otherwise a
@@ -2095,6 +2199,10 @@ def classify_purpose(
         append_jsonl(PURPOSE_BRANCHES_PATH, {
             "company_id": company_id,
             "company_name": fact.get("company_name") or "",
+            # Whether the register still lists the company. This column reaches far more dead
+            # companies than column 1 does — a purpose outlives the company that filed it, while a
+            # website does not — so slicing the counts by this is the only way to see it.
+            "register_status": fact.get("register_status"),
             # The column itself. `purpose_field` rather than `branch`, so a row from this file can
             # never be mistaken for a row from `branches.jsonl` by a reader looking at keys.
             "purpose_field": assignment.value,

@@ -191,6 +191,15 @@ safe. The same is true of column 3, which has **no** labelling worksheet yet.
 
 - **`website_url` is a view column, not a table column.** V9 dropped it from `companies`. Enriched
   fields live in `company_canonical_field_sources`, read through `public.v_companies_enriched`.
+- **53% of `companies` is `erloschen`** — dissolved. V13 promoted the register's `Status` into
+  `companies.register_status` (`aktiv` 6,298 / `erloschen` 7,673 / `in Liquidation` 472); it had been
+  in `metadata` since the import, unread. Every published number — 902 websites, 842 `high`, 346
+  fields — was measured over the dead ones, which supplied 4.0% of the websites.
+  `DISCOVERY_ACTIVE_ONLY=1` skips them and is **off**: the limit applies *after* the filter, so a
+  limited run gets a **different, not smaller** sample (`--limit 200` → 200 live, overlapping the
+  unfiltered 200 by 78). Keywords still score all 14,443; only a **new** model call is withheld, and a
+  cached verdict still applies. The manual Berlin `\copy` **must map `register_status`** or every row
+  is NULL and an active-only run does nothing. [data-model](docs/data-model.md).
 - **A register number on a page proves the page is *about* a company, never that it *is* that
   company's site.** Registry pages, insolvency trackers and directories all quote them.
   `search_common.is_own_site_candidate` is the single predicate for that call; a looser one anywhere
