@@ -33,6 +33,7 @@ are personal data, and nothing here needs them.
 from __future__ import annotations
 
 import argparse
+import collections
 import csv
 import io
 import json
@@ -564,6 +565,16 @@ def _report_judge(rows: list[dict[str, Any]], n: int) -> None:
             )
 
 
+def _hms(seconds: float) -> str:
+    """`2h14m` / `9m30s` / `45s`. Two units is enough to plan around and short enough to sit in a log line."""
+    seconds = int(max(seconds, 0))
+    if seconds >= 3600:
+        return f"{seconds // 3600}h{(seconds % 3600) // 60:02d}m"
+    if seconds >= 60:
+        return f"{seconds // 60}m{seconds % 60:02d}s"
+    return f"{seconds}s"
+
+
 def _pct(part: int, whole: int) -> str:
     return f"{100.0 * part / whole:5.1f}%" if whole else "    -"
 
@@ -710,8 +721,48 @@ _TECHNOLOGIEFELD_COLUMNS = (
     "technologiefeld", "technologiefeld_reason", "technologiefeld_score",
     "technologiefeld_text_source", "technologiefeld_decided_by", "technologiefeld_keywords",
     "technologiefeld_runner_up", "technologiefeld_needs_review",
+    # Only filled when the tie-break model ran. `decided_by = model` says it FIRED; these two say
+    # whether it was thinking. Read twenty reasons and you know if it is reading the page or
+    # bluffing — which is the question "coverage went up" cannot answer.
+    "technologiefeld_llm_reason", "technologiefeld_llm_refused",
 )
 _WZ_COLUMNS = ("wz_code", "wz_division", "wz_division_title", "wz_section", "wz_section_title")
+
+#: COLUMN 3, from the register purpose alone. Prefixed and grouped like the other two, because the
+#: whole point of three columns is that a reader can see which evidence produced which answer.
+#: `purpose_decided_by` is the one to read first: `keywords` means a word from the taxonomy is
+#: literally in the register text, `model_direct` means a model chose from all 77 with nothing
+#: anchoring it to the text.
+_PURPOSE_COLUMNS = (
+    "purpose_field", "purpose_outcome", "purpose_decided_by", "purpose_keywords",
+    "purpose_score", "purpose_llm_reason", "purpose_model",
+    # The source. Read `purpose_llm_reason` against `purpose_text` and a model row can be judged
+    # without opening anything else — the only check this column currently has. 251 characters on
+    # average, 541 at the 95th percentile, 7,321 at the longest; well inside Excel's 32,767-character
+    # cell limit, so it is written whole rather than abridged.
+    "purpose_text", "purpose_chars",
+)
+
+
+def _purpose_columns(row: dict[str, Any] | None) -> dict[str, Any]:
+    """Column 3 for one company. All blank when `classify-purpose` has never run for it.
+
+    Blank is a legitimate state and deliberately not spelled `NONE`: "nobody has run this" and "the
+    register named no field" are different claims, and only the second one is an answer.
+    """
+    if not row:
+        return {c: "" for c in _PURPOSE_COLUMNS}
+    return {
+        "purpose_field": row.get("purpose_field") or "",
+        "purpose_outcome": row.get("outcome") or "",
+        "purpose_decided_by": row.get("decided_by") or "",
+        "purpose_keywords": ";".join(sorted(row.get("keywords") or {})),
+        "purpose_score": row.get("score") or "",
+        "purpose_llm_reason": row.get("llm_reason") or "",
+        "purpose_model": row.get("model_name") or "",
+        "purpose_text": row.get("purpose_text") or "",
+        "purpose_chars": row.get("purpose_chars") or "",
+    }
 
 
 def _branch_columns(row: dict[str, Any] | None) -> dict[str, Any]:
@@ -742,6 +793,8 @@ def _branch_columns(row: dict[str, Any] | None) -> dict[str, Any]:
         "technologiefeld_keywords": ";".join(sorted(keywords)),
         "technologiefeld_runner_up": row.get("runner_up") or "",
         "technologiefeld_needs_review": "yes" if row.get("needs_review") else "",
+        "technologiefeld_llm_reason": row.get("llm_reason") or "",
+        "technologiefeld_llm_refused": row.get("llm_refused") or "",
         "wz_code": row.get("wz_code") or "",
         "wz_division": row.get("wz_division") or "",
         "wz_division_title": row.get("wz_division_title") or "",
@@ -773,6 +826,10 @@ CSV_COLUMNS = [
     # which is not the same as "this company has no industry".
     *_TECHNOLOGIEFELD_COLUMNS,
     *_WZ_COLUMNS,
+    # Column 3, from `classify-purpose`. Independent of the other two: it needs no website, so it is
+    # filled for thousands of companies the Technologiefeld can never reach — and for some of those
+    # the two will disagree, which is a finding rather than a fault.
+    *_PURPOSE_COLUMNS,
 ]
 
 
@@ -785,6 +842,14 @@ def write_csv(limit: int | None = None) -> None:
     branches = {r["company_id"]: r for r in read_jsonl(BRANCHES_PATH) if r.get("company_id")}
     if branches:
         log.info("Joining branches for %d companies from %s", len(branches), BRANCHES_PATH.name)
+    # Column 3 joins the same way and is just as optional. Missing leaves its columns blank.
+    purposes = {
+        r["company_id"]: r
+        for r in read_jsonl(PURPOSE_BRANCHES_PATH) if r.get("company_id")
+    }
+    if purposes:
+        log.info("Joining register purposes for %d companies from %s",
+                 len(purposes), PURPOSE_BRANCHES_PATH.name)
     CSV_PATH.parent.mkdir(parents=True, exist_ok=True)
     with CSV_PATH.open("w", encoding="utf-8-sig", newline="") as handle:
         writer = csv.DictWriter(handle, fieldnames=CSV_COLUMNS)
@@ -834,6 +899,7 @@ def write_csv(limit: int | None = None) -> None:
                 "db_website_confidence": stored.get("confidence") or "",
                 "agrees_with_db": agreement(r.get("website"), stored.get("website")),
                 **_branch_columns(branches.get(r.get("company_id") or "")),
+                **_purpose_columns(purposes.get(r.get("company_id") or "")),
             })
     found = sum(1 for r in rows if r.get("website"))
     log.info("Wrote %s — %d rows, %d with a URL", CSV_PATH, len(rows), found)
@@ -1122,6 +1188,14 @@ def labels_report() -> None:
 
 BRANCHES_PATH = OUT_DIR / "branches.jsonl"
 BRANCH_LABELS_PATH = OUT_DIR / "branch_labels_todo.csv"
+#: Candidate keywords a model read off pages where none of ours fired. A worksheet for a person, not
+#: an output: nothing here reaches a column until somebody puts it in `branch_taxonomy.yaml` by hand.
+KEYWORD_PROPOSALS_PATH = OUT_DIR / "keyword_proposals.csv"
+#: COLUMN 3, the PURPOSE FIELD. What the commercial register says the company was set up to do,
+#: from `business_purpose` alone. Its own file, because it is its own column: a Technologiefeld
+#: requires a website and this deliberately does not, so mixing them would silently reverse that
+#: rule. See `combined_discovery/purpose_branch.py`.
+PURPOSE_BRANCHES_PATH = OUT_DIR / "purpose_branches.jsonl"
 
 #: Read in this order, so a keyword found in several texts is credited to the most specific one.
 SOURCE_ORDER = ("services", "homepage", "imprint", "purpose")
@@ -1559,6 +1633,798 @@ def branch_counts(rows: list[dict[str, Any]]) -> dict[str, int]:
         key = row.get("technologiefeld") or row.get("branch") or "?"
         counts[key] = counts.get(key, 0) + 1
     return counts
+
+
+PROPOSAL_COLUMNS = [
+    # What the model read off a page, normalised so it is comparable with a real keyword.
+    "word",
+    # How many of the target companies this word FIRES on, by the real matcher. This is the value of
+    # adding it, and it is the column to sort by.
+    "companies",
+    #   new              fires on a page and is not in branch_taxonomy.yaml  <- the prize
+    #   already_keyword  fires and IS in the list, so something else stopped it. Rare, worth a look.
+    #   does_not_fire    the model paraphrased. Adding it would change nothing at all.
+    "status",
+    "example_companies", "example_snippet",
+    # The two a person fills in. The model is NEVER asked which field a word belongs to — the moment
+    # it names one we are back to the 77-way guessing this design exists to avoid.
+    "suggested_field", "decision",
+]
+
+
+def _snippet_around(word: str, text: str, width: int = EVIDENCE_WIDTH) -> str:
+    """The company's own sentence around a proposed word, so it can be judged in context."""
+    from combined_discovery import branch_classifier as bc
+
+    match = bc._pattern_for(word).search(text)
+    if not match:
+        return ""
+    start, end = max(0, match.start() - width), min(len(text), match.end() + width)
+    return f"…{text[start:end]}…"
+
+
+def propose_keywords(limit: int | None) -> None:
+    """Ask a model what the companies with NO keyword call themselves, and check every answer.
+
+    The second of the model's two jobs, and the one that needs no shortlist. `classify --llm` breaks
+    ties between fields the keywords already nominated; this runs where nothing fired at all — 332
+    companies with a website whose pages contain none of our 500 words.
+
+    It cannot move the Technologiefeld column and does not try. It writes one worksheet of candidate
+    keywords. A person places them in `branch_taxonomy.yaml`, and the NEXT `classify` run assigns the
+    fields through the ordinary matcher — so every field stays explainable by a word on a page.
+
+    **A proposal is only useful if the word really appears in that company's text.** Asked about an
+    ice-cream café the model may well answer "Gastronomie", which is already a keyword and did not
+    fire, because the page says *Eiscafé*. Adding it again changes nothing. So each word is run through
+    the real matcher against the same text `classify` reads, and the three outcomes are kept apart.
+    """
+    from combined_discovery import branch_classifier as bc
+    from combined_discovery import branch_llm
+
+    taxonomy = bc.load_taxonomy()
+    rows = {r["company_id"]: r for r in read_jsonl(BRANCHES_PATH) if r.get("company_id")}
+    if not rows:
+        raise SystemExit(f"nothing in {BRANCHES_PATH}; run `classify` first")
+
+    # The target: a website to read, and not one keyword found in it. Ordered by company id so a
+    # --limit trial is a prefix of the full run rather than a different sample.
+    scope = sorted(
+        (r for r in rows.values() if r.get("outcome") == "no_keyword" and r.get("website")),
+        key=lambda r: r.get("company_id") or "",
+    )
+    if limit:
+        scope = scope[:limit]
+    log.info("%d companies with a website and no keyword", len(scope))
+
+    usable, reason = branch_llm.availability()
+    if not usable:
+        raise SystemExit(f"the model is unreachable, and this command is nothing without it: {reason}")
+    log.info("Model: %s", reason)
+
+    facts = load_company_facts()
+    #: word -> the companies it actually fires on, and the companies that merely suggested it.
+    fires: dict[str, list[dict[str, Any]]] = {}
+    suggested: dict[str, int] = {}
+    asked = refused = reached = 0
+
+    for row in scope:
+        company_id = row["company_id"]
+        texts = company_texts(row, facts.get(company_id, {}), use_pages=True, use_purpose=True)
+        joined = bc.normalize(" ".join(texts.get(s, "") for s in SOURCE_ORDER))
+        if not joined:
+            continue
+
+        proposal = branch_llm.propose_vocabulary(
+            company_name=facts.get(company_id, {}).get("company_name") or row.get("company_name") or "",
+            text=joined,
+            url=row["website"],
+            taxonomy_version=taxonomy.version,
+        )
+        asked += 0 if proposal.cached else 1
+        if proposal.refused:
+            refused += 1
+            continue
+
+        gained = False
+        for word in proposal.words:
+            suggested[word] = suggested.get(word, 0) + 1
+            if bc._pattern_for(word).search(joined):
+                fires.setdefault(word, []).append({
+                    "company_name": row.get("company_name") or "",
+                    "snippet": _snippet_around(word, joined),
+                })
+                if word not in taxonomy.keyword_branches:
+                    gained = True
+        reached += gained
+        if (scope.index(row) + 1) % 25 == 0:
+            log.info("[%d/%d] %d distinct words fire so far", scope.index(row) + 1, len(scope), len(fires))
+
+    # ---- the worksheet -------------------------------------------------------------------
+    out: list[dict[str, Any]] = []
+    for word, count in sorted(suggested.items(), key=lambda kv: -kv[1]):
+        hits = fires.get(word) or []
+        status = ("already_keyword" if word in taxonomy.keyword_branches
+                  else "new" if hits else "does_not_fire")
+        out.append({
+            "word": word,
+            "companies": len(hits),
+            "status": status,
+            "example_companies": "; ".join(h["company_name"][:40] for h in hits[:3]),
+            "example_snippet": (hits[0]["snippet"] if hits else "")[:300],
+            "suggested_field": "",
+            "decision": "",
+        })
+    out.sort(key=lambda r: (r["status"] != "new", -r["companies"], r["word"]))
+
+    KEYWORD_PROPOSALS_PATH.parent.mkdir(parents=True, exist_ok=True)
+    with KEYWORD_PROPOSALS_PATH.open("w", encoding="utf-8-sig", newline="") as handle:
+        writer = csv.DictWriter(handle, fieldnames=PROPOSAL_COLUMNS, extrasaction="ignore")
+        writer.writeheader()
+        writer.writerows(out)
+
+    # ---- what happened ------------------------------------------------------------------
+    by_status = collections.Counter(r["status"] for r in out)
+    print(f"\n=== {len(scope)} companies asked · {asked} model calls · {refused} gave nothing ===\n")
+    print(f"{'distinct words proposed':<40}{len(out):>7}")
+    for status, label in (("new", "…fire on a page, NOT yet a keyword"),
+                          ("already_keyword", "…fire but are already keywords"),
+                          ("does_not_fire", "…do not appear on the page at all")):
+        print(f"{label:<40}{by_status.get(status, 0):>7}")
+
+    print("\n-- the candidates, most companies first --")
+    for row in [r for r in out if r["status"] == "new"][:20]:
+        print(f"   {row['word'][:32]:<34}{row['companies']:>4}  {row['example_companies'][:44]}")
+
+    print(f"\n{'companies a new word could reach':<40}{reached:>7}")
+    print(f"{'…still nothing, even if you accept all':<40}{len(scope) - reached:>7}")
+    print(
+        "\n  That second number is the honest ceiling. It is the count of companies whose pages carry\n"
+        "  no word for any industry Berlin's list contains — and no vocabulary work reaches them,\n"
+        "  because the gap is in the list rather than in the matching.\n"
+        f"\n  Nothing above has touched a column. Next: fill `suggested_field` and `decision` in\n"
+        f"  {KEYWORD_PROPOSALS_PATH.name}, add what you accept to branch_taxonomy.yaml with the count\n"
+        "  in a comment, then re-run `classify`. Apply the `clubs` test to every addition: is the word\n"
+        "  specific in GERMAN, or only useful in Osnabrück?"
+    )
+    if by_status.get("does_not_fire", 0) > by_status.get("new", 0):
+        print(
+            "\n  !! more paraphrases than real words — the prompt is drifting away from the page.\n"
+            "     Tighten it before anybody curates this."
+        )
+
+
+def branch_llm_cached(**kwargs):
+    """A purpose verdict already in the cache, or None. Never calls a model, so it is always safe."""
+    from combined_discovery import branch_llm
+
+    return branch_llm.cached_purpose_verdict(**kwargs)
+
+
+def _ask_the_model(
+    assignment: Any,
+    fact: dict[str, Any],
+    purpose: str | None,
+    company_id: str,
+    taxonomy: Any,
+    *,
+    options: list[str],
+    namespace: str,
+    tier: str,
+) -> tuple[Any, int]:
+    """One model call, folded into the assignment. Returns `(assignment, 1 if it actually asked)`.
+
+    Shared by both tiers on purpose. The two differ only in how long `options` is and which cache
+    namespace they use — so keeping one call site means the answer validation, the caching and the
+    failure handling cannot drift apart between a 3-way question and a 77-way one.
+    """
+    from combined_discovery import branch_llm
+    from combined_discovery import purpose_branch as pb
+
+    verdict = branch_llm.choose_for_purpose(
+        company_name=fact.get("company_name") or "",
+        purpose=purpose or "",
+        options=options,
+        company_id=company_id,
+        taxonomy_version=taxonomy.version,
+        namespace=namespace,
+    )
+    return pb.apply_model_verdict(
+        assignment,
+        branch=verdict.branch,
+        rejected_all=verdict.rejected_all,
+        unsure=verdict.unsure,
+        refused=verdict.refused,
+        reason=verdict.reason,
+        model_name=verdict.model_name,
+        tier=tier,
+    ), (0 if verdict.cached else 1)
+
+
+def classify_purpose(
+    limit: int | None,
+    use_llm: bool = False,
+    semantic: bool = False,
+    llm_budget: int | None = None,
+    only: list[str] | None = None,
+) -> None:
+    """COLUMN 3: what the register says each company was set up to do. Free unless `--llm`.
+
+    Reads `business_purpose` and nothing else. That independence is the point — this column reaches
+    the 6,477 companies that have a register purpose and no website at all, which the Technologiefeld
+    can never reach by design.
+
+    Three passes, because the middle one needs every company before it can weight anything:
+
+    1. match keywords in each company's purpose, with the strict word-boundary matcher
+    2. count how many COMPANIES use each keyword — the document frequency the weights divide by
+    3. score, and settle each company's outcome
+
+    Pass 2 is why `--limit` still reads the whole table for frequencies: a keyword's weight depends on
+    how common it is, so measuring it over 50 companies and over 7,141 gives different answers for the
+    same company. The limit selects which companies get *written*, not which ones get *counted*, and
+    the count that was used is recorded in every row as `df_companies`.
+
+    Ordered by company id, so `--limit 50` is a prefix of the full run rather than a different sample.
+
+    `only` names specific companies to spend model calls on, jumping the queue. The queue is
+    `company_id` order, which has nothing to do with the handover CSV's order (confidence, then name)
+    — so a row that looks interesting near the top of the spreadsheet can easily sit at position 2,903
+    and go untouched for hours. That mismatch is confusing enough to deserve an escape hatch.
+
+    `use_llm` turns on **Tier A only**: the 3-way tie-break on `torn` rows, against a local model.
+    It cannot create a field from nothing — it only converts `torn` into a field, an abstention, or
+    a recorded failure — so it never touches the ~6,481 `no_keyword` rows. Its reach is 17 companies
+    on today's data, and `BRANCH_MIN_KEYWORDS_FOR_MODEL` is what governs that, not the prompt.
+    """
+    from combined_discovery import branch_classifier as bc
+    from combined_discovery import purpose_branch as pb
+
+    taxonomy = bc.load_taxonomy()
+    facts = load_company_facts()
+    log.info("%d companies in the table", len(facts))
+
+    # ---- pass 1: what fired, per company ------------------------------------------------
+    # Over the WHOLE table, not the limit — see the docstring. `usable` is the corpus the weights are
+    # measured against, and it is the honest denominator for this column: 7,141 of 14,443.
+    # Matched for every company with ANY purpose text, including the stubs the length floor will
+    # exclude. Matching is free, and a stub that would have fired is what `withheld_by_floor`
+    # records — the floor's cost has to be countable or it cannot be argued with.
+    keywords: dict[str, dict[str, str]] = {}
+    usable: list[str] = []
+    for company_id, fact in facts.items():
+        purpose = fact.get("business_purpose")
+        if not (purpose or "").strip():
+            continue
+        keywords[company_id] = pb.purpose_keywords(purpose, taxonomy)
+        if pb.is_usable(purpose):
+            usable.append(company_id)
+    with_keyword = sum(1 for c in usable if keywords.get(c))
+    log.info(
+        "%d usable purposes (over %d chars), %d with at least one keyword",
+        len(usable), pb.MIN_PURPOSE_CHARS, with_keyword,
+    )
+
+    # ---- pass 2: document frequency over PURPOSE TEXTS ONLY ------------------------------
+    # Never borrowed from the website corpus. Register prose is a different vocabulary, and weighting
+    # it by how often a word appears on homepages would rank the wrong words. Counted per COMPANY, so
+    # one company cannot inflate its own words.
+    # Over the usable purposes ONLY — the stubs are matched but must not shift the weights, or the
+    # floor would be affecting the scores of the very rows it claims to have no opinion about.
+    df = bc.document_frequency(keywords[c].keys() for c in usable)
+    n_companies = len(usable)
+
+    # ---- pass 3: the answer -------------------------------------------------------------
+    scope = sorted(facts)
+    if limit:
+        scope = scope[:limit]
+
+    # Which model last answered each company, read from the file we are about to replace.
+    #
+    # The cache key contains the model name, so a lookup only finds answers from the model configured
+    # RIGHT NOW. Without `$env:OLLAMA_MODEL` set, that is the `qwen2.5:7b` default — which is not even
+    # pulled on this machine — so every previous answer would miss and a free re-run would silently
+    # report the keyword-only numbers. Carrying the names forward makes the file self-describing:
+    # re-running finds last time's answers whatever the environment says today.
+    previous_model: dict[str, str] = {}
+    if PURPOSE_BRANCHES_PATH.exists():
+        for row in read_jsonl(PURPOSE_BRANCHES_PATH):
+            if row.get("company_id") and row.get("model_name"):
+                previous_model[row["company_id"]] = row["model_name"]
+        if previous_model:
+            log.info("%d companies were answered by %s on an earlier run",
+                     len(previous_model), ", ".join(sorted(set(previous_model.values()))))
+
+    PURPOSE_BRANCHES_PATH.parent.mkdir(parents=True, exist_ok=True)
+    if PURPOSE_BRANCHES_PATH.exists():
+        PURPOSE_BRANCHES_PATH.unlink()
+
+    # ---- the model, if it was asked for ------------------------------------------------
+    # Checked once, up front, and it stops the run rather than degrading it. A command that silently
+    # does nothing because Ollama is down is worse than one that refuses to start: the numbers would
+    # look like "the model had no opinion" and nobody would know to re-run.
+    all_fields = taxonomy.branch_names()
+    if use_llm or semantic:
+        from combined_discovery import branch_llm
+
+        reachable, detail = branch_llm.availability()
+        if not reachable:
+            raise SystemExit(f"a model was asked for and it is unreachable: {detail}")
+        if use_llm:
+            log.info("Tier A (3-way tie-break) enabled: %s", detail)
+        if semantic:
+            log.info("Tier B (%d-way, no keyword to anchor it) enabled: %s", len(all_fields), detail)
+            log.info("  budget this run: %s new calls",
+                     llm_budget if llm_budget is not None else "unlimited")
+
+    # ---- the named companies, resolved from whatever was typed -------------------------
+    # A UUID is 36 characters and nobody wants to retype one, so a unique prefix is accepted. An
+    # ambiguous or unknown one is an error rather than a silent no-op: "I asked about this company and
+    # nothing happened" is the exact confusion this flag exists to remove.
+    only_ids: set[str] | None = None
+    if only:
+        only_ids = set()
+        for wanted in only:
+            wanted = wanted.strip().lower()
+            if not wanted:
+                continue
+            matches = [cid for cid in facts if cid.lower().startswith(wanted)]
+            if not matches:
+                raise SystemExit(f"--company-id {wanted!r} matches no company in public.companies")
+            if len(matches) > 1:
+                raise SystemExit(
+                    f"--company-id {wanted!r} is ambiguous — it matches {len(matches)} companies. "
+                    f"Use more characters: {', '.join(sorted(matches)[:3])}…"
+                )
+            only_ids.add(matches[0])
+        log.info("restricting NEW model calls to %d named company/companies", len(only_ids))
+        for cid in sorted(only_ids):
+            name = facts[cid].get("company_name") or ""
+            chars = len(bc.normalize(facts[cid].get("business_purpose")))
+            log.info("  %s  %-34s %d chars of register text", cid, name[:34], chars)
+            if chars <= pb.MIN_PURPOSE_CHARS:
+                log.warning(
+                    "  !! that is at or under the %d-char floor, so there is nothing to ask about — "
+                    "this row stays `no_purpose` whatever the model could have said",
+                    pb.MIN_PURPOSE_CHARS,
+                )
+
+    counts: dict[str, int] = {}
+    asked = served_from_cache = 0
+    started_at = time.time()
+    for company_id in scope:
+        fact = facts[company_id]
+        purpose = fact.get("business_purpose")
+        assignment = pb.classify_purpose(
+            taxonomy=taxonomy,
+            df=df,
+            n_companies=n_companies,
+            keywords_by_source=keywords.get(company_id),
+            had_purpose=pb.is_usable(purpose),
+        )
+
+        # Which question, if any, this row is eligible for. Tier A arbitrates between 3 candidates the
+        # keywords nominated; Tier B asks about all 77 where no keyword fired at all.
+        if assignment.outcome == pb.TORN and assignment.askable:
+            eligible = (assignment.shortlist, "purpose-llm-tiebreak",
+                        pb.DECIDED_BY_MODEL_TIEBREAK, use_llm)
+        elif assignment.outcome == pb.NO_KEYWORD:
+            eligible = (all_fields, "purpose-llm-direct", pb.DECIDED_BY_MODEL_DIRECT, semantic)
+        else:
+            eligible = None
+
+        if eligible:
+            options, namespace, tier, tier_on = eligible
+            # Named companies jump the queue; everything else is frozen out of NEW calls. A cached
+            # answer is still applied below either way, so this never loses work already paid for.
+            if only_ids is not None and company_id not in only_ids:
+                tier_on = False
+
+            # **An answer already paid for is applied on EVERY run, tier flag or not.** Otherwise a
+            # free re-run rewrites this file as though the model had never spoken, the counts drop,
+            # and nothing says why — the cache would still hold all of it. Only a NEW call is gated.
+            verdict = None
+            for candidate_model in (previous_model.get(company_id), None):
+                verdict = branch_llm_cached(
+                    options=options, company_id=company_id,
+                    taxonomy_version=taxonomy.version, namespace=namespace,
+                    model_name=candidate_model,
+                )
+                if verdict is not None:
+                    break
+            if verdict is not None:
+                served_from_cache += 1
+                assignment = pb.apply_model_verdict(
+                    assignment,
+                    branch=verdict.branch, rejected_all=verdict.rejected_all,
+                    unsure=verdict.unsure, refused=verdict.refused,
+                    reason=verdict.reason, model_name=verdict.model_name, tier=tier,
+                )
+            # `llm_budget` counts NEW calls only, which is what makes re-running make progress rather
+            # than repeat itself — 6,481 rows is too many for one sitting at any local speed.
+            elif tier_on and (llm_budget is None or asked < llm_budget):
+                assignment, called = _ask_the_model(
+                    assignment, fact, purpose, company_id, taxonomy,
+                    options=options, namespace=namespace, tier=tier,
+                )
+                asked += called
+                if called:
+                    # ONE LINE PER CALL, with what the model actually said.
+                    #
+                    # It used to print every 25 calls, which at ten seconds a call is four minutes of
+                    # silence — indistinguishable from a hung process, and this run takes hours. A
+                    # line per call also lets a bad batch be spotted and killed early: twenty
+                    # `Dienstleistung` answers in a row is visible immediately, and everything
+                    # answered so far is already cached, so stopping costs nothing.
+                    said = (
+                        assignment.branch or
+                        ("keine" if assignment.outcome == pb.NONE_APPLY else
+                         "unsicher" if assignment.outcome == pb.UNSURE else
+                         f"FAILED {assignment.llm_refused}"[:34])
+                    )
+                    budget_label = f"/{llm_budget}" if llm_budget else ""
+                    log.info(
+                        "  [%d%s] %-30s -> %-34s %s",
+                        asked, budget_label,
+                        (fact.get("company_name") or "")[:30],
+                        said[:34],
+                        (assignment.llm_reason or "")[:46],
+                    )
+                    # A rollup every 50, because a per-call line cannot show a rate or an ETA and
+                    # "how long is left" is the question a multi-hour run actually raises.
+                    if asked % 50 == 0:
+                        elapsed = time.time() - started_at
+                        per_call = elapsed / asked
+                        left = (llm_budget - asked) if llm_budget else (
+                            counts.get(pb.NO_KEYWORD, 0) + len(scope) - sum(counts.values())
+                        )
+                        fields = sum(counts.get(o, 0) for o in pb.ASSIGNED_OUTCOMES)
+                        log.info(
+                            "  --- %d calls in %s, %.1f s each | %d fields so far | %s left (~%s) ---",
+                            asked, _hms(elapsed), per_call, fields, left, _hms(left * per_call),
+                        )
+
+        counts[assignment.outcome] = counts.get(assignment.outcome, 0) + 1
+
+        snippets: dict[str, str] = {}
+        fallback = ""
+        if assignment.keywords or purpose:
+            snippets, fallback = evidence_snippets(
+                {"purpose": purpose or ""}, assignment.keywords, taxonomy
+            )
+        append_jsonl(PURPOSE_BRANCHES_PATH, {
+            "company_id": company_id,
+            "company_name": fact.get("company_name") or "",
+            # The column itself. `purpose_field` rather than `branch`, so a row from this file can
+            # never be mistaken for a row from `branches.jsonl` by a reader looking at keys.
+            "purpose_field": assignment.value,
+            "outcome": assignment.outcome,
+            "decided_by": assignment.decided_by,
+            "score": assignment.score,
+            "runner_up": assignment.runner_up,
+            "runner_up_score": assignment.runner_up_score,
+            "ranked": assignment.ranked[:5],
+            "keywords": assignment.keywords,
+            "evidence": snippets or ({"_text": fallback} if fallback else {}),
+            "shortlist": assignment.shortlist,
+            # What the length floor took away, when it took anything. Never an answer; the outcome
+            # stays `no_purpose`. Reported so the floor can be argued with rather than assumed.
+            "withheld_by_floor": assignment.withheld_by_floor,
+            # The text every answer above was derived from, EXACTLY as the register filed it — not
+            # normalised, not truncated. This is what makes a model answer checkable: `llm_reason`
+            # says why it chose, and this says what it was looking at. Abridging it would leave a
+            # reader checking a claim against a shortened source.
+            "purpose_text": (purpose or "").strip(),
+            # Phase 2 fills these. Written now, empty, so the schema does not change when the model
+            # is switched on and a reader can tell "not asked" from "key missing".
+            "llm_branch": assignment.branch if assignment.decided_by in (
+                pb.DECIDED_BY_MODEL_TIEBREAK, pb.DECIDED_BY_MODEL_DIRECT) else None,
+            "llm_reason": assignment.llm_reason,
+            "llm_refused": assignment.llm_refused,
+            "model_name": assignment.model_name,
+            # Which run this is. A keyword's weight depends on the corpus, so the same company can
+            # carry different answers in two files and neither is wrong.
+            "taxonomy_version": taxonomy.version,
+            "n_companies": n_companies,
+            "df_companies": n_companies,
+            "purpose_chars": len(bc.normalize(purpose)),
+        })
+
+    # ---- what the named companies came back with ---------------------------------------
+    # Printed in full, because the whole point of the flag is answering "why is this row empty"
+    # without opening a 7 MB spreadsheet afterwards.
+    if only_ids:
+        print()
+        print(f"=== the {len(only_ids)} company/companies you named ===")
+        for row in read_jsonl(PURPOSE_BRANCHES_PATH):
+            if row.get("company_id") not in only_ids:
+                continue
+            print()
+            print(f"  {row['company_name']}")
+            print(f"    company_id : {row['company_id']}")
+            print(f"    outcome    : {row['outcome']}")
+            print(f"    field      : {row['purpose_field']}")
+            print(f"    decided_by : {row['decided_by'] or '(nobody)'}")
+            if row.get("keywords"):
+                print(f"    keywords   : {', '.join(sorted(row['keywords']))}")
+            if row.get("model_name"):
+                print(f"    model      : {row['model_name']}")
+            if row.get("llm_reason"):
+                print(f"    reason     : {row['llm_reason']}")
+            if row.get("llm_refused"):
+                print(f"    call FAILED: {row['llm_refused']}")
+            text = row.get("purpose_text") or ""
+            print(f"    register   : {text[:400]}{'...' if len(text) > 400 else ''}")
+            if row["outcome"] == "no_keyword":
+                print(f"    ^^ no model has answered this row yet. Add --llm with the semantic tier.")
+
+    log.info("wrote %d rows to %s", len(scope), PURPOSE_BRANCHES_PATH)
+    for outcome, count in sorted(counts.items(), key=lambda kv: -kv[1]):
+        log.info("  %-20s %6d", outcome, count)
+    if use_llm or semantic:
+        # Both numbers, always. "0 model calls" on a re-run is the proof the cache keys correctly,
+        # and it is only meaningful next to the count it served instead.
+        log.info("model calls %d, served from cache %d", asked, served_from_cache)
+        if semantic and llm_budget is not None and asked >= llm_budget:
+            remaining = counts.get(pb.NO_KEYWORD, 0)
+            log.info("budget of %d spent; %d rows are still `no_keyword`. Re-run to continue — the "
+                     "answers so far are cached and will not be paid for twice.", llm_budget, remaining)
+
+
+def classify_purpose_report() -> None:
+    """What COLUMN 3 says. NOT whether it is right — no row here has ever been hand-checked."""
+    from combined_discovery import purpose_branch as pb
+
+    rows = read_jsonl(PURPOSE_BRANCHES_PATH)
+    if not rows:
+        raise SystemExit(f"nothing in {PURPOSE_BRANCHES_PATH}; run `classify-purpose` first")
+    n = len(rows)
+    counts: dict[str, int] = {}
+    for row in rows:
+        key = row.get("outcome") or "?"
+        counts[key] = counts.get(key, 0) + 1
+
+    print(f"\n=== COLUMN 3: what the register says, for {n} companies ===")
+
+    versions = {r.get("taxonomy_version") for r in rows if r.get("taxonomy_version")}
+    corpora = {r.get("df_companies") for r in rows if r.get("df_companies")}
+    print(f"\n  taxonomy+rule version   {', '.join(sorted(str(v) for v in versions)) or '?'}")
+    print(f"  keyword weights over    {', '.join(str(c) for c in sorted(corpora)) or '?'} usable purposes")
+    if len(versions) > 1 or len(corpora) > 1:
+        print("  !! this file mixes runs — the rows are not comparable; re-run `classify-purpose`")
+    print(
+        "\n  This column answers 'what was it REGISTERED to do?'. The Technologiefeld answers 'what\n"
+        "  does it WORK in?' and requires a website; this one deliberately does not. Neither is a\n"
+        "  check on the other, and neither may be written into the other's column."
+    )
+
+    # ---- the outcomes, never summed -----------------------------------------------------
+    order = (
+        pb.ASSIGNED_KEYWORDS, pb.ASSIGNED_MODEL_3WAY, pb.ASSIGNED_MODEL_77,
+        pb.TORN, pb.NONE_APPLY, pb.UNSURE, pb.NO_KEYWORD, pb.NO_PURPOSE,
+    )
+    print("\n-- one field, or NONE for one of several DIFFERENT reasons --")
+    for outcome in order:
+        got = counts.get(outcome, 0)
+        label = "a Berlin field" if outcome in pb.ASSIGNED_OUTCOMES else "NONE"
+        print(f"{label:<16}{outcome:<22}{got:>7}  {_pct(got, n)}")
+    for outcome, count in counts.items():
+        if outcome not in order:
+            print(f"{'?':<16}{outcome:<22}{count:>7}  {_pct(count, n)}   !! unknown outcome")
+    total = sum(counts.values())
+    print(f"{'':<16}{'TOTAL':<22}{total:>7}")
+    if total != n:
+        print("  !! the outcomes do not sum to the row count — something is being double-counted")
+    print(
+        "\n  NEVER add two of those together. `no_purpose` means the register said nothing we could\n"
+        "  read; `no_keyword` means we read it and not one of the taxonomy's words appeared; `torn`\n"
+        "  means two fields were too close; `none_apply` means a model read it and said no field\n"
+        "  fits; `unsure` means a model read it and could not tell. Only the last two are a claim\n"
+        "  about the company — the rest are statements about our evidence."
+    )
+
+    # ---- the denominator that actually describes this column -----------------------------
+    usable = n - counts.get(pb.NO_PURPOSE, 0)
+    assigned = sum(counts.get(o, 0) for o in pb.ASSIGNED_OUTCOMES)
+    print("\n-- measured against the companies this column can reach --")
+    print(f"{'companies with a usable purpose':<40}{usable:>7}  {_pct(usable, n)} of the table")
+    print(f"{'…given a field':<40}{assigned:>7}  {_pct(assigned, usable)} of those")
+
+    # ---- what the length floor cost, which is the whole point of recording it -------------
+    floored = [r for r in rows if r.get("withheld_by_floor")]
+    print("\n-- what the length floor threw away --")
+    print(f"{'the floor, in characters':<40}{pb.MIN_PURPOSE_CHARS:>7}")
+    print(f"{'purposes excluded as too short':<40}{counts.get(pb.NO_PURPOSE, 0):>7}")
+    print(f"{'…that WOULD have produced a field':<40}{len(floored):>7}")
+    if floored:
+        by_field: dict[str, int] = {}
+        for row in floored:
+            by_field[row["withheld_by_floor"]] = by_field.get(row["withheld_by_floor"], 0) + 1
+        print("\n  the fields it cost, and the shortest text in each:")
+        shortest: dict[str, tuple[int, str]] = {}
+        for row in floored:
+            field_name = row["withheld_by_floor"]
+            chars = row.get("purpose_chars") or 0
+            if field_name not in shortest or chars < shortest[field_name][0]:
+                shortest[field_name] = (chars, row.get("company_name") or "")
+        for field_name, count in sorted(by_field.items(), key=lambda kv: -kv[1]):
+            chars, name = shortest[field_name]
+            print(f"    {field_name[:30]:<32}{count:>4}   shortest {chars:>3} chars  {name[:26]}")
+        print(
+            "\n  Read that list before defending the floor. A short register purpose is often the\n"
+            "  LEAST ambiguous one there is — \"Gastronomie\", \"Pflegedienst\", \"Textil-Einzelhandel\"\n"
+            "  name a trade and nothing else. The floor was set to exclude vague text, and length\n"
+            "  turns out to be a poor proxy for vagueness. Lowering it is a measured decision, and\n"
+            "  this is the measurement; PURPOSE_MIN_CHARS is the knob."
+        )
+
+    # ---- who decided, and how much to trust it -------------------------------------------
+    by_decider: dict[str, int] = {}
+    for row in rows:
+        if row.get("decided_by"):
+            by_decider[row["decided_by"]] = by_decider.get(row["decided_by"], 0) + 1
+    if by_decider:
+        print("\n-- who decided (this is what says how far to trust a row) --")
+        for decider in (pb.DECIDED_BY_KEYWORDS, pb.DECIDED_BY_MODEL_TIEBREAK, pb.DECIDED_BY_MODEL_DIRECT):
+            print(f"{decider:<40}{by_decider.get(decider, 0):>7}")
+        print(
+            "\n  A `keywords` row is traceable to a word literally in the register text. A\n"
+            "  `model_tiebreak` row chose among 3 candidates the keywords had already nominated. A\n"
+            "  `model_direct` row chose from all 77 with no keyword at all — nothing anchors it to\n"
+            "  the text, so it is the one to distrust."
+        )
+
+    # ---- how thin the evidence is --------------------------------------------------------
+    assigned_rows = [r for r in rows if r.get("outcome") in pb.ASSIGNED_OUTCOMES]
+    one_keyword = sum(1 for r in assigned_rows if len(r.get("keywords") or {}) == 1)
+    if assigned_rows:
+        print("\n-- how much evidence each field rests on --")
+        print(f"{'fields resting on ONE keyword':<40}{one_keyword:>7}  "
+              f"{_pct(one_keyword, len(assigned_rows))} of the fields")
+        print(
+            "\n  Register prose is short — 251 characters on average — so most rows will fire exactly\n"
+            "  one keyword. That is not a bug, but it is the reason this column deserves less trust\n"
+            "  than the website column, where four texts can agree."
+        )
+
+    # ---- the score distribution, so the thresholds can be argued with --------------------
+    scored = sorted(r.get("score") or 0.0 for r in rows if r.get("score"))
+    if scored:
+        import bisect
+
+        from combined_discovery import branch_classifier as bc
+
+        # Two different populations, kept apart on purpose. Mixing them produces the nonsense of a
+        # "winning" score below the floor that no winner could have had.
+        won = sorted(r.get("score") or 0.0 for r in assigned_rows if r.get("score"))
+        print("\n-- the score distribution, against thresholds calibrated on WEBSITE text --")
+        print(f"{'MIN_SCORE (the floor)':<40}{bc.MIN_SCORE:>7.2f}")
+        print(f"{'MIN_MARGIN (times the runner-up)':<40}{bc.MIN_MARGIN:>7.2f}")
+        print(f"\n{'rows that scored anything at all':<40}{len(scored):>7}")
+        for label, value in (("lowest", scored[0]), ("median", scored[len(scored) // 2]),
+                             ("highest", scored[-1])):
+            print(f"{'  ' + label:<40}{value:>7.2f}")
+        if won:
+            print(f"\n{'…of those, the ones that WON a field':<40}{len(won):>7}")
+            for label, value in (("lowest", won[0]), ("median", won[len(won) // 2]),
+                                 ("highest", won[-1])):
+                print(f"{'  ' + label:<40}{value:>7.2f}")
+        below = bisect.bisect_left(scored, bc.MIN_SCORE)
+        print(f"\n{'scored something but under the floor':<40}{below:>7}")
+        print(
+            "\n  Purposes are far shorter than homepages, so every score here sits lower than the\n"
+            "  numbers these two thresholds were tuned against. The last row is the one to argue\n"
+            "  with: those companies had evidence that the floor threw away. If it is large, the\n"
+            "  floor is what costs coverage here — not the taxonomy."
+        )
+
+    # ---- what a model could ever add -----------------------------------------------------
+    torn = [r for r in rows if r.get("outcome") == pb.TORN]
+    askable = [r for r in torn if r.get("shortlist")]
+    print("\n-- what Phase 2 Tier A (the 3-way tie-break) could ever reach --")
+    print(f"{'torn rows':<40}{len(torn):>7}")
+    print(f"{'…askable (a shortlist was built)':<40}{len(askable):>7}")
+    print(f"{'…NOT askable, so no model will see them':<40}{len(torn) - len(askable):>7}")
+    print(
+        f"\n  `worth_asking` needs at least BRANCH_MIN_KEYWORDS_FOR_MODEL keywords and a score at the\n"
+        f"  floor. Most rows here fire exactly one keyword, so that constant — not the prompt — is\n"
+        f"  what governs how far the tie-break can reach. Raising it is a measured decision; the\n"
+        f"  askable count above is the measurement."
+    )
+
+    # ---- the model, split by the question it was asked -----------------------------------
+    # Tier A and Tier B are never added together. "One of these 3 the keywords nominated" and "one of
+    # all 77, with nothing anchoring it" are different questions, and an abstention means something
+    # different in each. `decided_by` is what keeps them apart.
+    touched = [r for r in rows if r.get("decided_by", "").startswith("model") or r.get("llm_refused")]
+    if touched:
+        print("\n-- the model, by the question it was asked --")
+        print(f"{'':<24}{'tier A (3-way)':>16}{'tier B (77-way)':>17}")
+        tiers = (pb.DECIDED_BY_MODEL_TIEBREAK, pb.DECIDED_BY_MODEL_DIRECT)
+        for label, predicate in (
+            ("named a field", lambda r, t: r.get("decided_by") == t and r.get("llm_branch")),
+            ("said keine", lambda r, t: r.get("decided_by") == t and r.get("outcome") == pb.NONE_APPLY),
+            ("said unsicher", lambda r, t: r.get("decided_by") == t and r.get("outcome") == pb.UNSURE),
+        ):
+            cells = "".join(f"{sum(1 for r in rows if predicate(r, t)):>17}" for t in tiers)
+            print(f"{label:<24}{cells}")
+
+        models = sorted({r.get("model_name") for r in touched if r.get("model_name")})
+        print(f"\n  model(s): {', '.join(models) or '?'}")
+
+        # ---- the calibration check that costs nothing ------------------------------------
+        direct = [r for r in rows if r.get("decided_by") == pb.DECIDED_BY_MODEL_DIRECT]
+        if direct:
+            refused_direct = sum(
+                1 for r in direct if r.get("outcome") in (pb.NONE_APPLY, pb.UNSURE)
+            )
+            print("\n-- did Tier B refuse often enough? --")
+            print(f"{'rows it answered':<40}{len(direct):>7}")
+            print(f"{'…of which keine or unsicher':<40}{refused_direct:>7}  "
+                  f"{_pct(refused_direct, len(direct))}")
+            print(
+                "\n  2,294 of the 7,141 usable purposes — 32% — are holding, asset-management or\n"
+                "  administrative boilerplate, measured independently of any model. So on a random\n"
+                "  sample of the no_keyword rows something near a THIRD should come back refused.\n"
+                "  Far below that and the model is under-refusing, which is the documented failure:\n"
+                "  a confident field for a company whose register text says only that it\n"
+                "  administers its own assets. Far above it and the prompt has gone timid."
+            )
+
+    failed = [r for r in rows if r.get("llm_refused")]
+    if failed:
+        reasons: dict[str, int] = {}
+        for row in failed:
+            head = str(row["llm_refused"]).split(":")[0]
+            reasons[head] = reasons.get(head, 0) + 1
+        print(f"\n{'model calls that BROKE (not a refusal)':<40}{len(failed):>7}")
+        for reason, count in sorted(reasons.items(), key=lambda kv: -kv[1]):
+            print(f"    {reason[:34]:<36}{count:>5}")
+        print(
+            "\n  These kept whatever the keywords said — `torn` or `no_keyword` — and are NEVER\n"
+            "  `none_apply`. 'We got no answer' and 'the model says no field fits' are different\n"
+            "  findings, and only the second one is about the company. `off-list` means the model\n"
+            "  invented a field name; a lot of those means the 77-way question is too wide for it."
+        )
+
+    # ---- the free comparison nobody has had yet ------------------------------------------
+    website_rows = {r["company_id"]: r for r in read_jsonl(BRANCHES_PATH) if r.get("company_id")}
+    if website_rows:
+        both = agree = 0
+        examples: list[tuple[str, str, str]] = []
+        for row in rows:
+            other = website_rows.get(row.get("company_id"))
+            if not other:
+                continue
+            mine = row.get("purpose_field")
+            theirs = other.get("technologiefeld") or other.get("branch")
+            if not mine or mine == pb.NONE or not theirs or theirs == pb.NONE:
+                continue
+            both += 1
+            if mine == theirs:
+                agree += 1
+            elif len(examples) < 8:
+                examples.append((row.get("company_name") or "", theirs, mine))
+        print("\n-- where the two columns can be compared at all --")
+        print(f"{'companies with BOTH columns filled':<40}{both:>7}")
+        print(f"{'…the two agree':<40}{agree:>7}  {_pct(agree, both)}")
+        print(f"{'…they disagree':<40}{both - agree:>7}  {_pct(both - agree, both)}")
+        if examples:
+            print("\n  a few disagreements (website field | register field):")
+            for name, theirs, mine in examples:
+                print(f"    {name[:34]:<36}{theirs[:24]:<26}{mine[:24]}")
+        print(
+            "\n  Disagreement is not error. A company registered to trade goods and now selling\n"
+            "  software has two true answers, and this is the first time we can see how often that\n"
+            "  happens. What it does NOT tell you is which column is right."
+        )
+
+    print(
+        "\n\n  NOT KNOWN: whether any row above is correct. No purpose row has ever been\n"
+        "  hand-checked, so this column has no precision figure — only counts. The model's\n"
+        "  `llm_reason` per row is the cheapest proxy: read twenty and you will know whether it is\n"
+        "  reading the register text or guessing from the company name."
+    )
 
 
 def classify_report() -> None:
@@ -2244,6 +3110,48 @@ def main() -> None:
     p_blabels.add_argument("--per-bucket", type=int, default=10,
                            help="how many companies per group (default 10, so about 40 rows)")
     sub.add_parser("classify-labels-report", help="read it back: is the branch actually right?")
+    p_purpose = sub.add_parser(
+        "classify-purpose",
+        help="COLUMN 3: what the register says the company was set up to do. Free, no model.",
+    )
+    p_purpose.add_argument(
+        "--limit", type=int, default=None,
+        help="write the first N companies by id — a prefix of the full run. Keyword weights are "
+             "always measured over the whole table, so a limit changes what is written, not what "
+             "is counted.",
+    )
+    p_purpose.add_argument(
+        "--tier", default="tiebreak",
+        help="tiebreak (default) is Tier A: 3 candidates the keywords nominated, on `torn` rows. "
+             "semantic is Tier B: all 77 fields on the `no_keyword` rows, where nothing anchors the "
+             "answer to a word in the text. Comma-separate to run both.",
+    )
+    p_purpose.add_argument(
+        "--company-id", action="append", default=None, metavar="ID",
+        help="spend model calls on these companies only, jumping the queue. Accepts a unique id "
+             "prefix and may be repeated. The queue is company_id order, which is NOT the handover "
+             "CSV's order - so this is how you check a row you spotted in the spreadsheet without "
+             "waiting. Every other row keeps its cached answer and the output file stays complete.",
+    )
+    p_purpose.add_argument(
+        "--llm-limit", type=int, default=None,
+        help="cap the NEW model calls this run. Cached answers do not count, so re-running the same "
+             "command makes progress rather than repeating itself.",
+    )
+    p_purpose.add_argument(
+        "--llm", action="store_true",
+        help="turn the model on. Which question it is asked is set by --tier. Off by default, so "
+             "the plain command stays free.",
+    )
+    sub.add_parser("classify-purpose-report", help="print the register-purpose scorecard")
+    p_propose = sub.add_parser(
+        "propose-keywords",
+        help="ask the model what companies with NO keyword call themselves; writes a worksheet only",
+    )
+    p_propose.add_argument(
+        "--limit", type=int, default=None,
+        help="first N of the target companies, ordered by id — a prefix of the full run",
+    )
 
     args = parser.parse_args()
     if args.command == "run":
@@ -2281,7 +3189,30 @@ def main() -> None:
         branch_labels(args.per_bucket)
     elif args.command == "classify-labels-report":
         branch_labels_report()
+    elif args.command == "propose-keywords":
+        propose_keywords(args.limit)
+    elif args.command == "classify-purpose":
+        tiers = {t.strip() for t in (args.tier or "").split(",") if t.strip()}
+        unknown = tiers - {"tiebreak", "semantic"}
+        if unknown:
+            raise SystemExit(
+                f"--tier does not know {sorted(unknown)}. Only `tiebreak` (3 candidates, on torn "
+                f"rows) and `semantic` (all 77, on no_keyword rows) exist. They are different "
+                f"questions and are reported apart."
+            )
+        classify_purpose(
+            args.limit,
+            use_llm=args.llm and "tiebreak" in tiers,
+            semantic=args.llm and "semantic" in tiers,
+            llm_budget=args.llm_limit,
+            only=args.company_id,
+        )
+    elif args.command == "classify-purpose-report":
+        classify_purpose_report()
     else:
+        # `csv` lands here, and so does any subcommand added above without a branch of its own.
+        # That silence is the trap: a new subcommand with no `elif` runs write_csv and looks like it
+        # worked. If you add one, add its branch too.
         write_csv(args.limit)
 
 

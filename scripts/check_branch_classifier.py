@@ -514,6 +514,67 @@ def main() -> int:
             else:
                 check("both delimiters give identical rows", got, wanted)
 
+    # -------------------------------------------------------------------------------------
+    section("the model may propose WORDS where no keyword fired, never a field")
+    # -------------------------------------------------------------------------------------
+    # The model has two jobs. `choose` breaks a tie between 2-3 fields the keywords nominated —
+    # closed multiple choice. `propose_vocabulary` runs where NOTHING fired, so there is no shortlist,
+    # and asking it to pick a field there would be asking it to invent one. Measured on the tie-break
+    # run: it says "none of these" 15% of the time, and for these companies the true answer is "none"
+    # about half the time. It under-refuses by a factor of three.
+    #
+    # THIS is the check that keeps the design safe: no field name may appear in the proposal prompt.
+    # With no list in front of it there is nothing to hallucinate against. One careless edit to the
+    # template — adding "z.B. Gastgewerbe" as an example — would undo that silently.
+    leaked = [n for n in taxonomy.branches if bc.normalize(n) in bc.normalize(branch_llm.VOCAB_PROMPT)]
+    check("no Berlin field name appears in the proposal prompt", leaked, [])
+    check("...and it does not name the taxonomy file either",
+          "branch_taxonomy" in branch_llm.VOCAB_PROMPT, False)
+
+    # A proposal is a list of words and nothing else. `Assignment` has no place to put one, so a
+    # proposal cannot become a column value even by accident.
+    check("Assignment has no field for a proposal",
+          any("propos" in f for f in bc.Assignment.__dataclass_fields__), False)
+    check("the classifier never imports the proposer", "branch_llm" in dir(bc), False)
+
+    # Words are normalised on both sides, or a proposal and a keyword can never be compared.
+    p = branch_llm.proposal_from_answer(["Messebau", " ingenieurbau ", "MESSEBAU"])
+    check("case, padding and duplicates collapse", p.words, ["messebau", "ingenieurbau"])
+    check("...and nothing is refused", p.refused, "")
+    check("a sentence is not a keyword",
+          branch_llm.proposal_from_answer(["Wir bieten seit 1974 Heizungen und Baeder an"]).words, [])
+    check("a non-list answer is refused",
+          bool(branch_llm.proposal_from_answer("Messebau").refused), True)
+    check("an empty answer is refused",
+          bool(branch_llm.proposal_from_answer([]).refused), True)
+    check("more words than the cap are trimmed",
+          len(branch_llm.proposal_from_answer(["eiscafe", "eissorten", "speiseeis", "waffeln"]).words),
+          branch_llm.MAX_PROPOSED_WORDS)
+
+    # The three-way split, which is what makes the worksheet a work queue rather than a wish list.
+    # A word only helps if it FIRES on the company's own text: a paraphrase the company never wrote
+    # cannot make the matcher do anything.
+    page = bc.normalize("Wir bauen Messestände. Unser Messebau überzeugt seit 1974.")
+    for word, want, why in (
+        ("messebau", "new", "on the page, not in the list — the prize"),
+        ("einzelhandel", "does_not_fire", "a real keyword, but not on this page"),
+        ("schienenfahrzeuge", "does_not_fire", "not on the page either"),
+    ):
+        fires = bool(bc._pattern_for(word).search(page))
+        known = word in taxonomy.keyword_branches
+        status = "already_keyword" if known and fires else "new" if fires else "does_not_fire"
+        check(f"{word!r} -> {want} ({why})", status, want)
+    # And the case the rule exists for: the model answers with a word that IS a keyword and IS on the
+    # page. Then the list already had it and something else stopped it — worth a look, not an addition.
+    gastro = bc.normalize("Unsere Gastronomie in Osnabrück.")
+    check("a keyword that is on the page -> already_keyword",
+          "already_keyword" if ("gastronomie" in taxonomy.keyword_branches
+                                and bc._pattern_for("gastronomie").search(gastro)) else "?",
+          "already_keyword")
+
+    check("the worksheet never asks the model for a field",
+          _load_runner().PROPOSAL_COLUMNS[-2:], ["suggested_field", "decision"])
+
     print(f"\n{'FAILED' if FAILURES else 'all checks passed'}")
     for label in FAILURES:
         print(f"  - {label}")

@@ -26,13 +26,16 @@ stopped and re-run at any point.
 
 ```powershell
 python scripts/check_branch_classifier.py
+python scripts/check_purpose_branch.py
 python scripts/check_combined_discovery.py
 ```
 
-No network, no database, no model, about a second each. **Expect `all checks passed`** and
+No network, no database, no model, about a second each. **Expect `all checks passed`** twice and
 `all combined-discovery checks passed`. If the first one fails, stop: it means either a keyword now
 matches inside a German compound word, or something has tried to let a WZ code fill the
-Technologiefeld. Both are bugs this project has already paid for once.
+Technologiefeld. Both are bugs this project has already paid for once. If the second fails, either
+the website gate has leaked into column 3 — which would withhold every register answer — or a failed
+model call is being recorded as a refusal.
 
 ## 2. Fetch the pages that actually describe the businesses — once
 
@@ -103,9 +106,9 @@ python scripts/run_combined_discovery.py classify-report
 It prints three blocks. **Column 1, Technologiefeld:**
 
 ```
-a Berlin field                        346    2.4%
+a Berlin field                        489    3.4%
 NONE: no_website                      563    3.9%
-NONE: torn                            272    1.9%
+NONE: torn                            129    0.9%
 NONE: no_keyword                     6558   45.4%
 NONE: no_text                        6704   46.4%
 ```
@@ -116,8 +119,12 @@ to read"* is not evidence that a company has no technology field.
 
 **`no_website` is the expensive one.** A Technologiefeld requires a website, so 563 fields the
 register text named are withheld. The report prints them, and the block below the outcomes gives the
-denominator that actually describes this column: 346 of the **902 companies with a website**, which
-is 38% — not 2.4% of a table most of which this column can never reach.
+denominator that actually describes this column: 489 of the **902 companies with a website**, which
+is 54% — not 3.4% of a table most of which this column can never reach.
+
+**`assigned` is not "the model assigned it."** `outcome` says whether a company got a field;
+`decided_by` says who — `keywords` 346, `model` 143, and empty for every non-assigned row. The model
+can only ever convert `torn` → `assigned`; it can never create a field from nothing.
 
 Also in this block: which text the keywords came from (`purpose` 625 hits, `services` 519, `homepage`
 226, `imprint` 49), whether the downloaded services pages paid for themselves (**157** companies got a
@@ -297,11 +304,47 @@ hand, re-run the guard and step 3, and compare the report.
 
 Editing a keyword costs one `classify` run: two minutes, no downloads.
 
+## 9. Column 3 — what the register says, 13 seconds and no network
+
+A separate column from a separate source: `business_purpose`, the *Gegenstand des Unternehmens*. It
+needs no website, so it reaches thousands of companies the Technologiefeld cannot. Full numbers and
+reasoning: [purpose-classification](purpose-classification.md).
+
+```powershell
+python scripts/run_combined_discovery.py classify-purpose
+python scripts/run_combined_discovery.py classify-purpose-report
+```
+
+Expect, over 14,443 companies:
+
+```
+assigned_keywords       596
+torn                     64
+no_keyword             6481
+no_purpose             7302     <- 6,902 empty plus 400 stubs of 40 chars or fewer
+TOTAL                 14443
+```
+
+**The total must be exactly 14,443**, and `classify-report` must still print 489 / 563 / 129 / 6,558 /
+6,704 afterwards. This column cannot move the Technologiefeld, and that check is how you know.
+
+The tie-break is optional and reaches 17 companies — `worth_asking` needs two keywords and 608 of the
+660 rows with any keyword have exactly one:
+
+```powershell
+$env:OLLAMA_MODEL = "qwen3.5:4b"
+python scripts/run_combined_discovery.py classify-purpose --llm     # 17 calls, about 3 minutes
+```
+
+Expect `assigned_model_3way 14, none_apply 3, torn 47` and, on a second run,
+**`model calls 0, served from cache 17`**. If the second run asks again, the cache key is broken.
+
 ## Everything that gets written, and where
 
 | file | written by | in git? |
 |---|---|---|
 | `airflow/data/combined_discovery/branches.jsonl` | `classify` | no, gitignored |
+| `…/purpose_branches.jsonl` | `classify-purpose` | no |
 | `…/combined_discovery_urls.csv` | `csv` | no |
 | `…/branch_labels_todo.csv` | `classify-labels`, then you | no |
 | `…/pages/content/…` | `fetch-content` | no |

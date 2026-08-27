@@ -4,6 +4,12 @@ We have 14,443 companies, mostly just a name and an address. This is about addin
 columns. Everything here is free — no paid API, and the language model is optional and runs on the
 laptop.
 
+> **There is now a third column**, `purpose_field`, built from the commercial register's *Gegenstand
+> des Unternehmens* instead of from a website. It needs no website, which is exactly why it is a
+> separate column rather than more coverage in this one — see
+> [purpose-classification](purpose-classification.md). Nothing in this document changed when it was
+> added, and `classify-report` still prints the same five numbers.
+
 **They are two columns because they are two different questions**, and the single most expensive
 mistake made here was answering one with the other.
 
@@ -13,7 +19,7 @@ mistake made here was answering one with the other.
 | who decides | Berlin's economic-development list of 77 fields | the Statistisches Bundesamt |
 | filled from | words the company published about itself | the company's official WZ code |
 | possible values | one of the 77, or `NONE` | 76 divisions in 20 sections |
-| companies with a value | **346** (2.4% of the table, **38%** of those with a website) | **8,483** (58.7%) |
+| companies with a value | **489** (3.4% of the table, **54%** of those with a website) | **8,483** (58.7%) |
 | what it needs first | a website we actually found | only the WZ code |
 | any judgement involved | yes: keyword weights, thresholds | **none** — it is a lookup |
 
@@ -208,9 +214,9 @@ company names: genericness is measured, never hand-listed.
 
 | | | |
 |---|---|---|
-| a Berlin field | **346** (2.4%) | |
+| a Berlin field | **489** (3.4%) | 346 decided by keywords, 143 by the model |
 | `NONE` | 563 | `no_website` — the register text named a field, no website was found |
-| `NONE` | 272 | `torn` — keywords fired, two fields too close to separate |
+| `NONE` | 129 | `torn` — keywords fired, two fields too close to separate |
 | `NONE` | 6,558 | `no_keyword` — we read the text, no keyword appeared |
 | `NONE` | 6,704 | `no_text` — nothing to read |
 
@@ -303,7 +309,7 @@ WZ cluster is attached to every row regardless, whether or not any text was read
 
 ## What is not known yet
 
-**Nobody has checked whether the Technologiefeld is right.** 346 companies have one and not a single
+**Nobody has checked whether the Technologiefeld is right.** 489 companies have one and not a single
 row is hand-labelled. `classify-labels` writes 40 rows in five buckets; `classify-labels-report` is
 the only thing that reports precision. Start with `torn`: those are the rows the model would be asked
 about, and if a person cannot separate two fields from the same text, a 4B model will not either.
