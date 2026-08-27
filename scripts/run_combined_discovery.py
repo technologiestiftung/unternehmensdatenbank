@@ -2427,6 +2427,189 @@ def classify_purpose_report() -> None:
     )
 
 
+
+
+COMPARE_PATH = OUT_DIR / "three_columns_compared.csv"
+
+COMPARE_COLUMNS = [
+    "company_id", "company_name",
+    # COLUMN 1 — what the company's own website says it works in.
+    "col1_technologiefeld", "col1_outcome", "col1_decided_by",
+    # COLUMN 2 — what it is registered as. A different taxonomy; never comparable to 1 or 3.
+    "col2_wz_code", "col2_wz_division_title", "col2_wz_section_title",
+    # COLUMN 3 — what the register says it was set up to do.
+    "col3_purpose_field", "col3_outcome", "col3_decided_by", "col3_llm_reason",
+    # The comparison itself, and the evidence behind it.
+    "verdict", "how_many_columns", "purpose_text",
+]
+
+#: How columns 1 and 3 relate on one company. Only `agree` and `disagree` are judgements; the rest
+#: say WHY no comparison was possible, which for most companies is the honest answer.
+VERDICTS = (
+    ("agree", "both named a Berlin field, the same one"),
+    ("disagree", "both named a Berlin field, different ones"),
+    ("only_website", "column 1 has a field, the register gave none"),
+    ("only_register", "column 3 has a field, the website gave none"),
+    ("neither", "no Berlin field from either source"),
+)
+
+
+def compare_columns(limit: int | None) -> None:
+    """All three industry columns for one company, side by side. Free — reads the three files only.
+
+    The point is that these are **three different questions**, and until they sit on one row nobody
+    can see how they relate. What it can show:
+
+    - where columns 1 and 3 both answered, and whether they agree. They share Berlin's 77 values, so
+      this comparison is meaningful — and disagreement is a finding, not an error: a company
+      registered to trade goods that now sells software has two true answers.
+    - where only one of them answered, which is most companies, and which column reached ground the
+      other could not.
+    - what column 2 said, alongside, WITHOUT pretending it is comparable. The WZ classification is a
+      different authority answering a different question in a different vocabulary; it is printed for
+      context and never scored against the other two.
+
+    Ordered worst-comparable first — `disagree`, then `agree`, then the single-column rows — because
+    the disagreements are the only rows that can teach anything about either column's accuracy, and
+    there are few enough to read by hand.
+    """
+    from combined_discovery import branch_classifier as bc
+
+    # The literal a column carries when no field was established. Taken from the classifier rather
+    # than spelled again here, so the two can never drift apart.
+    none_field = bc.NONE
+
+    branch_rows = {r["company_id"]: r for r in read_jsonl(BRANCHES_PATH) if r.get("company_id")}
+    purpose_rows = {r["company_id"]: r for r in read_jsonl(PURPOSE_BRANCHES_PATH) if r.get("company_id")}
+    if not branch_rows and not purpose_rows:
+        raise SystemExit(
+            f"nothing to compare: run `classify` and `classify-purpose` first "
+            f"({BRANCHES_PATH.name}, {PURPOSE_BRANCHES_PATH.name})"
+        )
+    if not branch_rows:
+        log.warning("%s is empty — columns 1 and 2 will be blank", BRANCHES_PATH.name)
+    if not purpose_rows:
+        log.warning("%s is empty — column 3 will be blank", PURPOSE_BRANCHES_PATH.name)
+
+    # A row count far below the table is almost always a `--limit` left on an earlier run, which
+    # rewrites the whole file rather than appending. Worth saying out loud: the comparison would
+    # silently describe 100 companies while looking like it described the table.
+    for name, rows in ((BRANCHES_PATH.name, branch_rows), (PURPOSE_BRANCHES_PATH.name, purpose_rows)):
+        if rows and len(rows) < 1000:
+            log.warning(
+                "%s holds only %d rows — it was written with --limit. Re-run without one for the "
+                "whole table; both commands are free.", name, len(rows)
+            )
+
+    def field(row: dict[str, Any] | None, *keys: str) -> str:
+        """The first non-empty, non-NONE value among `keys`. NONE and blank both mean 'no answer'."""
+        for key in keys:
+            value = (row or {}).get(key) or ""
+            if value and value != none_field:
+                return str(value)
+        return ""
+
+    out: list[dict[str, Any]] = []
+    for company_id in sorted(set(branch_rows) | set(purpose_rows)):
+        b = branch_rows.get(company_id) or {}
+        p = purpose_rows.get(company_id) or {}
+        col1 = field(b, "technologiefeld", "branch")
+        col2 = (b.get("wz_code") or "")
+        col3 = field(p, "purpose_field")
+
+        if col1 and col3:
+            verdict = "agree" if col1 == col3 else "disagree"
+        elif col1:
+            verdict = "only_website"
+        elif col3:
+            verdict = "only_register"
+        else:
+            verdict = "neither"
+
+        out.append({
+            "company_id": company_id,
+            "company_name": b.get("company_name") or p.get("company_name") or "",
+            "col1_technologiefeld": col1 or none_field,
+            "col1_outcome": b.get("outcome") or "",
+            "col1_decided_by": b.get("decided_by") or "",
+            "col2_wz_code": col2,
+            "col2_wz_division_title": b.get("wz_division_title") or "",
+            "col2_wz_section_title": b.get("wz_section_title") or "",
+            "col3_purpose_field": col3 or none_field,
+            "col3_outcome": p.get("outcome") or "",
+            "col3_decided_by": p.get("decided_by") or "",
+            "col3_llm_reason": p.get("llm_reason") or "",
+            "verdict": verdict,
+            "how_many_columns": sum(bool(x) for x in (col1, col2, col3)),
+            "purpose_text": p.get("purpose_text") or "",
+        })
+
+    order = {name: i for i, (name, _) in enumerate(VERDICTS)}
+    out.sort(key=lambda r: (order.get(r["verdict"], 9), r["company_name"]))
+    if limit:
+        out = out[:limit]
+
+    COMPARE_PATH.parent.mkdir(parents=True, exist_ok=True)
+    with COMPARE_PATH.open("w", encoding="utf-8-sig", newline="") as handle:
+        writer = csv.DictWriter(handle, fieldnames=COMPARE_COLUMNS, extrasaction="ignore")
+        writer.writeheader()
+        writer.writerows(out)
+
+    # ---- what the comparison says -------------------------------------------------------
+    counts = collections.Counter(r["verdict"] for r in out)
+    n = len(out)
+    print(f"\n=== three industry columns over {n} companies ===")
+    print(
+        "\n  COL 1  Technologiefeld  what it WORKS IN     from its own website   needs a website\n"
+        "  COL 2  WZ cluster       what it is REGISTERED AS  from its WZ code  a lookup, no judgement\n"
+        "  COL 3  purpose_field    what it was SET UP TO DO  from the register  needs 40+ chars\n"
+        "\n  Columns 1 and 3 share Berlin's 77 values, so they can be compared. Column 2 cannot be\n"
+        "  compared with either — different authority, different vocabulary, different question."
+    )
+
+    print("\n-- how columns 1 and 3 relate --")
+    for name, meaning in VERDICTS:
+        print(f"{name:<16}{counts.get(name, 0):>7}  {_pct(counts.get(name, 0), n)}  {meaning}")
+
+    comparable = counts.get("agree", 0) + counts.get("disagree", 0)
+    if comparable:
+        print(f"\n{'companies where BOTH answered':<40}{comparable:>7}")
+        print(f"{'…and they agree':<40}{counts.get('agree', 0):>7}  "
+              f"{_pct(counts.get('agree', 0), comparable)}")
+        print(
+            "\n  Read that percentage carefully: it is NOT an accuracy figure. Neither column is\n"
+            "  ground truth, so a disagreement says the two sources describe the company\n"
+            "  differently — which is often true of the company rather than false of the data."
+        )
+
+    print("\n-- what each column reached --")
+    for label, key in (("column 1, Technologiefeld", "col1_technologiefeld"),
+                       ("column 2, WZ code", "col2_wz_code"),
+                       ("column 3, purpose_field", "col3_purpose_field")):
+        got = sum(1 for r in out if r[key] and r[key] != none_field)
+        print(f"{label:<40}{got:>7}  {_pct(got, n)}")
+    none_at_all = sum(1 for r in out if r["how_many_columns"] == 0)
+    print(f"{'no column at all':<40}{none_at_all:>7}  {_pct(none_at_all, n)}")
+
+    disagreements = [r for r in out if r["verdict"] == "disagree"]
+    if disagreements:
+        print(f"\n-- every disagreement, worth reading by hand ({len(disagreements)}) --")
+        print(f"  {'company':<26}{'website says':<26}{'register says':<26}decided by")
+        for r in disagreements[:40]:
+            print(f"  {r['company_name'][:24]:<26}{r['col1_technologiefeld'][:24]:<26}"
+                  f"{r['col3_purpose_field'][:24]:<26}{r['col3_decided_by']}")
+        if len(disagreements) > 40:
+            print(f"  … and {len(disagreements) - 40} more, all in the CSV")
+
+    print(f"\n  wrote {COMPARE_PATH}")
+    print(
+        "\n  The CSV carries `purpose_text` and `col3_llm_reason` side by side, so a model-decided\n"
+        "  row can be judged against the text it was derived from without opening anything else.\n"
+        "  Sort by `verdict`. NOT KNOWN: whether any value in any of the three columns is correct —\n"
+        "  no row has ever been hand-checked, so there is no precision figure for any of them."
+    )
+
+
 def classify_report() -> None:
     """What happened. NOT whether it was right — that is `classify-labels-report`."""
     rows = read_jsonl(BRANCHES_PATH)
@@ -3144,6 +3327,14 @@ def main() -> None:
              "the plain command stays free.",
     )
     sub.add_parser("classify-purpose-report", help="print the register-purpose scorecard")
+    p_compare = sub.add_parser(
+        "compare-columns",
+        help="all three industry columns side by side, and where 1 and 3 disagree",
+    )
+    p_compare.add_argument(
+        "--limit", type=int, default=None,
+        help="first N rows of the comparison, disagreements first",
+    )
     p_propose = sub.add_parser(
         "propose-keywords",
         help="ask the model what companies with NO keyword call themselves; writes a worksheet only",
@@ -3209,6 +3400,8 @@ def main() -> None:
         )
     elif args.command == "classify-purpose-report":
         classify_purpose_report()
+    elif args.command == "compare-columns":
+        compare_columns(args.limit)
     else:
         # `csv` lands here, and so does any subcommand added above without a branch of its own.
         # That silence is the trap: a new subcommand with no `elif` runs write_csv and looks like it
