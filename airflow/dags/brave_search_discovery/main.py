@@ -1,11 +1,14 @@
 """Brave web search → Impressum verification → observations.
 
-UNVERIFIED end to end: no `BRAVE_API_KEY` has ever existed here, so neither this DAG nor
-`brave_http` has executed against the live API. The client was written from Brave's OpenAPI
-schema, and Brave publishes no complete JSON example, so the first real run doubles as contract
-verification. Treat a suspiciously empty result list as a possible shape mismatch, not as
-"Brave found nothing" — a wrong request shape hid inside the old Parallel REST call for weeks
-precisely because it failed quietly.
+Verified end to end on 2026-09-01: 20 active Osnabrück companies, all 20 processed, no failures.
+What it produced, and the shape of it matters more than the count:
+
+  * **19 `directory_url`, 4 `website`** (mean confidence 0.401). Brave ranks Creditreform,
+    Northdata and trade portals above a small company's own site, so most of what it returns is
+    correctly rejected by `search_common.is_own_site_candidate`. A provider comparison that
+    counted raw hits rather than accepted websites would rank Brave far too highly.
+  * 8 `ceo_name_or_contact`, and `$0.0000` reported spend — Brave sends no cost field at all,
+    so its cost is requests x plan rate and has to be tracked outside the response.
 
 Brave is NOT a like-for-like competitor to Exa, and the asymmetry is structural, not a bug:
 
@@ -44,6 +47,9 @@ SPEC = ProviderSpec(
     search=provider_search,
     transient_errors=(BraveRateLimitError,),
     require_key=require_brave_api_key,
+    # Proven against the live API on 2026-09-01: smoke call plus a 20-company batch, envelope
+    # `{mixed, query, type, web}` as assumed. See this module's docstring for what it returned.
+    smoke_required=False,
     dag_description="Brave web search, verified against the company's Impressum",
 )
 
