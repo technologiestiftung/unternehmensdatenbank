@@ -259,12 +259,20 @@ def choose(
     shortlist: list[str],
     url: str,
     taxonomy_version: str,
+    cached_only: bool = False,
 ) -> BranchVerdict:
     """Pick one of `shortlist`, or reject them all. Never raises.
 
     A model that is unreachable, slow or incoherent has to behave like a model that was never asked:
     the keyword answer stands and the row stays `torn`. A tie-breaker that can fail a whole run is
     worse than no tie-breaker.
+
+    `cached_only` is how a caller declines to spend a NEW call on this row — currently
+    `DISCOVERY_ACTIVE_ONLY` for a company the register no longer lists as `aktiv`. It stops short of
+    the model but still returns a verdict already in the cache, and that distinction is the point:
+    skipping the lookup as well would rewrite this file as though the model had never spoken about
+    those rows, dropping counts on a free re-run with nothing to say why. Same rule as the purpose
+    column's `tier_on`.
     """
     if not shortlist or not text:
         return BranchVerdict(branch=None, reason="", refused="nothing to choose between")
@@ -279,6 +287,11 @@ def choose(
             refused=cached.get("refused") or "",
             cached=True,
         )
+
+    if cached_only:
+        # Not asked, and honest about which kind of not-asked it is: `refused` is what every other
+        # unanswered path sets, so the row stays exactly as the keywords left it — `torn`.
+        return BranchVerdict(branch=None, reason="", refused="not asked: not aktiv")
 
     prompt = PROMPT.format(
         none=NONE_ANSWER,

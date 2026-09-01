@@ -20,6 +20,25 @@ PG_DSN = os.getenv(
 )
 SOURCE_ENRICHMENT_BATCH_SIZE = int(os.getenv("SOURCE_ENRICHMENT_BATCH_SIZE", "50"))
 SOURCE_ENRICHMENT_SELECTION_WINDOW = int(os.getenv("SOURCE_ENRICHMENT_SELECTION_WINDOW", "250"))
+
+#: Skip companies the register says no longer exist. Off by default, and the default is the whole
+#: point of the flag: `companies.register_status` is `erloschen` for 7,673 of the 14,443 Osnabrück
+#: rows (53.1%) and `in Liquidation` for 472 more, so switching it on removes 56.4% of the work — and
+#: with it 36 of the 902 websites ever discovered, 4.0%. That trade is good but it is a CHANGE, and
+#: every number published in `docs/` was measured over the unfiltered table. Turn it on, measure once,
+#: write the new baseline down, and only then argue about the default.
+#:
+#: `aktiv` alone counts as active: a company in liquidation is winding down, and its 7 websites are
+#: not worth 472 companies of work. Decided 2026-08-27.
+ACTIVE_ONLY = os.getenv("DISCOVERY_ACTIVE_ONLY", "").strip().lower() in {"1", "true", "yes"}
+
+#: A whole SQL fragment, interpolated into the candidate queries below — **NOT** a bound parameter,
+#: and it must not be turned into one. It is either the empty string or this one fixed literal; the
+#: only input is an environment variable choosing between them, and no value from a row, a request or
+#: a user reaches it. A `%s` placeholder cannot be empty and cannot carry `AND <col> = <val>`, so
+#: binding it would either fail to parse or silently filter on something else. The real arguments in
+#: those queries stay `%s`, as they must.
+_ACTIVE_ONLY_SQL = "AND c.register_status = 'aktiv'" if ACTIVE_ONLY else ""
 LEGAL_SUFFIX_RE = re.compile(
     r"\b(gmbh(?:\s*&\s*co\.\s*kg)?|ug|ag|eg|kg|ohg|gbr|se|kgaa|mbh|e\. ?v\.?)\b",
     re.IGNORECASE,
@@ -79,8 +98,11 @@ def fetch_companies_without_source(source_key: str, limit: int = SOURCE_ENRICHME
     connection = get_connection()
     try:
         with connection, connection.cursor() as cur:
+            # `_ACTIVE_ONLY_SQL` is interpolated, not bound: it is a fixed SQL fragment chosen by an
+            # env var, never a value, and a `%s` placeholder can be neither empty nor a predicate.
+            # See its definition at the top of this module before "fixing" this.
             cur.execute(
-                """
+                f"""
                 SELECT
                   c.id,
                   c.company_name,
@@ -101,6 +123,7 @@ def fetch_companies_without_source(source_key: str, limit: int = SOURCE_ENRICHME
                     AND s.key = %s
                     AND COALESCE(csr.source_payload ->> 'status', '') <> 'planned'
                 )
+                {_ACTIVE_ONLY_SQL}
                 ORDER BY c.updated_at DESC, c.company_name ASC
                 LIMIT %s
                 """,
@@ -120,9 +143,11 @@ def fetch_companies_without_source_after_id(
     connection = get_connection()
     try:
         with connection, connection.cursor() as cur:
+            # Both branches interpolate `_ACTIVE_ONLY_SQL` rather than binding it — see the note at
+            # its definition; a bound parameter cannot be an empty string or a predicate.
             if after_id:
                 cur.execute(
-                    """
+                    f"""
                     SELECT
                       c.id,
                       c.company_name,
@@ -144,6 +169,7 @@ def fetch_companies_without_source_after_id(
                           AND s.key = %s
                           AND COALESCE(csr.source_payload ->> 'status', '') <> 'planned'
                       )
+                      {_ACTIVE_ONLY_SQL}
                     ORDER BY c.id ASC
                     LIMIT %s
                     """,
@@ -151,7 +177,7 @@ def fetch_companies_without_source_after_id(
                 )
             else:
                 cur.execute(
-                    """
+                    f"""
                     SELECT
                       c.id,
                       c.company_name,
@@ -172,6 +198,7 @@ def fetch_companies_without_source_after_id(
                         AND s.key = %s
                         AND COALESCE(csr.source_payload ->> 'status', '') <> 'planned'
                     )
+                    {_ACTIVE_ONLY_SQL}
                     ORDER BY c.id ASC
                     LIMIT %s
                     """,
@@ -466,8 +493,9 @@ def fetch_companies_with_latest_text_observation(
     connection = get_connection()
     try:
         with connection, connection.cursor() as cur:
+            # Interpolated, not bound — see `_ACTIVE_ONLY_SQL` at the top of this module.
             cur.execute(
-                """
+                f"""
                 WITH latest_observation AS (
                   SELECT DISTINCT ON (o.company_id)
                     o.company_id,
@@ -496,6 +524,7 @@ def fetch_companies_with_latest_text_observation(
                     AND s.key = %s
                     AND COALESCE(csr.source_payload ->> 'status', '') <> 'planned'
                 )
+                {_ACTIVE_ONLY_SQL}
                 ORDER BY c.updated_at DESC, c.company_name ASC
                 LIMIT %s
                 """,
@@ -561,6 +590,7 @@ def fetch_companies_for_llm_enrichment(
                       AND COALESCE(csr.source_payload ->> 'status', '') <> 'planned'
                   )
                   {quality_clause}
+                  {_ACTIVE_ONLY_SQL}
                 ORDER BY c.id ASC
                 LIMIT %s
                 """,

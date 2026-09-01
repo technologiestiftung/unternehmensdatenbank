@@ -362,9 +362,14 @@ def main() -> int:
     check("…and still has no model name", torn_row.model_name, "")
 
     # -----------------------------------------------------------------------------------
-    section("the website gate and the WZ code cannot get in")
+    section("the website gate, the WZ code and the register status cannot get in")
     signature = inspect.signature(pb.classify_purpose)
-    for forbidden in ("has_website", "website", "wz", "wz_code", "wz_cluster", "wz_division"):
+    # `register_status` joins the list for the same reason as the other two: whether a company still
+    # exists is not evidence about what it was set up to do, and a dissolved company's purpose is
+    # exactly as classifiable as a live one's. The flag may withhold a MODEL CALL from a dead
+    # company; it may never reach the classifier and change the answer.
+    for forbidden in ("has_website", "website", "wz", "wz_code", "wz_cluster", "wz_division",
+                      "register_status", "active_only", "status"):
         check(f"classify_purpose has no {forbidden!r} parameter",
               forbidden in signature.parameters, False)
     check("classify_purpose takes had_purpose", "had_purpose" in signature.parameters, True)
@@ -396,6 +401,8 @@ def main() -> int:
     check("purpose_branch never passes has_website=", "has_website" in kwargs_used, False)
     check("purpose_branch never reads a wz_code", "wz_code" in attributes_read, False)
     check("…and never reads a website either", "website" in attributes_read, False)
+    check("…nor a register_status", "register_status" in attributes_read, False)
+    check("…and never passes register_status=", "register_status" in kwargs_used, False)
 
     # A purpose answer must not be able to reach the Technologiefeld's column, in either direction.
     runner = _load_runner()
@@ -454,6 +461,69 @@ def main() -> int:
         if bc._pattern_for(bc.normalize(name)).search(prompt_text)
     ]
     check("no field name is baked into the prompt", baked, [])
+
+    # -----------------------------------------------------------------------------------
+    section("DISCOVERY_ACTIVE_ONLY defaults off and can only withhold a model call")
+    # Read from the syntax tree rather than by importing the module: `source_enrichment_common`
+    # imports psycopg2 at module level, and this guard is meant to cost nothing and need nothing.
+    common_path = Path(pb.__file__).resolve().parents[1] / "source_enrichment_common.py"
+    common_tree = ast.parse(common_path.read_text(encoding="utf-8"))
+    flag_default: object = "MISSING"
+    fragment_node: ast.AST | None = None
+    for node in ast.walk(common_tree):
+        if not isinstance(node, ast.Assign):
+            continue
+        targets = {t.id for t in node.targets if isinstance(t, ast.Name)}
+        if "ACTIVE_ONLY" in targets:
+            # `os.getenv("DISCOVERY_ACTIVE_ONLY", "").strip().lower() in {...}` — walk down to the
+            # getenv call and read its default. An empty default is what "off unless asked" means.
+            for inner in ast.walk(node.value):
+                if (isinstance(inner, ast.Call) and isinstance(inner.func, ast.Attribute)
+                        and inner.func.attr == "getenv" and len(inner.args) == 2):
+                    name = inner.args[0]
+                    if isinstance(name, ast.Constant) and name.value == "DISCOVERY_ACTIVE_ONLY":
+                        flag_default = getattr(inner.args[1], "value", "NOT-A-CONSTANT")
+        if "_ACTIVE_ONLY_SQL" in targets:
+            fragment_node = node.value
+
+    check("ACTIVE_ONLY reads DISCOVERY_ACTIVE_ONLY with an empty default", flag_default, "")
+    # The injection question, settled on the tree instead of by argument: the fragment is a plain
+    # conditional between two string CONSTANTS. No f-string, no `+`, no `.format`, nothing that could
+    # carry a value from a row or a request into the SQL it is interpolated into.
+    check("_ACTIVE_ONLY_SQL is a conditional expression",
+          isinstance(fragment_node, ast.IfExp), True)
+    if isinstance(fragment_node, ast.IfExp):
+        check("…both of its branches are string constants",
+              all(isinstance(part, ast.Constant) and isinstance(part.value, str)
+                  for part in (fragment_node.body, fragment_node.orelse)), True)
+        check("…the off branch is empty", fragment_node.orelse.value, "")
+        check("…the on branch filters on aktiv",
+              fragment_node.body.value, "AND c.register_status = 'aktiv'")
+
+    # The behavioural half: a withheld call leaves the row exactly as the keywords left it. A synthetic
+    # id nothing has ever been cached under, so this is a guaranteed miss and touches no model.
+    from combined_discovery import branch_llm
+    withheld = branch_llm.choose(
+        company_name="Nicht Existent GmbH",
+        text="Wir bauen Software für die Logistik und für die Mobilität.",
+        shortlist=["Logistik", "Mobility"],
+        url="check-purpose-branch://withheld-model-call/never-cached",
+        taxonomy_version="check-purpose-branch",
+        cached_only=True,
+    )
+    check("a withheld call names no branch", withheld.branch, None)
+    check("…and says why", bool(withheld.refused), True)
+    check("…and does not pretend the model rejected the shortlist", withheld.rejected_all, False)
+    check("cached_only defaults to False — the flag has to ask for it",
+          inspect.signature(branch_llm.choose).parameters["cached_only"].default, False)
+
+    # And the runner may only spend that flag on the model, never on the classifier.
+    for function_name in ("classify", "classify_purpose"):
+        source = inspect.getsource(getattr(runner, function_name))
+        check(f"{function_name}() gates only NEW calls with it",
+              "skip_model_for" in source, True)
+        check(f"…{function_name}() never passes register_status into a classifier",
+              "register_status=" in source, False)
 
     # -----------------------------------------------------------------------------------
     section("every subcommand has a dispatch branch of its own")

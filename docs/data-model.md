@@ -58,6 +58,8 @@ Important fields:
 - `wz_code`: current chosen business classification code
 - `business_purpose`: canonical company description / purpose when we know it
 - `postcode`, `city`, `district`, `locality`: location fields for search and rough deduplication
+- `register_status`: whether the register still lists the company — see below, it is not a small
+  detail
 - `metadata`: technical/system metadata
 - `canonical_updated_at`: when the winning values were last recalculated
 - `data_last_updated_at`: when business data last changed
@@ -65,6 +67,41 @@ Important fields:
 Short version:
 
 - `companies` = "best current company profile"
+
+#### `register_status`, and why more than half this table is dead
+
+The Northdata export has a `Status` column. It says whether the company still exists, and over the
+14,443 Osnabrück rows it says:
+
+| value | companies | share |
+|---|---|---|
+| `erloschen` — dissolved, struck off | 7,673 | 53.1% |
+| `aktiv` | 6,298 | 43.6% |
+| `in Liquidation` — winding down | 472 | 3.3% |
+
+So **most of this table is companies that no longer exist**, and every number this project has
+published — 902 websites found, 842 of them high-confidence, 346 Technologiefelder — was measured
+over the dead ones too. The dead ones contributed 36 of those 902 websites, 4.0%. Two things follow.
+
+First, a dissolved company's domain is exactly the kind that gets sold to somebody else, so a website
+"found" for an `erloschen` company deserves more suspicion than the confidence number gives it.
+
+Second, the expensive stages can skip them. `DISCOVERY_ACTIVE_ONLY=1` restricts every discovery
+query and every new model call to `register_status = 'aktiv'` — `in Liquidation` counts as inactive,
+which costs 7 high-confidence websites and skips 472 companies. It is **off by default**, on purpose:
+see the note on `SAMPLE_SQL` in `scripts/run_combined_discovery.py` before you compare a filtered run
+to anything.
+
+The column was added in `V13__company_register_status.sql`, which backfilled it from
+`metadata->>'status'` — the value had been imported all along, just never read. `metadata` keeps its
+copy as the raw source record.
+
+> **The manual load has to map this column.** There is no loader script in this repo: a prepared CSV
+> goes into Postgres by hand. `prepare_company_import.py` emits `register_status`, but if the
+> hand-written `\copy` column list leaves it out, every row lands `NULL`; the filter is `= 'aktiv'`,
+> which excludes `NULL`, so an active-only run would find nothing to do at all. `load_sample()`
+> raises rather than reporting a clean run over zero companies, but that is a net under the tightrope
+> — put the column in the copy list.
 
 ### `public.sources`
 
