@@ -39,6 +39,9 @@ SPEC = ProviderSpec(
     search=provider_search,
     transient_errors=(ParallelQuotaExhausted, ParallelRateLimitError),
     require_key=require_parallel_api_key,  # no-op: anonymous access is supported
+    # Proven against the live API, the hard way: this is the client whose REST call was malformed
+    # for weeks (fixed 2026-08-06), which is the reason the gate above exists for everyone else.
+    smoke_required=False,
     dag_description="Parallel web search, verified against the company's Impressum",
 )
 

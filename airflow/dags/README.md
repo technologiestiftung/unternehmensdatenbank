@@ -137,6 +137,25 @@ Each has its own README with env vars and provider quirks.
 
 The first three share `search_discovery_runner` verbatim, which is what makes them comparable.
 
+### A new provider is refused until somebody has watched it work
+
+A search client that has never run against its provider's live API cannot be trusted to fail
+loudly. A wrong request shape does not raise — it returns an empty result list, and an empty result
+list reads exactly like "the search found nothing". The Parallel REST call was malformed on that
+basis for weeks, and every run looked like a provider that simply found little.
+
+So `ProviderSpec.smoke_required` defaults to `True`, and `require_enabled()` refuses to start the
+batch until `./airflow/data/<source_key>_smoke_ok.json` exists. A smoke script on the host writes
+that file after one real call, recording the date, the hit count and the response's top-level keys;
+the task then logs those back, so a marker left over from before a change is visible rather than
+silently accepted.
+
+To clear the gate for a provider, write `scripts/smoke_<provider>_client.py` — copy
+`smoke_brave_client.py`, which is the fullest of them — run it, and read what it prints. Set
+`smoke_required=False` only for a client already proven in production, and put the date and the
+evidence in a comment beside it: that comment is the only record of when the contract was last
+checked.
+
 ### `url_discovery/`
 
 Builds candidate URLs from the company name and legal form (slug variants, common TLDs,
