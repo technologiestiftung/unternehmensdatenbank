@@ -108,6 +108,67 @@ CASES: list[tuple[str, str, list[str]]] = [
 ]
 
 
+#: Finding the Impressum page at all, which has to happen before any of the layouts above matter.
+#:
+#: `base_url` is often a DEEP page: `search_discovery_runner` hands over whatever the search engine
+#: ranked. Resolving a root-relative link by concatenation then produced
+#: `/planen/service/kontakt/service/impressum`, a 404, and `fetch_impressum` settled for the
+#: contact page instead. The register number was never read, so the candidate scored 20 rather than
+#: 120 and the website was stored at 0.65 instead of 1.0. Found on Tourismusgesellschaft
+#: Osnabrücker Land, 2026-09-01, whose register number sits at /service/impressum.
+#:
+#: (label, base_url, href in the page, expected resolved URL)
+LINK_CASES = [
+    (
+        "root-relative link from a deep page resolves against the SITE",
+        "https://www.osnabruecker-land.de/planen/service/kontakt",
+        "/service/impressum",
+        "https://www.osnabruecker-land.de/service/impressum",
+    ),
+    (
+        "root-relative link from the origin still works",
+        "https://www.osnabruecker-land.de",
+        "/service/impressum",
+        "https://www.osnabruecker-land.de/service/impressum",
+    ),
+    (
+        "document-relative link resolves against the deep page's DIRECTORY",
+        "https://example.de/ueber/kontakt.html",
+        "impressum.html",
+        "https://example.de/ueber/impressum.html",
+    ),
+    (
+        "an absolute link is left alone",
+        "https://example.de/a/b",
+        "https://cdn.example.de/impressum",
+        "https://cdn.example.de/impressum",
+    ),
+    (
+        "a protocol-relative link keeps the page's scheme",
+        "https://example.de/a/b",
+        "//example.de/impressum",
+        "https://example.de/impressum",
+    ),
+]
+
+
+def _check_link_resolution() -> int:
+    """Free: no network. The parser falls back to html.parser where lxml is not installed."""
+    from url_discovery.http_client import _find_impressum_link
+
+    failures = 0
+    for label, base_url, href, expected in LINK_CASES:
+        html = f'<html><body><a href="{href}">Impressum</a></body></html>'
+        actual = _find_impressum_link(base_url, html)
+        if actual != expected:
+            failures += 1
+            print(f"FAIL  {label}")
+            print(f"      base     {base_url}")
+            print(f"      expected {expected}")
+            print(f"      got      {actual}")
+    return failures
+
+
 def main() -> int:
     failures = 0
     for label, html, expected in CASES:
@@ -117,7 +178,9 @@ def main() -> int:
             print(f"FAIL  {label}")
             print(f"      expected {expected}")
             print(f"      got      {actual}")
-    total = len(CASES)
+    failures += _check_link_resolution()
+
+    total = len(CASES) + len(LINK_CASES)
     print(f"\n{total - failures}/{total} cases pass")
     if failures:
         print(

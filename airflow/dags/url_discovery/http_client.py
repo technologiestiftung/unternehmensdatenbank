@@ -3,6 +3,8 @@ from __future__ import annotations
 import logging
 import os
 
+from urllib.parse import urljoin
+
 import requests
 from bs4 import BeautifulSoup
 
@@ -76,18 +78,40 @@ def fetch_page(url: str) -> str | None:
     return None
 
 
-def _find_impressum_link(base_url: str, html: str) -> str | None:
+def _soup(html: str) -> BeautifulSoup:
+    """Parse with lxml where it exists, html.parser where it does not.
+
+    The old code asked for lxml inside a bare `except: pass`, so on a machine without it the
+    function silently returned None and every Impressum link went unseen. That is the host: lxml
+    is in the container's requirements and not necessarily anywhere else, which also meant this
+    could not be covered by a free guard.
+    """
     try:
-        soup = BeautifulSoup(html, "lxml")
-        for a in soup.find_all("a", href=True):
-            href = a["href"].lower()
-            if "impressum" in href or "imprint" in href:
-                href_full = a["href"]
-                if href_full.startswith("http"):
-                    return href_full
-                base = base_url.rstrip("/")
-                return base + "/" + href_full.lstrip("/")
-    except Exception:
+        return BeautifulSoup(html, "lxml")
+    except Exception:  # noqa: BLE001  FeatureNotFound, and anything else a builder raises
+        return BeautifulSoup(html, "html.parser")
+
+
+def _find_impressum_link(base_url: str, html: str) -> str | None:
+    """The page's own Impressum link, resolved against `base_url`.
+
+    Resolution is `urljoin`, not string concatenation, and the difference is the whole point.
+    `base_url` is often a DEEP page — `search_discovery_runner` hands over whatever the search
+    engine ranked, e.g. `/planen/service/kontakt`. Appending a root-relative `/service/impressum`
+    to that produced `/planen/service/kontakt/service/impressum`, which 404s; `fetch_impressum`
+    then fell through and settled for the contact page as the Impressum, so the register number
+    was never seen and the candidate scored 20 instead of 120.
+
+    Measured on Tourismusgesellschaft Osnabrücker Land: the register number is printed at
+    /service/impressum, the row was stored with `register_number: null` and confidence 0.65.
+    `combined_discovery` never hit this because it guesses origins, which is why it holds 667
+    register-number matches against the search DAGs' 20.
+    """
+    try:
+        for a in _soup(html).find_all("a", href=True):
+            if "impressum" in a["href"].lower() or "imprint" in a["href"].lower():
+                return urljoin(base_url, a["href"])
+    except Exception:  # noqa: BLE001  malformed markup is not worth failing a candidate over
         pass
     return None
 
@@ -115,9 +139,11 @@ def fetch_impressum(base_url: str, homepage: str | None = None) -> tuple[str, st
         if _has_imprint_content(homepage):
             return homepage, base_url
 
-    base = base_url.rstrip("/")
+    # Guessed paths hang off the SITE, not off whatever deep page was handed in. `/impressum`
+    # appended to `/planen/service/kontakt` is a 404 every time — the same concatenation bug as
+    # in `_find_impressum_link`, one function further down.
     for path in IMPRESSUM_PATHS[:-1]:
-        url = f"{base}{path}"
+        url = urljoin(base_url, path)
         content = fetch_page(url)
         if content and _has_imprint_content(content):
             return content, url
