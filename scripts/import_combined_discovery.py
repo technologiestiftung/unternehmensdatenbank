@@ -46,6 +46,7 @@ from __future__ import annotations
 import argparse
 import json
 import logging
+import os
 import sys
 from collections import Counter
 from pathlib import Path
@@ -53,6 +54,15 @@ from typing import Any
 
 REPO = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO / "airflow" / "dags"))
+
+# Running on the host means Postgres is on localhost:5433, not on the compose network. The DAG
+# default (`host=postgres port=5432`) is right inside a container and wrong outside one, so supply
+# a host-shaped default without overriding an explicit PG_DSN. Same line as
+# run_combined_discovery.py, and it has to be set before source_enrichment_common is imported --
+# that module reads PG_DSN at import time, which is why the import lives inside `write()`.
+os.environ.setdefault(
+    "PG_DSN", "host=localhost port=5433 dbname=unternehmensdatenbank user=app password=app"
+)
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 log = logging.getLogger("import_combined_discovery")
