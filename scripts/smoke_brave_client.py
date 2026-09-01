@@ -10,9 +10,10 @@ verification.
 The DAG will not start until this has passed: on success the marker below is written, and
 `search_discovery_runner.require_smoke_check` refuses the batch without it.
 
-Runs on the host: `scripts/` is not mounted into the Airflow containers, but `airflow/data` is the
-host side of the container's `/opt/airflow/data`, so the marker written here is the file the task
-reads.
+Runs on the host. `scripts/` is mounted into the containers, but READ-ONLY
+(`./scripts:/opt/airflow/scripts:ro`), so this could be imported in there and could not write its
+marker. `airflow/data` is mounted read-write and is the host side of `/opt/airflow/data`, which is
+what makes the file written here the same file the task reads.
 
     python scripts/smoke_brave_client.py
 

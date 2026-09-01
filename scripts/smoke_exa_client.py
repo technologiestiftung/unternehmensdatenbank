@@ -5,7 +5,8 @@ Worth running before the DAG, because a wrong request shape fails QUIETLY — it
 result list that is indistinguishable from "the search found nothing". That is exactly how a
 malformed Parallel REST call went unnoticed for weeks.
 
-Runs on the host: `scripts/` is not mounted into the Airflow containers.
+Runs on the host. `scripts/` is mounted into the containers, but read-only
+(`./scripts:/opt/airflow/scripts:ro`), and the key lives in the host's `.env`.
 
     python scripts/smoke_exa_client.py
 
