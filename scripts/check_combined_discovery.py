@@ -958,6 +958,43 @@ check("the single-value helper still answers", ie.extract_postcode("49074 Osnabr
 check("and returns None when there is no address", ie.extract_postcode("nothing here"), None)
 
 # ---------------------------------------------------------------------------------------
+# Register numbers: a thousands separator is not the end of the number
+# ---------------------------------------------------------------------------------------
+#
+# ok-personalprofis.de prints `HRB 222 442`. A bare `(\d+)` read `222`, `score_candidate` compared
+# it to 222442, and applied the -200 MISMATCH penalty — the one meaning "this page belongs to a
+# different company". A correct website was punished harder than one with no number at all.
+# Measured over the stored runs before the fix: 13 candidates across 8 companies.
+#
+# The second half of this block is the reason the grouped branch demands a separator. A greedy
+# rule would read "HRB 12345 49074 Osnabrück" as one number and invent an entry no register holds.
+
+check("a space as thousands separator", ie.extract_register_numbers("HRB 222 442"), ["HRB 222442"])
+check("a dot as thousands separator", ie.extract_register_numbers("HRB 222.442"), ["HRB 222442"])
+check("a non-breaking space", ie.extract_register_numbers("HRB 222 442"), ["HRB 222442"])
+check("a narrow no-break space", ie.extract_register_numbers("HRB 222 442"), ["HRB 222442"])
+check("two groups", ie.extract_register_numbers("HRA 12 345 678"), ["HRA 12345678"])
+check("a plain number is unchanged", ie.extract_register_numbers("HRB 213220"), ["HRB 213220"])
+check("a short number is unchanged", ie.extract_register_numbers("VR 2217"), ["VR 2217"])
+# The trap: the next number on the page is an address, not a continuation of the register entry.
+check(
+    "a postcode after the number is NOT swallowed",
+    ie.extract_register_numbers("HRB 12345 49074 Osnabrück"),
+    ["HRB 12345"],
+)
+check(
+    "…nor is a four-digit group, which no separator produces",
+    ie.extract_register_numbers("HRB 222 4425"),
+    ["HRB 222"],
+)
+check(
+    "several entries still come back in order",
+    ie.extract_register_numbers("HRB 222 442 und HRB 213220"),
+    ["HRB 222442", "HRB 213220"],
+)
+check("VR-Bank is still not a register entry", ie.extract_register_numbers("VR-Bank eG"), [])
+
+# ---------------------------------------------------------------------------------------
 # Structured data: the business card a page publishes for search engines
 # ---------------------------------------------------------------------------------------
 #
