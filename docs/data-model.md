@@ -260,6 +260,49 @@ So:
 
 `companies` is the answer, `company_field_observations` is the proof.
 
+## `northdata_export` — the one table that is outside all of this
+
+Everything above describes how a claim becomes a canonical field. `public.northdata_export` (V14)
+takes part in none of it. It is a **landing table**: one row per company per export file, kept
+verbatim, feeding nothing.
+
+It exists because the export has been arriving for months with only a handful of its columns read.
+The rest went into `companies.metadata` as loose JSON, and that has cost real work twice —
+`register_status` sat unread there until V13, and `website` is doing the same now.
+
+| | |
+|---|---|
+| rows, Osnabrück 2026-04-01 | 14,456 |
+| matched to a company | 14,443 (99.9%) |
+| **with a website** | **3,283** |
+| with an email | 3,677 |
+| with a WZ code | 8,481 |
+| **website, but no discovered one** | **2,394** |
+
+Four things to know before using it.
+
+1. **The key is `(source_file, internal_id)`, not `internal_id`.** Two exports a week apart already
+   exist; keeping both is what makes "what did Northdata change" answerable. Loading a second file
+   adds rows rather than replacing the first, so **every query must say which `source_file` it
+   means** or it will double-count.
+2. **`status` speaks English** — `active` / `terminated` / `liquidation`. `companies.register_status`
+   speaks German for the same fact — `aktiv` / `erloschen` / `in Liquidation`. A join comparing the
+   two as strings matches nothing and reports a clean zero rather than an error.
+3. **The website is not a top-level field in the source.** It lives at `extras[].items[]` where
+   `id = 'url'`, with `email`, `phone`, `fax` and `vatId`. Anyone reading the raw JSONL and looking
+   for a `Website` key concludes the export has no websites. It has 3,283 — and **none of them are
+   on `terminated` companies**, which is its own small piece of evidence that dead companies rarely
+   keep a site.
+4. **`company_id` is nullable and has no foreign key.** It is matched on
+   `companies.metadata ->> 'internal_id'`, unique across all 14,443 rows, unlike `unique_key` and
+   `registration_number`, which each carry 158 duplicates. A Berlin export may land before its
+   companies are imported; NULL then means unmatched, never failed.
+
+Loaded by `scripts/import_northdata_export.py`, idempotent per file. Nothing reads the table yet:
+whether an unverified third-party URL should outrank a page carrying the company's own register
+number is undecided, and the 207 companies where the two disagree are the evidence nobody has
+looked at.
+
 ## Resolution lifecycle
 
 For each incoming company row from a source:
