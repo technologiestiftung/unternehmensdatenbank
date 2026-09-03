@@ -287,6 +287,45 @@ def load_db_websites(company_ids: list[str]) -> dict[str, dict[str, Any]]:
     }
 
 
+#: Companies the Northdata export already knows a website for. Ids only — the URL is deliberately
+#: not returned, because nothing here should be tempted to compare against it.
+#:
+#: `company_id::text = ANY(%s)`, matching `DB_WEBSITE_SQL` above, because the ids arrive from
+#: `CompanyCandidate.id` as strings while the column is `uuid` — and `uuid = text` has no operator
+#: in Postgres, so the uncast version fails outright rather than returning the wrong rows.
+EXPORT_WEBSITE_SQL = """
+SELECT company_id::text
+FROM public.northdata_export
+WHERE company_id::text = ANY(%s)
+  AND website IS NOT NULL
+"""
+
+
+def load_export_websites(company_ids: list[str]) -> set[str]:
+    """Which of these companies have a website in `public.northdata_export`.
+
+    **Why this is not folded into `load_db_websites`.** That function feeds the report path, where
+    `agreement()` turns it into the CSV's `agrees_with_db` column — `db_blank` means the database has
+    nothing, `different` means it has something else. Adding the export to it would redefine "what
+    the database believes" in every report and silently reclassify those rows, changing published
+    numbers to fix a skip. So the skip gets its own loader and the report keeps meaning what it meant.
+
+    Ids only, and no URL: the export's opinion has no business influencing what this script scores.
+    It answers exactly one question, "would work here be wasted", and nothing else.
+    """
+    if not company_ids:
+        return set()
+    from source_enrichment_common import get_connection
+
+    connection = get_connection()
+    try:
+        with connection, connection.cursor() as cur:
+            cur.execute(EXPORT_WEBSITE_SQL, (company_ids,))
+            return {row[0] for row in cur.fetchall()}
+    finally:
+        connection.close()
+
+
 def _compare_host(url: str) -> str:
     """The part of a URL that decides whether two URLs are the same site.
 
@@ -345,6 +384,34 @@ def active_only() -> bool:
     from source_enrichment_common import ACTIVE_ONLY
 
     return ACTIVE_ONLY
+
+
+def skip_resolved_website() -> bool:
+    """Whether to skip companies that already HAVE a resolved website.
+
+    One definition of the flag, in `source_enrichment_common`, read through here for the same reason
+    as `active_only` above — the DAGs and this script must not end up with two env var names that
+    drift apart.
+
+    Two predicates, both meaning "we already know this company's website": a canonical row in
+    `company_canonical_field_sources`, or a `website` in `northdata_export` that has not been
+    imported yet. The second earns its keep only in that window — once
+    `import_northdata_websites.py` and `pipeline_coordinator` have run, every export website is
+    canonical and the first predicate covers it, measured at **3,109** active companies either way.
+
+    Where it is applied is the part worth reading. **Not in `SAMPLE_SQL`.** `load_sample` also backs
+    `sample_rows`, which is what `report --limit N` scopes with, so filtering the query would
+    silently rescope every reported number and drop already-solved companies out of the report — the
+    published figures would stop being reproducible. `{active_only}` already carries that hazard;
+    a second one is not worth adding. So the filter lands on `pending` inside `run`, where it changes
+    what gets *worked on* and nothing about what gets *counted*.
+
+    Note for anyone running this on the host: `.env` configures the containers and this script never
+    reads it, so the flag has to be in the shell — `$env:DISCOVERY_SKIP_RESOLVED_WEBSITE = "true"`.
+    """
+    from source_enrichment_common import SKIP_RESOLVED_WEBSITE
+
+    return SKIP_RESOLVED_WEBSITE
 
 
 def load_sample(limit: int) -> list[Any]:
@@ -443,6 +510,37 @@ def run(
     )
 
     companies = load_sample(limit)
+
+    # Companies the resolver has already settled a website for. `load_db_websites` returns only the
+    # ones that actually have one, which is the predicate needed here. Applied to the work list and
+    # not to the sample — see `skip_resolved_website` for why that distinction matters to `report`.
+    #
+    # It applies regardless of `--force`: force means "re-run methods whose implementation changed",
+    # not "re-find websites we already have".
+    resolved: set[str] = set()
+    if skip_resolved_website():
+        ids = [c.id for c in companies]
+        canonical = set(load_db_websites(ids))
+        export_only = load_export_websites(ids) - canonical
+        resolved = canonical | export_only
+        # Counted apart, and that is the point. A single total would hide whether the export is
+        # contributing anything: once the import has run it contributes zero, and `export_only`
+        # above 0 means `import_northdata_websites.py` is owed a run.
+        log.info(
+            "DISCOVERY_SKIP_RESOLVED_WEBSITE: %d of %d companies in the sample will not be worked "
+            "on — %d have a resolved website, %d more are known only to northdata_export. They "
+            "stay in the sample, so `report` still counts them; only the work is withheld.",
+            len(resolved), len(companies), len(canonical), len(export_only),
+        )
+        if export_only:
+            log.warning(
+                "%d of those are export websites that were never imported. Until "
+                "scripts/import_northdata_websites.py runs and pipeline_coordinator resolves them, "
+                "they are skipped here but a paid provider DAG only skips them because this same "
+                "flag is on in its container.",
+                len(export_only),
+            )
+
     already = {row["company_id"]: stages_run_for(row) for row in latest_rows(RESULTS_PATH)}
 
     # A company is pending when a method we want has never been run for it. The whole method
@@ -454,15 +552,17 @@ def run(
     # method works changed rather than which methods ran: the OSM stage switched from a
     # per-company Overpass query to a city-wide snapshot, and a sample where some rows came from
     # each is not one measurement.
-    pending = (
-        list(companies) if force
-        else [c for c in companies if effective - already.get(c.id, set())]
-    )
+    pending = [
+        c for c in companies
+        if c.id not in resolved and (force or effective - already.get(c.id, set()))
+    ]
     log.info(
-        "%d companies in sample, %d already have %s, %d to run | stages: %s",
+        "%d companies in sample, %d already have %s, %d withheld for a resolved website, "
+        "%d to run | stages: %s",
         len(companies),
-        len(companies) - len(pending),
+        len(companies) - len(pending) - len(resolved),
         "+".join(sorted(effective)) or "nothing",
+        len(resolved),
         len(pending),
         ", ".join(sorted(effective)) or "none",
     )
