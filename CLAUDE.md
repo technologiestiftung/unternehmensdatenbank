@@ -191,6 +191,11 @@ safe. The same is true of column 3, which has **no** labelling worksheet yet.
 
 - **`website_url` is a view column, not a table column.** V9 dropped it from `companies`. Enriched
   fields live in `company_canonical_field_sources`, read through `public.v_companies_enriched`.
+- **The import already carries 3,283 websites and nothing reads them** — the `Status` mistake again,
+  one field over. Discovery found 1,109; **2,394 more sit in the import for companies it never found**.
+  V14's `northdata_export` holds the export whole and feeds nothing. Its `status` is English
+  (`active`) where `register_status` is German (`aktiv`), and the website is at `extras[].items[]`
+  `id='url'`, not a top-level field: [data-model](docs/data-model.md).
 - **53% of `companies` is `erloschen`** — dissolved. V13 promoted the register's `Status` into
   `companies.register_status` (`aktiv` 6,298 / `erloschen` 7,673 / `in Liquidation` 472); it had been
   in `metadata` since the import, unread. Every published number — 902 websites, 842 `high`, 346
