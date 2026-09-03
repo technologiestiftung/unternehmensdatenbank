@@ -1,10 +1,16 @@
 """Brave Search client — https://api-dashboard.search.brave.com/documentation/services/web-search
 
-UNVERIFIED: written from the OpenAPI schema and doc fragments, never executed, because no
-`BRAVE_API_KEY` exists yet. Brave publishes no complete end-to-end JSON example, so the
-first real run doubles as contract verification. That is exactly how a broken request shape
-hid in the old Parallel REST call for weeks — treat a suspiciously empty result list as a
-possible shape mismatch, not as "Brave found nothing".
+VERIFIED against the live API on 2026-09-01, having been written from the OpenAPI schema alone.
+What came back, over one smoke call and a 20-company batch:
+
+  * The envelope is `{mixed, query, type, web}`. `web.results` is where the results live, as
+    assumed. `mixed` is an ordering block and is not read.
+  * A query that matches NOTHING drops `web` altogether and returns `{mixed, query, type}`. That
+    is an empty result, not a broken request — see `_hits_from_body`.
+  * Snippet text ran 108-369 characters per hit, consistent with the snippets-only note below.
+
+Re-run `scripts/smoke_brave_client.py` after any change here; it is what the DAG's smoke gate
+checks, and it prints the envelope's top-level keys precisely so a change to them is visible.
 
 Two properties that make Brave NOT a like-for-like comparison against Exa or Parallel:
 
@@ -119,12 +125,23 @@ def _get_search(query: str) -> dict[str, Any]:
 def _hits_from_body(body: dict[str, Any]) -> list[SearchHit]:
     results = ((body.get("web") or {}).get("results")) or []
     if not results and body.get("web") is None:
-        # Distinguish "no matches" from "our assumption about the response shape is wrong".
-        log.warning(
-            "Brave response has no `web` key (top-level keys: %s) — verify the response "
-            "shape against the current docs before trusting a zero-hit result.",
-            sorted(body)[:10],
-        )
+        # Measured on the first live run, 2026-09-01: Brave DROPS the `web` container entirely for
+        # a query that matches nothing, leaving `{mixed, query, type}`. It is not a shape error —
+        # in the same run, queries that did match returned `web` with up to 14 results. So a
+        # missing `web` beside a present `query` is an empty result, and only worth a debug line.
+        #
+        # `query` and `type` are what make that distinction possible: they were present in every
+        # response observed, empty or not. Losing THEM is the envelope change the original warning
+        # was written to catch, so that case keeps the warning.
+        if "query" in body:
+            log.debug("Brave returned no `web` block: no matches for this query.")
+        else:
+            log.warning(
+                "Brave response has neither `web` nor `query` (top-level keys: %s) — the response "
+                "envelope has changed. Verify against the current docs before trusting any "
+                "zero-hit result, and re-run scripts/smoke_brave_client.py.",
+                sorted(body)[:10],
+            )
     hits: list[SearchHit] = []
     for item in results:
         if not isinstance(item, dict):

@@ -45,6 +45,7 @@ x-airflow-common: &airflow-common
     # default because it changes which companies every stage sees, and all published numbers were
     # measured unfiltered. See source_enrichment_common.ACTIVE_ONLY.
     DISCOVERY_ACTIVE_ONLY: ${DISCOVERY_ACTIVE_ONLY:-false}
+    DISCOVERY_SKIP_RESOLVED_WEBSITE: ${DISCOVERY_SKIP_RESOLVED_WEBSITE:-false}
     ENABLE_MISTRAL_SEARCH_DISCOVERY: ${ENABLE_MISTRAL_SEARCH_DISCOVERY:-false}
     ENABLE_CLAUDE_SEARCH_DISCOVERY: ${ENABLE_CLAUDE_SEARCH_DISCOVERY:-false}
     MISTRAL_API_KEY: ${MISTRAL_API_KEY:-}

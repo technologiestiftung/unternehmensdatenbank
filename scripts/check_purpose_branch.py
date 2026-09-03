@@ -500,6 +500,54 @@ def main() -> int:
         check("…the on branch filters on aktiv",
               fragment_node.body.value, "AND c.register_status = 'aktiv'")
 
+    # -----------------------------------------------------------------------------------
+    section("DISCOVERY_SKIP_RESOLVED_WEBSITE obeys the same three rules")
+    # Same shape, same tree, same reasoning — a second env-gated SQL fragment interpolated into the
+    # candidate queries. It exists because neither the per-source check nor the 0.90 quality gate
+    # stops a paid provider re-searching a company that already HAS a website: measured 2026-09-01,
+    # such companies averaged data_quality_score 0.340, and 108 of 500 candidates (21.6%) held one.
+    skip_default: object = "MISSING"
+    skip_fragment: ast.AST | None = None
+    for node in ast.walk(common_tree):
+        if not isinstance(node, ast.Assign):
+            continue
+        targets = {t.id for t in node.targets if isinstance(t, ast.Name)}
+        if "SKIP_RESOLVED_WEBSITE" in targets:
+            for inner in ast.walk(node.value):
+                if (isinstance(inner, ast.Call) and isinstance(inner.func, ast.Attribute)
+                        and inner.func.attr == "getenv" and len(inner.args) == 2):
+                    name = inner.args[0]
+                    if isinstance(name, ast.Constant) and name.value == "DISCOVERY_SKIP_RESOLVED_WEBSITE":
+                        skip_default = getattr(inner.args[1], "value", "NOT-A-CONSTANT")
+        if "_SKIP_RESOLVED_WEBSITE_SQL" in targets:
+            skip_fragment = node.value
+
+    check("SKIP_RESOLVED_WEBSITE reads its env var with an empty default", skip_default, "")
+    check("_SKIP_RESOLVED_WEBSITE_SQL is a conditional expression",
+          isinstance(skip_fragment, ast.IfExp), True)
+    if isinstance(skip_fragment, ast.IfExp):
+        check("…both of its branches are string constants",
+              all(isinstance(part, ast.Constant) and isinstance(part.value, str)
+                  for part in (skip_fragment.body, skip_fragment.orelse)), True)
+        check("…the off branch is empty", skip_fragment.orelse.value, "")
+        # It must ask the CANONICAL table. An observation is a claim and a company can hold several
+        # rejected ones; only a canonical row means the resolver settled on a website. A guard here
+        # because the two table names differ by a suffix and the wrong one silently over-skips.
+        on_branch = skip_fragment.body.value if isinstance(skip_fragment.body, ast.Constant) else ""
+        check("…the on branch reads company_canonical_field_sources",
+              "company_canonical_field_sources" in on_branch, True)
+        check("…and not the observations table",
+              "company_field_observations" in on_branch, False)
+        check("…and asks only about the website field",
+              "field_name = 'website'" in on_branch, True)
+
+    # Every query carrying the active-only fragment must carry this one too, or a provider skips the
+    # dead through one code path and re-searches solved companies through another.
+    common_src = common_path.read_text(encoding="utf-8")
+    check("both fragments are interpolated at the same number of sites",
+          common_src.count("{_SKIP_RESOLVED_WEBSITE_SQL}"),
+          common_src.count("{_ACTIVE_ONLY_SQL}"))
+
     # The behavioural half: a withheld call leaves the row exactly as the keywords left it. A synthetic
     # id nothing has ever been cached under, so this is a guaranteed miss and touches no model.
     from combined_discovery import branch_llm

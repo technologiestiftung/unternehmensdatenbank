@@ -39,6 +39,39 @@ ACTIVE_ONLY = os.getenv("DISCOVERY_ACTIVE_ONLY", "").strip().lower() in {"1", "t
 #: binding it would either fail to parse or silently filter on something else. The real arguments in
 #: those queries stay `%s`, as they must.
 _ACTIVE_ONLY_SQL = "AND c.register_status = 'aktiv'" if ACTIVE_ONLY else ""
+
+#: Skip companies that already HAVE a resolved website. Off by default, same reasoning as above:
+#: it changes which companies every published number was measured over.
+#:
+#: Why it is needed at all. The candidate queries already skip a company THIS source has seen, and
+#: skip anything at `data_quality_score >= 0.90`. Neither catches the case that costs money: on
+#: 2026-09-01, importing `combined_discovery` took the active companies with a website from 155 to
+#: 949, and their mean `data_quality_score` was **0.340** — nowhere near the 0.90 gate. So a paid
+#: provider would have re-searched all 949, 15.1% of the 6,298 active companies, to rediscover
+#: URLs a DNS lookup had already found. Tradineo GmbH is the worked example: url_pattern had
+#: `tradineo.com` at 0.99 with a register-number match, and Brave paid to find it again.
+#:
+#: It asks `company_canonical_field_sources` rather than counting observations, and the difference
+#: is load-bearing: an observation is a CLAIM, and a company can hold half a dozen rejected ones.
+#: Only a canonical row means the resolver actually settled on a website for this company.
+#:
+#: Leave it OFF while measuring which provider is best on equal terms, and turn it ON for
+#: production runs, where re-finding a known website is pure cost.
+SKIP_RESOLVED_WEBSITE = os.getenv("DISCOVERY_SKIP_RESOLVED_WEBSITE", "").strip().lower() in {
+    "1",
+    "true",
+    "yes",
+}
+
+#: Interpolated, not bound — see the note on `_ACTIVE_ONLY_SQL`, which applies here word for word.
+_SKIP_RESOLVED_WEBSITE_SQL = (
+    """AND NOT EXISTS (
+                    SELECT 1 FROM public.company_canonical_field_sources ccfs
+                    WHERE ccfs.company_id = c.id AND ccfs.field_name = 'website'
+                  )"""
+    if SKIP_RESOLVED_WEBSITE
+    else ""
+)
 LEGAL_SUFFIX_RE = re.compile(
     r"\b(gmbh(?:\s*&\s*co\.\s*kg)?|ug|ag|eg|kg|ohg|gbr|se|kgaa|mbh|e\. ?v\.?)\b",
     re.IGNORECASE,
@@ -124,6 +157,7 @@ def fetch_companies_without_source(source_key: str, limit: int = SOURCE_ENRICHME
                     AND COALESCE(csr.source_payload ->> 'status', '') <> 'planned'
                 )
                 {_ACTIVE_ONLY_SQL}
+                {_SKIP_RESOLVED_WEBSITE_SQL}
                 ORDER BY c.updated_at DESC, c.company_name ASC
                 LIMIT %s
                 """,
@@ -170,6 +204,7 @@ def fetch_companies_without_source_after_id(
                           AND COALESCE(csr.source_payload ->> 'status', '') <> 'planned'
                       )
                       {_ACTIVE_ONLY_SQL}
+                      {_SKIP_RESOLVED_WEBSITE_SQL}
                     ORDER BY c.id ASC
                     LIMIT %s
                     """,
@@ -199,6 +234,7 @@ def fetch_companies_without_source_after_id(
                         AND COALESCE(csr.source_payload ->> 'status', '') <> 'planned'
                     )
                     {_ACTIVE_ONLY_SQL}
+                    {_SKIP_RESOLVED_WEBSITE_SQL}
                     ORDER BY c.id ASC
                     LIMIT %s
                     """,
@@ -525,6 +561,7 @@ def fetch_companies_with_latest_text_observation(
                     AND COALESCE(csr.source_payload ->> 'status', '') <> 'planned'
                 )
                 {_ACTIVE_ONLY_SQL}
+                {_SKIP_RESOLVED_WEBSITE_SQL}
                 ORDER BY c.updated_at DESC, c.company_name ASC
                 LIMIT %s
                 """,
@@ -591,6 +628,7 @@ def fetch_companies_for_llm_enrichment(
                   )
                   {quality_clause}
                   {_ACTIVE_ONLY_SQL}
+                  {_SKIP_RESOLVED_WEBSITE_SQL}
                 ORDER BY c.id ASC
                 LIMIT %s
                 """,

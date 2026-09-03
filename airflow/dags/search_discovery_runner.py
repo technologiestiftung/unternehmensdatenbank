@@ -98,6 +98,16 @@ class ProviderSpec:
     transient_errors: tuple[type[BaseException], ...]
     #: Callable raising a clear error when the provider's key is missing.
     require_key: Callable[[], None]
+    #: Refuse to run until a smoke script has proven this client against the provider's LIVE API.
+    #:
+    #: True by default, so a NEW provider is gated until somebody proves it and has to opt out on
+    #: purpose. That default is the whole point: a wrong request shape does not raise, it returns
+    #: an empty result list that reads exactly like "the search found nothing". The old Parallel
+    #: REST call was malformed for weeks and every run looked like a provider that found little.
+    #:
+    #: Set False only once a smoke script has run against the live API, and say WHEN in a comment
+    #: beside it — that comment is the only record of when the contract was last checked.
+    smoke_required: bool = True
     source_type: str = "web_search"
     dag_description: str = ""
     dag_tags: tuple[str, ...] = ()
@@ -131,6 +141,19 @@ class ProviderSpec:
             )
         )
 
+    @property
+    def smoke_marker(self) -> Path:
+        """Where a smoke script records that this client's live API contract holds.
+
+        Beside the checkpoint rather than at a path of its own, for two reasons. It follows the
+        checkpoint if that is ever relocated, and it needs no new environment variable — one absent
+        from BOTH `.env.example` and `docker-compose.yml` cannot be set by editing `.env` alone.
+
+        `/opt/airflow/data` is `./airflow/data` on the host (`docker-compose.yml`), which is what
+        lets a script running on the host write a file this task can read.
+        """
+        return self.checkpoint_file.parent / f"{self.source_key}_smoke_ok.json"
+
 
 #: Ceiling for an unverified, LLM-read website. Must stay below both the resolver's 0.35 website
 #: threshold and main's pattern-only floor of 0.365, so a snippet guess can never outrank page
@@ -138,10 +161,50 @@ class ProviderSpec:
 LLM_WEBSITE_CONF_CAP = float(os.getenv("LLM_WEBSITE_CONF_CAP", "0.34"))
 
 
+def require_smoke_check(spec: ProviderSpec) -> None:
+    """Refuse to spend money through a client nobody has ever seen work.
+
+    The ordering — prove the client, THEN run the batch — used to be human discipline, and it is
+    the kind that gets skipped exactly when it matters, on the day the key finally arrives. It is
+    cheap to enforce instead, because the host and this container share `/opt/airflow/data`.
+
+    The one weakness is a STALE marker: the client changes, the marker from last month stays. So
+    when the marker is present its contents are logged rather than silently accepted — the task log
+    then says which day the shape was checked and what came back, and a reader can notice that the
+    date predates the change they are debugging.
+    """
+    if not spec.smoke_required:
+        return
+    marker = spec.smoke_marker
+    if not marker.exists():
+        raise RuntimeError(
+            f"{spec.provider} has never been checked against its live API, so this run is "
+            f"refused: an empty result list from a malformed request is indistinguishable from "
+            f"'found nothing', and a batch would spend the quota proving nothing.\n"
+            f"Run  python scripts/smoke_{spec.provider}_client.py  on the host; it writes "
+            f"{marker.name} once the response shape checks out.\n"
+            f"Expected at {marker} (./airflow/data/{marker.name} on the host)."
+        )
+    try:
+        recorded = json.loads(marker.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as exc:
+        raise RuntimeError(f"{marker} is unreadable ({exc}). Re-run the smoke script.") from exc
+    log.info(
+        "%s smoke check passed %s: %s hits, response keys %s. If that predates the change you are "
+        "debugging, re-run the smoke script before trusting this batch.",
+        spec.provider,
+        recorded.get("checked_at", "at an unrecorded time"),
+        recorded.get("hits", "?"),
+        recorded.get("response_keys", "?"),
+    )
+
+
 def require_enabled(spec: ProviderSpec) -> None:
     if os.getenv(spec.enabled_flag, "false").lower() != "true":
         raise RuntimeError(f"{spec.enabled_flag} is not enabled.")
+    # Order of complaints, cheapest first: flag off, then key missing, then never proven.
     spec.require_key()
+    require_smoke_check(spec)
     require_extract_api_key()
 
 

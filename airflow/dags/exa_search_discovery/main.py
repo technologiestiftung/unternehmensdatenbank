@@ -35,6 +35,10 @@ SPEC = ProviderSpec(
     search=provider_search,
     transient_errors=(ExaRateLimitError,),
     require_key=require_exa_api_key,
+    # Proven against the live API: the 100-company measured run in
+    # docs/website-and-owner-discovery-results.md. `scripts/smoke_exa_client.py` re-checks the
+    # response shape on demand — run it, not this DAG, if Exa's contract is ever in doubt.
+    smoke_required=False,
     dag_description="Exa web search, verified against the company's Impressum",
 )
 

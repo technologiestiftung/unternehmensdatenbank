@@ -26,6 +26,7 @@ from __future__ import annotations
 import logging
 import os
 from typing import Any
+from urllib.parse import urljoin
 
 import requests
 
@@ -87,9 +88,12 @@ def best_imprint(
     if not IMPRINT_PROBE_ENABLED or (best and best[0][0]):
         return (best[1], best[2], best[3]) if best else None
 
-    root = base_url.rstrip("/")
+    # Against the SITE, not against whatever page was handed in. `search_discovery_runner` passes
+    # the search engine's hit, which is usually deep, and `/impressum` glued onto
+    # `/planen/service/kontakt` is a 404 every time. Same bug, and same fix, as
+    # `url_discovery.http_client._find_impressum_link`.
     for path in PROBE_PATHS:
-        candidate = f"{root}{path}"
+        candidate = urljoin(base_url, path)
         if best and candidate == best[2]:
             continue
         try:

@@ -15,9 +15,26 @@ from bs4 import BeautifulSoup
 #:
 #: `-Nr.` is optional because both "HRB 12345" and "HRB-Nr. 12345" are written. The separator class
 #: deliberately excludes `-`, so "VR-Bank" cannot be read as a `VR` number.
+#:
+#: The number may be typeset with thousands separators, which is ordinary German practice:
+#: ok-personalprofis.de prints `HRB 222 442`. A bare `(\d+)` stopped at the space, read `222`, and
+#: `score_candidate` then compared 222 against 222442 and applied its **-200 mismatch** penalty — the
+#: one reserved for "this page belongs to a different company". A correct website was therefore
+#: punished harder than one with no register number at all. Measured over the stored runs: 13
+#: candidates across 8 companies.
+#:
+#: The grouped branch requires at least one separator (`+`, not `*`), which is what keeps it safe.
+#: Without that, `HRB 12345 49074 Osnabrück` could read as one long number; with it, the grouped
+#: branch fails there and the plain `\d+` branch correctly returns `12345`. Groups must be exactly
+#: three digits, so only real thousands separators join.
 REGISTER_RE = re.compile(
-    r"\b(HRA|HRB|VR|GnR|PR)\s*(?:-?\s*Nr\.?)?\s*[.:\s]?\s*(\d+)\b", re.IGNORECASE
+    r"\b(HRA|HRB|VR|GnR|PR)\s*(?:-?\s*Nr\.?)?\s*[.:\s]?\s*"
+    r"(\d{1,3}(?:[ .  ]\d{3})+|\d+)\b",
+    re.IGNORECASE,
 )
+
+#: Everything a thousands separator can be, stripped before the digits are compared to the register.
+_REGISTER_SEPARATORS = str.maketrans("", "", " .  ")
 
 #: The old name, kept because it reads as "the Handelsregister pattern" in older call sites.
 HRB_RE = REGISTER_RE
@@ -161,7 +178,10 @@ def extract_register_numbers(text: str) -> list[str]:
     found: list[str] = []
     for match in REGISTER_RE.finditer(text):
         prefix = _REGISTER_CASE.get(match.group(1).upper(), match.group(1).upper())
-        entry = f"{prefix} {match.group(2)}"
+        # Normalised here, at the one place an entry is assembled, so no caller ever has to know
+        # that "HRB 222 442" and "HRB 222442" are the same entry. `confidence.register_digits` and
+        # `scorer._reg_digits` both strip non-digits anyway; this keeps the stored string clean too.
+        entry = f"{prefix} {match.group(2).translate(_REGISTER_SEPARATORS)}"
         if entry not in found:
             found.append(entry)
     return found
