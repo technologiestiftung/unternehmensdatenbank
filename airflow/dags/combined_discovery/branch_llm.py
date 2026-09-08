@@ -42,7 +42,7 @@ from __future__ import annotations
 
 import logging
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from combined_discovery import page_cache
 from ollama_search_discovery.ollama_http import (
@@ -118,6 +118,68 @@ Gegenstand des Unternehmens:
 Antworte als JSON:
 {{"branche": "<Name aus der Liste, {none} oder {unsure}>", "begruendung": "<max 15 Woerter>"}}
 """
+
+#: The same question, asking for the best THREE in order instead of one.
+#:
+#: Why it exists: Tier B answers carry no score at all (`ranked` is empty and `score` is 0.0 for all
+#: 553 of them), because Tier B runs precisely on the rows where no keyword fired, so there is nothing
+#: to score with. A ranked answer is what makes "the classifier was wrong, but the right field was its
+#: second choice" a distinguishable outcome — and that distinction is what says whether a cheap
+#: candidate generator would be good enough to replace this call.
+#:
+#: Three differences from `PURPOSE_PROMPT`, each deliberate:
+#:
+#: 1. It asks for a JSON **list**, so a truncated answer loses the third entry rather than corrupting
+#:    the first. `ranked_purpose_verdict_from_answer` validates every entry independently.
+#: 2. `{none}` and `{unsure}` stay available and are answered INSTEAD of a list, not inside one. A
+#:    model hedging with `["Handel", "keine"]` would otherwise be both an answer and an abstention.
+#: 3. It says the order matters and forbids repeats. A model left to itself repeats its first answer
+#:    to fill three slots, which looks like confidence and carries no information.
+#: 4. **It asks for AT MOST three, never exactly three, and says one is enough.** The first version
+#:    demanded three ("Waehle die DREI am besten passenden Branchen") and that measurably broke the
+#:    abstention: over the 34 answers it produced, **17.6% named a field while their own reason said
+#:    no field fits**, against 2.8% for the single-answer prompt — six times the rate — and the
+#:    decline rate across all model answers fell from 57.1% to 53.3%. `Expert Eyes Security` became
+#:    Cybersicherheit on the reason "Keine passende Branche fuer physischen Schutz", and
+#:    `Piepenbrock Dienstleistungen Verwaltungs` — a holding shell the boilerplate paragraph below
+#:    exists to catch — became Dienstleistung. A quota for three answers is a quota, and the model
+#:    filled it. Six rows of 34 is a signal rather than a measurement, but the mechanism is not in
+#:    doubt and the fix costs nothing.
+PURPOSE_RANK3_PROMPT = """Du ordnest ein Unternehmen einer Branche zu.
+
+Du liest den GEGENSTAND DES UNTERNEHMENS aus dem Handelsregister. Das ist der Zweck, den das
+Unternehmen bei der Eintragung angegeben hat — nicht unbedingt das, was es heute wirklich tut.
+
+Nenne die passenden Branchen aus der folgenden Liste, die beste zuerst, HOECHSTENS DREI.
+Nenne nur so viele, wie wirklich passen — eine genuegt, und eine ist besser als drei erfundene.
+Erfinde keine andere Branche. Nenne keine Branche zweimal.
+
+Branchen:
+{options}
+
+Antworte stattdessen "{none}", wenn keine davon passt. Das ist bei Holdinggesellschaften,
+Vermoegensverwaltung, Beteiligungsgesellschaften und rein verwaltenden Zwecken fast immer der
+Fall — "{none}" ist dort die richtige Antwort, keine Ausrede.
+
+Antworte "{unsure}", wenn der Text zu wenig sagt, um es zu entscheiden.
+
+Unternehmen: {company}
+
+Gegenstand des Unternehmens:
+{text}
+
+Antworte als JSON:
+{{"branchen": ["<beste>"], "begruendung": "<max 15 Woerter>"}}
+Oder mit zwei oder drei: {{"branchen": ["<beste>", "<zweitbeste>"], "begruendung": "..."}}
+Oder wenn keine passt: {{"branchen": "{none}", "begruendung": "<max 15 Woerter>"}}
+"""
+
+#: Output budget for the ranked ask. Three German field names plus a 15-word reason does not fit the
+#: 120 tokens a single-answer call gets — measured names run to 30 characters ("Gesundheitsversorgung
+#: & Pflege"), so three of them plus JSON punctuation is most of that budget before the reason starts.
+#: A truncated third entry is handled (it parses as two ranks) but a truncated reason is a silent loss
+#: of the only human-readable evidence on the row.
+RANK3_OUTPUT_TOKENS = int(os.getenv("BRANCH_LLM_RANK3_OUTPUT_TOKENS", "260"))
 
 #: The second job: read a page and say what the business IS CALLED, never which field it belongs to.
 #:
@@ -473,6 +535,12 @@ class PurposeVerdict:
     #: Which model produced it, so two runs can be told apart and a cheap model's answers can be
     #: found and re-asked later without re-asking everything.
     model_name: str = ""
+    #: The on-list fields the model put in order, best first. Empty unless the ranked prompt was used.
+    #:
+    #: Names only, never scores. A model asked for a confidence emits a plausible decimal that is not
+    #: a measurement, and it would end up beside the keyword classifier's real weights. `branch` stays
+    #: the rank-1 entry so every existing caller keeps working without knowing this field exists.
+    ranked: list[str] = field(default_factory=list)
 
     @property
     def abstained(self) -> bool:
@@ -515,6 +583,69 @@ def purpose_verdict_from_answer(
             # written to a column, and "gastgewerbe" is not a Berlin field name.
             return PurposeVerdict(branch=option, reason=reason)
     return PurposeVerdict(branch=None, reason=reason, refused=f"off-list: {cleaned[:60]}")
+
+
+def ranked_purpose_verdict_from_answer(
+    answer: object, reason: str, options: list[str]
+) -> PurposeVerdict:
+    """Turn a ranked answer into a verdict. `branch` is rank 1; `ranked` is the whole ordering.
+
+    A sibling of `purpose_verdict_from_answer` rather than a flag on it, for the reason that function
+    gives for being a sibling of `verdict_from_answer`: its behaviour is pinned by a guard, and adding
+    a list-shaped answer to it would change a rule two columns depend on. Three callers, three rules,
+    three guards.
+
+    Every rule of the single-answer parser holds **per entry**: case-insensitive comparison, list
+    punctuation stripped, and the field returned as the TAXONOMY spells it. On top of that:
+
+    - **Each entry is judged alone.** An off-list entry at rank 2 must not discard rank 1 — a model
+      that gets one right and then drifts has still got one right, and throwing the row away would
+      report "no answer" for a row that was answered.
+    - **Duplicates collapse**, first occurrence kept. A model told to name three fields will repeat
+      its favourite to fill the slots, and three copies of one answer is one answer.
+    - `keine` / `unsicher` are answered INSTEAD of a list. Accepted as a bare string, and also as a
+      one-entry list, because a model told to answer with a list sometimes wraps its abstention in
+      one. Tested before the options, so a taxonomy field named "Unsicher" could not shadow it.
+    - **Nothing usable at all -> refused**, never an abstention. The row keeps what the keywords said.
+    """
+    # A bare string is either an abstention or a single answer; either way the one-answer parser
+    # already owns those rules exactly, so defer to it rather than restating them.
+    if isinstance(answer, str):
+        verdict = purpose_verdict_from_answer(answer, reason, options)
+        if verdict.branch:
+            verdict.ranked = [verdict.branch]
+        return verdict
+
+    if not isinstance(answer, (list, tuple)):
+        return PurposeVerdict(branch=None, reason=reason, refused="empty answer")
+
+    entries = [_strip_list_punctuation(str(item)) for item in answer]
+    entries = [item for item in entries if item]
+    if not entries:
+        return PurposeVerdict(branch=None, reason=reason, refused="empty answer")
+
+    # An abstention wrapped in a list. Checked across every entry, not just the first: a model that
+    # answers ["keine"] and one that answers ["Handel", "keine"] are both telling us it wants out,
+    # and treating the second as a clean pick of "Handel" would read a hedge as a decision.
+    folded = [item.casefold() for item in entries]
+    if UNSURE_ANSWER in folded:
+        return PurposeVerdict(branch=None, reason=reason, unsure=True)
+    if NONE_ANSWER in folded:
+        return PurposeVerdict(branch=None, reason=reason, rejected_all=True)
+
+    by_fold = {option.casefold(): option for option in options}
+    ranked: list[str] = []
+    for item in folded:
+        option = by_fold.get(item)
+        # Off-list entries are skipped, not fatal, and duplicates keep their first position.
+        if option is not None and option not in ranked:
+            ranked.append(option)
+
+    if not ranked:
+        return PurposeVerdict(
+            branch=None, reason=reason, refused=f"off-list: {entries[0][:60]}",
+        )
+    return PurposeVerdict(branch=ranked[0], reason=reason, ranked=ranked)
 
 
 def purpose_cache_key(
@@ -583,6 +714,7 @@ def choose_for_purpose(
     taxonomy_version: str,
     namespace: str = "purpose-llm-tiebreak",
     model_name: str | None = None,
+    ranked: bool = False,
 ) -> PurposeVerdict:
     """Read a register purpose and pick one of `options`, or abstain. Never raises.
 
@@ -590,6 +722,13 @@ def choose_for_purpose(
     nominated. The same function serves Tier B's 77-way ask with a different `namespace` — the only
     thing that differs is the length of the list, and keeping one code path means the answer
     validation, the caching and the failure handling cannot drift apart between the two tiers.
+
+    `ranked=True` asks for the best three in order instead of one, and is the third caller through
+    this same path for the same reason. It changes the prompt, the output budget and the parser, and
+    nothing else. **The caller must pass a different `namespace` with it** — see the warning on
+    `purpose_cache_key`: the prompt shape is not part of the cache key, so a ranked ask against the
+    single-answer namespace is served the old one-answer verdicts and writes them as though they were
+    ranked. `classify-purpose` passes `purpose-llm-direct-rank3`, and a guard asserts it differs.
 
     Keyed on **`company_id`, not a URL**: a register purpose has no URL, and the company id is the
     only stable handle. The model name is in the key, so switching models creates new entries and
@@ -622,9 +761,14 @@ def choose_for_purpose(
             refused=cached.get("refused") or "",
             cached=True,
             model_name=cached.get("model_name") or model,
+            # Absent from every entry written before the ranked tier existed, which is correct: those
+            # answers had no ordering. `list(... or [])` so an old entry reads as "no ranking", not
+            # as a crash.
+            ranked=list(cached.get("ranked") or []),
         )
 
-    prompt = PURPOSE_PROMPT.format(
+    template = PURPOSE_RANK3_PROMPT if ranked else PURPOSE_PROMPT
+    prompt = template.format(
         none=NONE_ANSWER,
         unsure=UNSURE_ANSWER,
         options="\n".join(f"- {name}" for name in options),
@@ -634,7 +778,7 @@ def choose_for_purpose(
     try:
         result = run_chat_prompt(
             prompt,
-            num_predict=MAX_OUTPUT_TOKENS,
+            num_predict=RANK3_OUTPUT_TOKENS if ranked else MAX_OUTPUT_TOKENS,
             # Every one of these is measured, not taste. `think=False` because with thinking on the
             # model spends the whole 120-token budget reasoning and returns an empty string, three
             # times out of three. `temperature=0.0` so the same prompt gives the same answer and "the
@@ -653,15 +797,27 @@ def choose_for_purpose(
             branch=None, reason="", refused=f"{type(exc).__name__}", model_name=model,
         )
 
-    answer = str(parsed.get("branche") or "").strip()
     reason = str(parsed.get("begruendung") or "").strip()[:200]
 
-    verdict = purpose_verdict_from_answer(answer, reason, options)
+    if ranked:
+        # `branchen` (plural) for the list, and `branche` accepted as a fallback: a model given a
+        # list-shaped example still sometimes answers the singular key it saw in every other prompt,
+        # and treating that as an empty answer would throw away a usable pick.
+        raw = parsed.get("branchen")
+        if raw is None:
+            raw = str(parsed.get("branche") or "").strip()
+        verdict = ranked_purpose_verdict_from_answer(raw, reason, options)
+        logged = str(raw)
+    else:
+        answer = str(parsed.get("branche") or "").strip()
+        verdict = purpose_verdict_from_answer(answer, reason, options)
+        logged = answer
+
     verdict.model_name = model
     if verdict.refused:
         # An off-list answer decides nothing, and it is worth a log line: a model doing this often
         # means the prompt has stopped reading as a multiple-choice question.
-        log.info("purpose model answered off-list for %s: %r", company_id, answer[:60])
+        log.info("purpose model answered off-list for %s: %r", company_id, logged[:60])
 
     page_cache.put(namespace, key, {
         "branch": verdict.branch,
@@ -670,5 +826,8 @@ def choose_for_purpose(
         "unsure": verdict.unsure,
         "refused": verdict.refused,
         "model_name": verdict.model_name,
+        # Written on every entry, ranked ask or not. An empty list on a single-answer entry is the
+        # truth about it, and it keeps the cached shape uniform for whoever reads this next.
+        "ranked": verdict.ranked,
     })
     return verdict

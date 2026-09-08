@@ -131,6 +131,20 @@ LIMIT %s
 _WRITE_LOCK = threading.Lock()
 
 
+#: What a labelling worksheet is written with. **A semicolon, because these files exist to be
+#: double-clicked in Excel on a German locale** — and there, a comma-delimited CSV opens with all 25
+#: columns in column A. Nobody labels 110 rows like that.
+#:
+#: This was comma-delimited on the reasoning that a comma is "the portable form". It is, and it was
+#: the wrong trade: the only consumer is `read_label_csv`, which sniffs either delimiter, and the only
+#: human is on a German locale. Portability was being bought with the one thing that mattered.
+#:
+#: Quoting is `csv`'s job either way, so a `purpose_text` containing a semicolon — and German
+#: register text does — survives the round trip. Overridable for anyone on an English locale, where
+#: Excel wants the comma back.
+LABEL_CSV_DELIMITER = os.getenv("COMBINED_LABEL_CSV_DELIMITER", ";")
+
+
 def read_label_csv(path: Path) -> list[dict[str, str]]:
     """Read a hand-labelling worksheet back, whatever Excel did to it on the way.
 
@@ -142,8 +156,11 @@ def read_label_csv(path: Path) -> list[dict[str, str]]:
 
     So the delimiter is sniffed from the header rather than assumed, and only from these two
     candidates — a real `csv` reader still handles quoting, so a company name containing a comma
-    survives either way. Writing stays comma-delimited, because that is the portable form; tolerating
-    the round trip on read is what makes an Excel visit harmless.
+    survives either way. Reading is therefore delimiter-agnostic in both directions, which is what
+    makes an Excel visit harmless.
+
+    **Writing uses `LABEL_CSV_DELIMITER`, which is `;`** — see the note there. These files exist to
+    be opened in Excel on a German locale, and a comma-delimited one lands entirely in column A.
     """
     text = path.read_text(encoding="utf-8-sig")
     header = text.splitlines()[0] if text else ""
@@ -1221,7 +1238,10 @@ def labels(limit: int | None = None, per_bucket: int = 20) -> None:
 
     LABELS_PATH.parent.mkdir(parents=True, exist_ok=True)
     with LABELS_PATH.open("w", encoding="utf-8-sig", newline="") as handle:
-        writer = csv.DictWriter(handle, fieldnames=LABEL_COLUMNS, extrasaction="ignore")
+        # `LABEL_CSV_DELIMITER` for the same reason as the other two worksheets: this one is opened
+        # in Excel to be filled in, and a comma file lands entirely in column A on a German locale.
+        writer = csv.DictWriter(handle, fieldnames=LABEL_COLUMNS, extrasaction="ignore",
+                                delimiter=LABEL_CSV_DELIMITER)
         writer.writeheader()
         for entry in out:
             writer.writerow(entry)
@@ -1349,6 +1369,40 @@ KEYWORD_PROPOSALS_PATH = OUT_DIR / "keyword_proposals.csv"
 #: requires a website and this deliberately does not, so mixing them would silently reverse that
 #: rule. See `combined_discovery/purpose_branch.py`.
 PURPOSE_BRANCHES_PATH = OUT_DIR / "purpose_branches.jsonl"
+
+#: COLUMN 3's hand-labelling worksheet. Its own file, beside `branch_labels_todo.csv` and never
+#: sharing with it: the two columns ask different questions and a label for one is not a label for
+#: the other.
+PURPOSE_LABELS_PATH = OUT_DIR / "purpose_labels_todo.csv"
+
+#: The cache namespaces each purpose tier reads, **newest first**. A new call is only ever written to
+#: element 0; everything after it is read-only history.
+#:
+#: Why a list and not a string. `purpose_cache_key` is built from
+#: `taxonomy_version|model_name|company_id|options` and does **not** include the prompt shape, so a
+#: changed prompt has to move to a new namespace or it is served the old answers — see the warning on
+#: `choose_for_purpose`. But moving namespace empties it, and this file is rewritten from scratch on
+#: every run: the first free re-run after Tier B moved to `-rank3` dropped **1,285 paid-for answers**
+#: (553 fields, 732 abstentions) and reported them as `no_keyword`, with the cache still holding all
+#: of them. Reading the old namespaces too is what makes a prompt change cost only the new calls.
+#:
+#: A row served from history carries no ranking, and that is correct — it was a single-answer ask.
+#: **`purpose-llm-direct-rank3` is deliberately NOT in this list.** It holds 215 answers from the
+#: first ranked prompt, which demanded exactly three fields and thereby suppressed the abstention:
+#: 17.6% of them named a field while their own reason said none fits, against 2.8% for the
+#: single-answer prompt. Those answers are not corrupt, they are biased, and a biased answer served
+#: from a cache is worse than no answer because nothing downstream can see where it came from. Left
+#: on disk rather than deleted — they are the evidence for the prompt change — and simply not read,
+#: which is what makes the re-ask cost 215 calls instead of 5,000.
+#:
+#: `purpose-llm-direct` (1,307 single-answer entries) IS still read. Those came from the unbiased
+#: prompt and are fine; they carry no ranking, which is the truth about them.
+PURPOSE_TIER_A_NAMESPACES = ("purpose-llm-tiebreak",)
+PURPOSE_TIER_B_NAMESPACES = ("purpose-llm-direct-ranked", "purpose-llm-direct")
+
+#: Quarantined, for the guard to assert against. Never read; kept named so that "why is this
+#: directory here" has an answer six months from now.
+PURPOSE_TIER_B_QUARANTINED = ("purpose-llm-direct-rank3",)
 
 #: Read in this order, so a keyword found in several texts is credited to the most specific one.
 SOURCE_ORDER = ("services", "homepage", "imprint", "purpose")
@@ -2006,6 +2060,11 @@ def _ask_the_model(
     from combined_discovery import branch_llm
     from combined_discovery import purpose_branch as pb
 
+    # Tier B asks for three ranked fields; Tier A asks for one of three. Derived from the tier rather
+    # than passed in, so the ranked prompt and the `-rank3` namespace can never be paired with the
+    # wrong question by a caller that forgot one of them.
+    ranked = tier == pb.DECIDED_BY_MODEL_DIRECT
+
     verdict = branch_llm.choose_for_purpose(
         company_name=fact.get("company_name") or "",
         purpose=purpose or "",
@@ -2013,6 +2072,7 @@ def _ask_the_model(
         company_id=company_id,
         taxonomy_version=taxonomy.version,
         namespace=namespace,
+        ranked=ranked,
     )
     return pb.apply_model_verdict(
         assignment,
@@ -2023,6 +2083,7 @@ def _ask_the_model(
         reason=verdict.reason,
         model_name=verdict.model_name,
         tier=tier,
+        model_ranked=verdict.ranked,
     ), (0 if verdict.cached else 1)
 
 
@@ -2203,15 +2264,18 @@ def classify_purpose(
         # Which question, if any, this row is eligible for. Tier A arbitrates between 3 candidates the
         # keywords nominated; Tier B asks about all 77 where no keyword fired at all.
         if assignment.outcome == pb.TORN and assignment.askable:
-            eligible = (assignment.shortlist, "purpose-llm-tiebreak",
+            eligible = (assignment.shortlist, PURPOSE_TIER_A_NAMESPACES,
                         pb.DECIDED_BY_MODEL_TIEBREAK, use_llm)
         elif assignment.outcome == pb.NO_KEYWORD:
-            eligible = (all_fields, "purpose-llm-direct", pb.DECIDED_BY_MODEL_DIRECT, semantic)
+            eligible = (all_fields, PURPOSE_TIER_B_NAMESPACES,
+                        pb.DECIDED_BY_MODEL_DIRECT, semantic)
         else:
             eligible = None
 
         if eligible:
-            options, namespace, tier, tier_on = eligible
+            options, namespaces, tier, tier_on = eligible
+            # A NEW call always goes to the newest namespace; the older ones are read-only history.
+            namespace = namespaces[0]
             # Named companies jump the queue; everything else is frozen out of NEW calls. A cached
             # answer is still applied below either way, so this never loses work already paid for.
             if only_ids is not None and company_id not in only_ids:
@@ -2227,13 +2291,22 @@ def classify_purpose(
             # **An answer already paid for is applied on EVERY run, tier flag or not.** Otherwise a
             # free re-run rewrites this file as though the model had never spoken, the counts drop,
             # and nothing says why — the cache would still hold all of it. Only a NEW call is gated.
+            # Newest namespace first, then the older ones. That second loop is what stops a prompt
+            # change from destroying answers: moving Tier B to `-rank3` emptied its namespace, and on
+            # the first free re-run 1,285 paid-for answers — 553 fields and 732 abstentions —
+            # vanished from the file and reappeared as `no_keyword`. The cache still held every one of
+            # them. An older entry is applied exactly as it was written, with no ranking, which is the
+            # truth about a single-answer ask.
             verdict = None
-            for candidate_model in (previous_model.get(company_id), None):
-                verdict = branch_llm_cached(
-                    options=options, company_id=company_id,
-                    taxonomy_version=taxonomy.version, namespace=namespace,
-                    model_name=candidate_model,
-                )
+            for lookup_namespace in namespaces:
+                for candidate_model in (previous_model.get(company_id), None):
+                    verdict = branch_llm_cached(
+                        options=options, company_id=company_id,
+                        taxonomy_version=taxonomy.version, namespace=lookup_namespace,
+                        model_name=candidate_model,
+                    )
+                    if verdict is not None:
+                        break
                 if verdict is not None:
                     break
             if verdict is not None:
@@ -2243,6 +2316,9 @@ def classify_purpose(
                     branch=verdict.branch, rejected_all=verdict.rejected_all,
                     unsure=verdict.unsure, refused=verdict.refused,
                     reason=verdict.reason, model_name=verdict.model_name, tier=tier,
+                    # Empty for every answer cached before the ranked tier existed, which is the
+                    # truth about them: they were single-answer asks and had no ordering.
+                    model_ranked=verdict.ranked,
                 )
             # `llm_budget` counts NEW calls only, which is what makes re-running make progress rather
             # than repeat itself — 6,481 rows is too many for one sitting at any local speed.
@@ -2312,6 +2388,15 @@ def classify_purpose(
             "runner_up": assignment.runner_up,
             "runner_up_score": assignment.runner_up_score,
             "ranked": assignment.ranked[:5],
+            # The top three, best first, as {rank, field, score, basis}. `purpose_field` above stays
+            # the rank-1 string — this is additive, so `classify-purpose-report`, `compare-columns`
+            # and the handover CSV keep reading what they always read.
+            #
+            # `score` is filled only where one was MEASURED. A keyword row carries its weight sum
+            # (basis `keyword_weight`); a model row carries None (basis `model_rank`), because a
+            # model has no calibrated number and inventing one would put a plausible decimal in the
+            # same column as 7.487 with nothing able to tell them apart.
+            "candidates": pb.purpose_candidates(assignment),
             "keywords": assignment.keywords,
             "evidence": snippets or ({"_text": fallback} if fallback else {}),
             "shortlist": assignment.shortlist,
@@ -2369,10 +2454,33 @@ def classify_purpose(
     log.info("wrote %d rows to %s", len(scope), PURPOSE_BRANCHES_PATH)
     for outcome, count in sorted(counts.items(), key=lambda kv: -kv[1]):
         log.info("  %-20s %6d", outcome, count)
+    # Printed on EVERY run, not only when a tier is on. The run that silently dropped 1,285
+    # paid-for answers was a free one, and it said nothing at all: without this line the only symptom
+    # was an outcome count that had quietly changed, in a file nobody diffs.
+    log.info("model answers applied from cache: %d (new calls this run: %d)", served_from_cache, asked)
+
+    # The signature of a cache that has become unreachable rather than empty. Two ways to get here,
+    # and the fix differs, so both are named:
+    #
+    #  * the model name. The cache key includes it, and `OLLAMA_MODEL` defaults in code to
+    #    `qwen2.5:7b`, which is not the model that answered. `previous_model` normally supplies the
+    #    right name from THIS file — so a file rewritten while the variable was wrong loses the
+    #    ability to find its own answers, which is how 1,285 of them went missing.
+    #  * a prompt change that moved to a new namespace without keeping the old one readable. See
+    #    `PURPOSE_TIER_B_NAMESPACES`.
+    if served_from_cache == 0 and counts.get(pb.NO_KEYWORD, 0):
+        from combined_discovery import page_cache
+
+        on_disk = sum(page_cache.stats().get(name, 0) for name in PURPOSE_TIER_B_NAMESPACES)
+        if on_disk:
+            log.warning(
+                "%d answers sit in the Tier B cache and NONE was applied. They are unreachable, not "
+                "absent. Almost always the model name: set $env:OLLAMA_MODEL to the model that "
+                "answered (the code default qwen2.5:7b is not it) and re-run. Namespaces read: %s",
+                on_disk, ", ".join(PURPOSE_TIER_B_NAMESPACES),
+            )
+
     if use_llm or semantic:
-        # Both numbers, always. "0 model calls" on a re-run is the proof the cache keys correctly,
-        # and it is only meaningful next to the count it served instead.
-        log.info("model calls %d, served from cache %d", asked, served_from_cache)
         if semantic and llm_budget is not None and asked >= llm_budget:
             remaining = counts.get(pb.NO_KEYWORD, 0)
             log.info("budget of %d spent; %d rows are still `no_keyword`. Re-run to continue — the "
@@ -3164,9 +3272,16 @@ def branch_label_buckets(rows: list[dict[str, Any]]) -> dict[str, list[dict[str,
 
 
 def label_staleness(
-    was: Mapping[str, str], bucket: str, technologiefeld: str
+    was: Mapping[str, str], bucket: str, technologiefeld: str, field_key: str = "technologiefeld"
 ) -> tuple[bool, bool]:
     """Is a carried-over label still an answer to the question it was written about?
+
+    `field_key` names the worksheet column holding the answer being judged, because there are now two
+    worksheets and they do not share a vocabulary: column 1 writes `technologiefeld`, column 3 writes
+    `purpose_field`. Defaulted, so column 1's caller and `check_branch_classifier.py` are unchanged.
+    Getting this wrong is not a small bug — reading a key the worksheet does not have compares `""`
+    against every real field name, so **every label goes stale on the second run** and quietly leaves
+    the precision count. That is exactly what happened the first time column 3's worksheet ran.
 
     Returns `(moved, still_stale)`. `moved` means the row changed since it was judged and this is the
     first run to notice. `still_stale` means it was already flagged and nobody has cleared the flag.
@@ -3190,20 +3305,24 @@ def label_staleness(
         return False, False
     moved = (
         (was.get("bucket") or "") != bucket
-        or (was.get("technologiefeld") or "") != technologiefeld
+        or (was.get(field_key) or "") != technologiefeld
     )
     was_flagged = (was.get("stale") or "").strip().lower() == "yes"
     return moved, was_flagged and not moved
 
 
-def _stale_note(was: dict[str, str]) -> str:
+def _stale_note(was: dict[str, str], field_key: str = "technologiefeld") -> str:
     """Say in the `notes` column what this label was originally about.
 
     Without it, `stale=yes` tells a human their answer no longer applies and not what it applied to,
     which makes re-labelling a re-do instead of a re-read. Their own note is kept in front.
+
+    `field_key` names the answer column, for the same reason `label_staleness` takes one: two
+    worksheets, two vocabularies. Read the wrong key and the trail says `keyword_decided/?` — it
+    still flags the row, but it no longer says what the label was about, which is the entire job.
     """
     old_bucket = was.get("bucket") or "?"
-    old_field = was.get("technologiefeld") or "?"
+    old_field = was.get(field_key) or "?"
     old_version = was.get("taxonomy_version") or "?"
     trail = (
         f"[labelled {was.get('label', '').strip()} when this was {old_bucket}/{old_field} "
@@ -3211,7 +3330,11 @@ def _stale_note(was: dict[str, str]) -> str:
     )
     note = (was.get("notes") or "").strip()
     # Do not stack a trail on a trail: re-running this twice must not grow the cell.
-    note = note.split(" [labelled ")[0].strip()
+    #
+    # Split on the BRACKET, not on " [labelled " — with the leading space it only matched when a
+    # human had written a note in front, so a row with no note of its own grew a second trail on
+    # every run. Measured on column 3's first run: two identical trails in one cell.
+    note = note.split("[labelled ")[0].strip()
     return f"{note} {trail}".strip()
 
 
@@ -3291,7 +3414,8 @@ def branch_labels(per_bucket: int = 10) -> None:
 
     BRANCH_LABELS_PATH.parent.mkdir(parents=True, exist_ok=True)
     with BRANCH_LABELS_PATH.open("w", encoding="utf-8-sig", newline="") as handle:
-        writer = csv.DictWriter(handle, fieldnames=BRANCH_LABEL_COLUMNS, extrasaction="ignore")
+        writer = csv.DictWriter(handle, fieldnames=BRANCH_LABEL_COLUMNS, extrasaction="ignore",
+                                delimiter=LABEL_CSV_DELIMITER)
         writer.writeheader()
         writer.writerows(out)
 
@@ -3422,6 +3546,358 @@ def branch_labels_report() -> None:
     print()
 
 
+# =====================================================================================
+# COLUMN 3's hand-labelling worksheet
+#
+# The same machinery as column 1's above, on column 3's own file and vocabulary — `label_staleness`,
+# `_stale_note` and `read_label_csv` are called, never copied, because each of them already records a
+# bug it was written to fix and a second copy would have to re-earn all of them.
+#
+# Why column 3 needs its own: it has assigned a Berlin field to 1,163 companies and **not one has
+# ever been checked**. Two of the numbers below decide whether the 553 Tier B calls (~10 s each) can
+# be replaced by something cheaper — `model_77` precision, and whether `none_apply` is right, since a
+# similarity ranking can never say "no field fits".
+# =====================================================================================
+
+#: Per-bucket draw. Weighted, not flat: `model_77` and `none_apply` are the two buckets the Tier B
+#: decision rests on, and `no_keyword`/`no_purpose` hold 12,498 rows between them — sampled evenly,
+#: most of the worksheet would be the two least informative groups.
+PURPOSE_LABEL_DRAW = {
+    "model_77": 25,
+    "none_apply": 25,
+    "keyword_decided": 15,
+    "no_keyword": 15,
+    "torn": 10,
+    "model_3way": 10,
+    "no_purpose": 10,
+}
+
+PURPOSE_LABEL_COLUMNS = [
+    "bucket", "company_id", "company_name",
+    "purpose_field",
+    # The three candidates, flat rather than a JSON blob: the point of this file is a human sorting
+    # and filtering in Excel, and a nested value cannot be filtered on.
+    #
+    # `cand_basis` is what stops the score column lying. `keyword_weight` means the number was
+    # measured over the corpus; `model_rank` means a model put the fields in order and there is NO
+    # number — the cell is empty, not zero. A zero would read as "scored nothing".
+    "cand1_field", "cand1_score", "cand2_field", "cand2_score", "cand3_field", "cand3_score",
+    "cand_basis",
+    "outcome", "decided_by", "score", "keywords", "shortlist",
+    # Empty except on `no_purpose` rows, where it is the field the register text WOULD have produced
+    # had the 40-character floor not excluded it. What you are being asked to judge in that bucket.
+    "withheld_by_floor",
+    # The two that make labelling possible at all: the register's own words, and the model's stated
+    # reason for what it did with them. Read them side by side before looking a company up.
+    "purpose_text", "purpose_chars", "llm_reason", "llm_refused", "model_name",
+    "taxonomy_version",
+    "label", "notes", "stale",
+]
+
+
+def purpose_label_buckets(rows: list[dict[str, Any]]) -> dict[str, list[dict[str, Any]]]:
+    """Seven groups, because column 3 has seven outcomes and each asks a different question.
+
+    keyword_decided  the register's words said it. PRECISION of the free path.
+    model_3way       Tier A broke a keyword tie from 3 candidates. Was breaking it that way right?
+    model_77         Tier B chose from all 77 where no keyword fired. **The expensive one** — 553
+                     rows at ~10 s. Its precision decides whether a cheaper generator could replace it.
+    torn             two fields too close to call. Label these before paying for Tier A: if a human
+                     cannot separate them from the same text, a 4B model will not either.
+    none_apply       a model read the purpose and said NO field fits. **Was it right?** This is the
+                     one capability a similarity ranking cannot reproduce, so it is what a cheaper
+                     approach would be giving up.
+    no_keyword       we read a usable purpose and not one taxonomy word appeared. Does a field fit
+                     anyway? These 5,196 rows are Tier B's target population.
+    no_purpose       the register said nothing readable, or the 40-char floor excluded it. THE
+                     CEILING: what better input would buy.
+
+    `unsure` has no rows today but is a real outcome — it is folded in with `none_apply`, since both
+    are a model declining, and the `outcome` column keeps them tellable apart. Silently dropping it
+    would break the guarantee that the buckets cover all 14,443 rows.
+    """
+    from combined_discovery import purpose_branch as pb
+
+    buckets: dict[str, list[dict[str, Any]]] = {name: [] for name in PURPOSE_LABEL_DRAW}
+    by_outcome = {
+        pb.ASSIGNED_KEYWORDS: "keyword_decided",
+        pb.ASSIGNED_MODEL_3WAY: "model_3way",
+        pb.ASSIGNED_MODEL_77: "model_77",
+        pb.TORN: "torn",
+        pb.NONE_APPLY: "none_apply",
+        pb.UNSURE: "none_apply",
+        pb.NO_KEYWORD: "no_keyword",
+        pb.NO_PURPOSE: "no_purpose",
+    }
+    for row in rows:
+        bucket = by_outcome.get(row.get("outcome") or "")
+        if bucket:
+            buckets[bucket].append(row)
+    return buckets
+
+
+def _purpose_candidate_cells(row: dict[str, Any]) -> dict[str, Any]:
+    """Flatten `candidates` into the six worksheet cells plus `cand_basis`.
+
+    A missing rank leaves both its cells empty rather than writing a placeholder: a row where the
+    model named one field and we do not know its second choice must not look like a row where the
+    second choice was blank.
+    """
+    cells: dict[str, Any] = {}
+    candidates = row.get("candidates") or []
+    for rank in (1, 2, 3):
+        entry = next((c for c in candidates if c.get("rank") == rank), None)
+        cells[f"cand{rank}_field"] = (entry or {}).get("field") or ""
+        score = (entry or {}).get("score")
+        # `None` becomes empty, never 0. See the note on `cand_basis` in PURPOSE_LABEL_COLUMNS.
+        cells[f"cand{rank}_score"] = "" if score is None else score
+    cells["cand_basis"] = (candidates[0].get("basis") if candidates else "") or ""
+    return cells
+
+
+def purpose_labels(per_bucket: int | None = None) -> None:
+    """Write (or extend) column 3's worksheet. Never overwrites a label a human has written.
+
+    Keyed on the **company** alone, and stale-marked rather than dropped when what a label described
+    has changed — both rules and both past bugs are `label_staleness`'s, which this calls.
+
+    `per_bucket` flattens the weighted draw to one number for anyone who wants the simple version.
+    The default is `PURPOSE_LABEL_DRAW`, which is deliberately uneven.
+    """
+    rows = read_jsonl(PURPOSE_BRANCHES_PATH)
+    if not rows:
+        raise SystemExit(f"nothing in {PURPOSE_BRANCHES_PATH}; run `classify-purpose` first")
+    buckets = purpose_label_buckets(rows)
+    version = next((r.get("taxonomy_version") for r in rows if r.get("taxonomy_version")), "")
+
+    existing: dict[str, dict[str, str]] = {}
+    if PURPOSE_LABELS_PATH.exists():
+        for old in read_label_csv(PURPOSE_LABELS_PATH):
+            existing[old.get("company_id") or ""] = old
+        done = sum(1 for v in existing.values() if (v.get("label") or "").strip())
+        log.info("%s has %d rows, %d labelled", PURPOSE_LABELS_PATH.name, len(existing), done)
+
+    out: list[dict[str, Any]] = []
+    carried = stale_count = stale_kept = 0
+    for bucket, entries in buckets.items():
+        # Ordered by company id: arbitrary but STABLE, so the same rows come up every run and
+        # re-running never swaps a labelled company for a fresh one.
+        entries.sort(key=lambda r: r.get("company_id") or "")
+        want = per_bucket if per_bucket is not None else PURPOSE_LABEL_DRAW[bucket]
+        keep = entries[:want] + [
+            e for e in entries[want:]
+            if (existing.get(e.get("company_id") or "", {}).get("label") or "").strip()
+        ]
+        for row in keep:
+            was = existing.get(row.get("company_id") or "", {})
+            field_now = row.get("purpose_field") or ""
+            # `field_key="purpose_field"` is not optional. `label_staleness` defaults to column 1's
+            # `technologiefeld`, which this worksheet does not have — reading it compares `""`
+            # against every real field name, so every label goes stale on the second run and leaves
+            # the precision count. That is what the first run of this command did.
+            moved, still = label_staleness(was, bucket, field_now, field_key="purpose_field")
+            carried += bool((was.get("label") or "").strip())
+            stale_count += moved
+            stale_kept += still
+            entry = {
+                "bucket": bucket,
+                "company_id": row.get("company_id"),
+                "company_name": row.get("company_name"),
+                "purpose_field": field_now,
+                "outcome": row.get("outcome"),
+                "decided_by": row.get("decided_by") or "",
+                "score": row.get("score") or "",
+                "keywords": ";".join(sorted(row.get("keywords") or {})),
+                "shortlist": ";".join(row.get("shortlist") or []),
+                "withheld_by_floor": row.get("withheld_by_floor") or "",
+                "purpose_text": row.get("purpose_text") or "",
+                "purpose_chars": row.get("purpose_chars") or "",
+                "llm_reason": row.get("llm_reason") or "",
+                "llm_refused": row.get("llm_refused") or "",
+                "model_name": row.get("model_name") or "",
+                "taxonomy_version": row.get("taxonomy_version") or version,
+                # Carried over verbatim. This is the human's work.
+                "label": was.get("label", ""),
+                # Written ONCE, when the row moves. `label_staleness` keeps the flag sticky, and
+                # `_stale_note` never stacks a trail on a trail.
+                "notes": (
+                    _stale_note(was, field_key="purpose_field") if moved
+                    else was.get("notes", "")
+                ),
+                "stale": "yes" if (moved or still) else "",
+            }
+            entry.update(_purpose_candidate_cells(row))
+            out.append(entry)
+        log.info("%-16s %d rows (%d available)", bucket, len(keep), len(entries))
+
+    PURPOSE_LABELS_PATH.parent.mkdir(parents=True, exist_ok=True)
+    # Two separate things Excel needs, and both are needed: `utf-8-sig` for the BOM, or `Osnabrück`
+    # renders as `OsnabrÃ¼ck`; and the semicolon delimiter, or all 25 columns land in column A.
+    with PURPOSE_LABELS_PATH.open("w", encoding="utf-8-sig", newline="") as handle:
+        writer = csv.DictWriter(handle, fieldnames=PURPOSE_LABEL_COLUMNS, extrasaction="ignore",
+                                delimiter=LABEL_CSV_DELIMITER)
+        writer.writeheader()
+        writer.writerows(out)
+
+    print(f"\nWrote {len(out)} rows to {PURPOSE_LABELS_PATH}")
+    if carried:
+        print(f"Carried {carried} label(s) over from the previous worksheet.")
+    if stale_count:
+        print(f"   {stale_count} label(s) went STALE — the row changed after it was judged.")
+    if stale_kept:
+        print(f"   {stale_kept} more were already stale and still are.")
+    if stale_count or stale_kept:
+        print(
+            "   Stale labels are LEFT OUT of every number in classify-purpose-labels-report.\n"
+            "   Re-read the row, fix `label`, then CLEAR the `stale` cell — that is how you say you\n"
+            "   have looked again. Nothing else clears it."
+        )
+    print(f"Fill in `label` with one of: {', '.join(BRANCH_LABEL_VALUES)}")
+    print("  keyword_decided          -> is `purpose_field` right, from `purpose_text` alone?")
+    print("  model_3way / model_77    -> same question. `llm_reason` says why it chose;")
+    print("                              `cand2_field`/`cand3_field` are what it ranked below.")
+    print("  none_apply               -> the model said NO field fits. `yes` if that is right.")
+    print("                              This is the one thing a similarity ranking cannot do.")
+    print("  torn                     -> can YOU pick one of `shortlist` from the same text? If")
+    print("                              not, no model can. Write which one in `notes`.")
+    print("  no_keyword / no_purpose  -> does any Berlin field fit this company? Name it in `notes`.")
+    print("\n  When you mark a row `no` but one of `cand2_field`/`cand3_field` IS right, write that")
+    print("  field name in `notes` — the report counts those separately, and that number decides")
+    print("  whether a cheap candidate generator could replace the model.")
+    print(f"\nThen: python {Path(__file__).name} classify-purpose-labels-report")
+
+
+def purpose_labels_report() -> None:
+    """Read column 3's worksheet back. The only thing that says whether the answer was RIGHT."""
+    if not PURPOSE_LABELS_PATH.exists():
+        raise SystemExit(f"no {PURPOSE_LABELS_PATH}; run `classify-purpose-labels` first")
+    rows = read_label_csv(PURPOSE_LABELS_PATH)
+
+    def tally(*buckets: str) -> dict[str, int]:
+        counts = {v: 0 for v in BRANCH_LABEL_VALUES}
+        counts["unlabelled"] = 0
+        counts["stale"] = 0
+        for row in rows:
+            if (row.get("bucket") or "") not in buckets:
+                continue
+            # A stale label describes a row that has since changed, so counting it as `yes` or `no`
+            # would report an answer to a question nobody asked. Set aside, and said out loud.
+            if (row.get("stale") or "").strip().lower() == "yes":
+                counts["stale"] += 1
+                continue
+            value = (row.get("label") or "").strip().lower()
+            counts[value if value in counts else "unlabelled"] += 1
+        return counts
+
+    def recovered(*buckets: str) -> tuple[int, int]:
+        """Of the rows marked wrong, how many name a field that WAS at rank 2 or 3.
+
+        The number the Tier B decision turns on. High means the ordering is nearly right and a cheap
+        generator producing a shortlist would be enough; low means the candidate set itself is wrong
+        and no amount of re-ranking helps.
+
+        Matched case-insensitively against `notes`, because a human writes the field name in prose.
+        """
+        wrong = hit = 0
+        for row in rows:
+            if (row.get("bucket") or "") not in buckets:
+                continue
+            if (row.get("stale") or "").strip().lower() == "yes":
+                continue
+            if (row.get("label") or "").strip().lower() != "no":
+                continue
+            wrong += 1
+            note = (row.get("notes") or "").casefold()
+            lower = [(row.get("cand2_field") or "").casefold(),
+                     (row.get("cand3_field") or "").casefold()]
+            if note and any(field_name and field_name in note for field_name in lower):
+                hit += 1
+        return hit, wrong
+
+    print(f"\n=== {len(rows)} rows in {PURPOSE_LABELS_PATH.name} ===")
+    versions = {(r.get("taxonomy_version") or "?") for r in rows}
+    stale_total = sum(1 for r in rows if (r.get("stale") or "").strip().lower() == "yes")
+    print(f"  classified by run   {', '.join(sorted(versions))}")
+    if stale_total:
+        print(
+            f"  {stale_total} label(s) are STALE — the row changed after it was judged, so they are\n"
+            "  left out of every number below. Re-read them; `notes` says what each one was."
+        )
+
+    for bucket, question in (
+        ("keyword_decided", "the register's own words decided it"),
+        ("model_3way", "Tier A broke a keyword tie, from 3 candidates"),
+        ("model_77", "Tier B chose from all 77 — the expensive call"),
+    ):
+        counts = tally(bucket)
+        decided = counts["yes"] + counts["no"]
+        print(f"\n-- {question} --")
+        print(f"{'right':<38}{counts['yes']:>5}")
+        print(f"{'wrong':<38}{counts['no']:>5}")
+        print(f"{'unclear':<38}{counts['unclear']:>5}")
+        print(f"{'not yet labelled':<38}{counts['unlabelled']:>5}")
+        if decided:
+            print(f"\n  PRECISION {counts['yes']}/{decided} = "
+                  f"{100.0 * counts['yes'] / decided:.0f}%  (at rank 1)")
+            hit, wrong = recovered(bucket)
+            if wrong:
+                print(f"  RANK-2/3 RECOVERY {hit}/{wrong} of the wrong ones named a field that was")
+                print("  already at rank 2 or 3. High -> a cheap generator producing a shortlist")
+                print("  would be enough. Low -> the candidate set itself is wrong.")
+            else:
+                print("  RANK-2/3 RECOVERY unknown — nothing in this group is labelled `no` yet.")
+        else:
+            print("\n  PRECISION unknown — nothing in this group is labelled yet")
+
+    # The decline. Kept apart from the assignments because it is a different claim: not "is this
+    # field right" but "is NO field right", which is the one answer a ranking cannot produce.
+    decline = tally("none_apply")
+    decided = decline["yes"] + decline["no"]
+    print("\n-- the model declined: was 'no Berlin field fits' right? --")
+    print(f"{'yes, no field fits':<38}{decline['yes']:>5}")
+    print(f"{'no, a field does fit':<38}{decline['no']:>5}")
+    print(f"{'unclear':<38}{decline['unclear']:>5}")
+    print(f"{'not yet labelled':<38}{decline['unlabelled']:>5}")
+    if decided:
+        print(f"\n  DECLINE ACCURACY {decline['yes']}/{decided} = "
+              f"{100.0 * decline['yes'] / decided:.0f}%")
+        print("  Scale that across the 735 `none_apply` rows. A similarity ranking always returns a")
+        print("  nearest field and can NEVER answer this, so a high number is the cost of replacing")
+        print("  the model with one — and 1,272 of 6,298 active companies are holding shells.")
+    else:
+        print("\n  UNKNOWN — so the one thing a cheaper approach would give up is unmeasured.")
+
+    torn = tally("torn")
+    decided = torn["yes"] + torn["no"]
+    print("\n-- the ties: could a human separate them from the same text? --")
+    print(f"{'yes, one of the shortlist fits':<38}{torn['yes']:>5}")
+    print(f"{'no, none of the shortlist fits':<38}{torn['no']:>5}")
+    print(f"{'unclear':<38}{torn['unclear']:>5}")
+    print(f"{'not yet labelled':<38}{torn['unlabelled']:>5}")
+    if decided:
+        print(f"\n  A human separated {torn['yes']}/{decided}. That is the ceiling for Tier A: it is")
+        print("  asked the same question from the same text, with less to work with.")
+
+    # The two kinds of blank, added together HERE and nowhere else: the question in this section is
+    # "does a field exist for this company at all", and for that one question it does not matter
+    # whether no keyword fired or there was no readable purpose.
+    blanks = tally("no_keyword", "no_purpose")
+    decided = blanks["yes"] + blanks["no"]
+    print("\n-- the ceiling: do the companies we gave no field actually have one? --")
+    print(f"{'a Berlin field fits (yes)':<38}{blanks['yes']:>5}")
+    print(f"{'none fits (no)':<38}{blanks['no']:>5}")
+    print(f"{'unclear':<38}{blanks['unclear']:>5}")
+    print(f"{'not yet labelled':<38}{blanks['unlabelled']:>5}")
+    if decided:
+        print(f"\n  MISSED {blanks['yes']}/{decided} = {100.0 * blanks['yes'] / decided:.0f}% of the")
+        print("  blanks do have a field. Over 5,196 `no_keyword` rows that is what better lexical")
+        print("  coverage — compound splitting, lemmatisation — would be buying. Low means it would")
+        print("  manufacture false positives instead.")
+    else:
+        print("\n  CEILING unknown — this group decides whether compound splitting is worth building.")
+    print()
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     sub = parser.add_subparsers(dest="command", required=True)
@@ -3535,6 +4011,20 @@ def main() -> None:
              "the plain command stays free.",
     )
     sub.add_parser("classify-purpose-report", help="print the register-purpose scorecard")
+    p_plabels = sub.add_parser(
+        "classify-purpose-labels",
+        help="COLUMN 3's hand-labelling worksheet (merges with what is already labelled)",
+    )
+    p_plabels.add_argument(
+        "--per-bucket", type=int, default=None,
+        help="flatten the weighted draw to N rows per bucket. The default is uneven on purpose — "
+             "25 each for model_77 and none_apply, which are the two the Tier B decision rests on, "
+             "and 10 for the 12,498 rows of blanks. About 110 rows in total.",
+    )
+    sub.add_parser(
+        "classify-purpose-labels-report",
+        help="read it back: is column 3 actually right? The only thing that measures precision.",
+    )
     p_compare = sub.add_parser(
         "compare-columns",
         help="all three industry columns side by side, and where 1 and 3 disagree",
@@ -3608,6 +4098,10 @@ def main() -> None:
         )
     elif args.command == "classify-purpose-report":
         classify_purpose_report()
+    elif args.command == "classify-purpose-labels":
+        purpose_labels(args.per_bucket)
+    elif args.command == "classify-purpose-labels-report":
+        purpose_labels_report()
     elif args.command == "compare-columns":
         compare_columns(args.limit)
     else:
