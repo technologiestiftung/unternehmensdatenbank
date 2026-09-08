@@ -135,12 +135,23 @@ Antworte als JSON:
 #:    model hedging with `["Handel", "keine"]` would otherwise be both an answer and an abstention.
 #: 3. It says the order matters and forbids repeats. A model left to itself repeats its first answer
 #:    to fill three slots, which looks like confidence and carries no information.
+#: 4. **It asks for AT MOST three, never exactly three, and says one is enough.** The first version
+#:    demanded three ("Waehle die DREI am besten passenden Branchen") and that measurably broke the
+#:    abstention: over the 34 answers it produced, **17.6% named a field while their own reason said
+#:    no field fits**, against 2.8% for the single-answer prompt — six times the rate — and the
+#:    decline rate across all model answers fell from 57.1% to 53.3%. `Expert Eyes Security` became
+#:    Cybersicherheit on the reason "Keine passende Branche fuer physischen Schutz", and
+#:    `Piepenbrock Dienstleistungen Verwaltungs` — a holding shell the boilerplate paragraph below
+#:    exists to catch — became Dienstleistung. A quota for three answers is a quota, and the model
+#:    filled it. Six rows of 34 is a signal rather than a measurement, but the mechanism is not in
+#:    doubt and the fix costs nothing.
 PURPOSE_RANK3_PROMPT = """Du ordnest ein Unternehmen einer Branche zu.
 
 Du liest den GEGENSTAND DES UNTERNEHMENS aus dem Handelsregister. Das ist der Zweck, den das
 Unternehmen bei der Eintragung angegeben hat — nicht unbedingt das, was es heute wirklich tut.
 
-Waehle die DREI am besten passenden Branchen aus der folgenden Liste, die beste zuerst.
+Nenne die passenden Branchen aus der folgenden Liste, die beste zuerst, HOECHSTENS DREI.
+Nenne nur so viele, wie wirklich passen — eine genuegt, und eine ist besser als drei erfundene.
 Erfinde keine andere Branche. Nenne keine Branche zweimal.
 
 Branchen:
@@ -158,8 +169,9 @@ Gegenstand des Unternehmens:
 {text}
 
 Antworte als JSON:
-{{"branchen": ["<beste>", "<zweitbeste>", "<drittbeste>"], "begruendung": "<max 15 Woerter>"}}
-Oder: {{"branchen": "{none}", "begruendung": "<max 15 Woerter>"}}
+{{"branchen": ["<beste>"], "begruendung": "<max 15 Woerter>"}}
+Oder mit zwei oder drei: {{"branchen": ["<beste>", "<zweitbeste>"], "begruendung": "..."}}
+Oder wenn keine passt: {{"branchen": "{none}", "begruendung": "<max 15 Woerter>"}}
 """
 
 #: Output budget for the ranked ask. Three German field names plus a 15-word reason does not fit the

@@ -442,8 +442,16 @@ def main() -> int:
     # ranked ask against the single-answer namespace is served the old one-answer verdicts and writes
     # them as though they were ranked — a re-run that completes and reports success on stale data.
     tier_b = runner.PURPOSE_TIER_B_NAMESPACES
-    check("tier B asks in its own ranked namespace", tier_b[0], "purpose-llm-direct-rank3")
+    check("tier B asks in its own ranked namespace", tier_b[0], "purpose-llm-direct-ranked")
     check("…which differs from the single-answer one", tier_b[0] == "purpose-llm-direct", False)
+
+    # The first ranked prompt demanded exactly three fields and suppressed the abstention: 17.6% of
+    # its 34 answers named a field while their own reason said none fits, against 2.8% for the
+    # single-answer prompt. Its namespace is quarantined — on disk as evidence, never read, so those
+    # companies are re-asked instead of being served a biased answer nothing downstream can spot.
+    for quarantined in runner.PURPOSE_TIER_B_QUARANTINED:
+        check(f"{quarantined} is quarantined, not read", quarantined in tier_b, False)
+    check("the quarantine list is not empty", bool(runner.PURPOSE_TIER_B_QUARANTINED), True)
     # And it must still READ the old one. Moving namespace empties it, and this file is rewritten
     # from scratch every run: the first free re-run after the move dropped 1,285 paid-for answers
     # (553 fields, 732 abstentions) and reported them as `no_keyword`, cache still full.
@@ -596,6 +604,25 @@ def main() -> int:
     # rebuilds the rule it is checking agrees with itself whatever the real code does.
     ranked_from = branch_llm.ranked_purpose_verdict_from_answer
     options = ["Handel", "Logistik", "Gastgewerbe", "Medizintechnik"]
+
+    # The prompt must ask for AT MOST three and say one is enough. Demanding exactly three is a
+    # quota, and the model fills a quota: the first version did that and 17.6% of its answers named a
+    # field while the reason said none fits, six times the single-answer prompt's rate.
+    ranked_prompt = branch_llm.PURPOSE_RANK3_PROMPT
+    check("the ranked prompt asks for at most three",
+          "HOECHSTENS DREI" in ranked_prompt, True)
+    check("…and does not demand exactly three",
+          "die DREI am besten passenden" in ranked_prompt, False)
+    check("…and says one is enough",
+          "eine genuegt" in ranked_prompt, True)
+    check("…and still offers keine", "{none}" in ranked_prompt, True)
+    check("…and still offers unsicher", "{unsure}" in ranked_prompt, True)
+    # The boilerplate paragraph is what catches holding shells, and a quota overrode it once.
+    for word in ("Holdinggesellschaften", "Vermoegensverwaltung", "Beteiligungsgesellschaften"):
+        check(f"the ranked prompt still names {word} as keine", word in ranked_prompt, True)
+    # A one-element JSON example, so the shape the model is shown permits a single answer.
+    check("the JSON example shows a single-entry list",
+          '{{"branchen": ["<beste>"]' in ranked_prompt, True)
 
     clean = ranked_from(["Logistik", "Handel", "Gastgewerbe"], "weil", options)
     check("three on-list names -> three ranks", clean.ranked,

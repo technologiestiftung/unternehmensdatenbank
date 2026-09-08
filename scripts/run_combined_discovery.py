@@ -1367,8 +1367,22 @@ PURPOSE_LABELS_PATH = OUT_DIR / "purpose_labels_todo.csv"
 #: of them. Reading the old namespaces too is what makes a prompt change cost only the new calls.
 #:
 #: A row served from history carries no ranking, and that is correct — it was a single-answer ask.
+#: **`purpose-llm-direct-rank3` is deliberately NOT in this list.** It holds 215 answers from the
+#: first ranked prompt, which demanded exactly three fields and thereby suppressed the abstention:
+#: 17.6% of them named a field while their own reason said none fits, against 2.8% for the
+#: single-answer prompt. Those answers are not corrupt, they are biased, and a biased answer served
+#: from a cache is worse than no answer because nothing downstream can see where it came from. Left
+#: on disk rather than deleted — they are the evidence for the prompt change — and simply not read,
+#: which is what makes the re-ask cost 215 calls instead of 5,000.
+#:
+#: `purpose-llm-direct` (1,307 single-answer entries) IS still read. Those came from the unbiased
+#: prompt and are fine; they carry no ranking, which is the truth about them.
 PURPOSE_TIER_A_NAMESPACES = ("purpose-llm-tiebreak",)
-PURPOSE_TIER_B_NAMESPACES = ("purpose-llm-direct-rank3", "purpose-llm-direct")
+PURPOSE_TIER_B_NAMESPACES = ("purpose-llm-direct-ranked", "purpose-llm-direct")
+
+#: Quarantined, for the guard to assert against. Never read; kept named so that "why is this
+#: directory here" has an answer six months from now.
+PURPOSE_TIER_B_QUARANTINED = ("purpose-llm-direct-rank3",)
 
 #: Read in this order, so a keyword found in several texts is credited to the most specific one.
 SOURCE_ORDER = ("services", "homepage", "imprint", "purpose")
