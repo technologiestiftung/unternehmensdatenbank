@@ -222,6 +222,8 @@ safe. The same is true of column 3, which has **no** labelling worksheet yet.
   `name_frequency.common_words` counts company names, `common_email_domains` counts mapped
   businesses. The most common email domain here is `osnanet.de`, a local ISP no hand-written list
   would contain.
+- **`combined_discovery/observations.py` has no importer.** The live write path is
+  `import_combined_discovery.py`'s own SQL. Editing `observations.py` changes nothing.
 - Two more live in the industry section above, because that is where they bite: a **WZ code is not a
   technology field** (rule 1), and a **word naming a quality is not a word naming an industry**
   (rule 6).
@@ -234,11 +236,10 @@ applied. Flyway is a one-shot service under `--profile tools`; it does **not** r
 
 ## Utility scripts
 
-Six guards, all free — no API, no model, no database, no network. Run them after touching
+Seven guards, all free — no API, no model, no database, no network. Run them after touching
 `search_common.py`, `imprint_probe.py`, `url_discovery/imprint_extractor.py`, or anything in
-`combined_discovery/`. A `PostToolUse` hook in `.claude/settings.local.json` runs four automatically
-after an edit under `combined_discovery/` or `scripts/` — those three plus
-`check_ground_truth_columns.py` below.
+`combined_discovery/`. A `PostToolUse` hook in `.claude/settings.local.json` runs five automatically
+after an edit under `combined_discovery/` or `scripts/`.
 
 - `check_own_site_filter.py` · 21 real URLs guarding `is_own_site_candidate`
 - `check_imprint_owner_extraction.py` · 19 Impressum layouts guarding owner extraction
@@ -249,6 +250,7 @@ after an edit under `combined_discovery/` or `scripts/` — those three plus
 - `check_purpose_branch.py` · 154 checks on column 3: the seven outcomes stay disjoint, the website
   gate and WZ code cannot get in (asserted on the **syntax tree**, since the docstring discusses
   both), the floor keeps what it takes, and a failed model call never becomes `none_apply`
+- `check_osm_match.py` · guards `osm_snapshot`, used by combined discovery's `osm` stage
 - `replay_judge_gate.py` · re-runs the real gate over `results.jsonl`, failing if a change loses a
   discovery **or a demotion**
 
@@ -266,7 +268,7 @@ with the `*-report` subcommands and edit the frozen block **in the same commit**
   **through** `company_canonical_field_sources` — `candidate_url` is an alias for `website`, and
   grouping on the observation's own name splits Brave's 85 into 82 + 3.
 
-`ac_measurement.py` measures what a name and address alone yield — 29% verified websites, 15% owners
+`scripts/archive/ac_measurement.py` measures what a name and address alone yield — 29% verified websites, 15% owners
 — and adding the Handelsregister number makes it *worse* (21% vs 25%) by pulling results toward
 register aggregators ([results](docs/website-and-owner-discovery-results.md)).
 `prepare_company_import.py` converts a Northdata export, repairing rows whose quoted `Gegenstand`
