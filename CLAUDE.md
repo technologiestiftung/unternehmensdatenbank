@@ -191,9 +191,14 @@ safe. The same is true of column 3, which has **no** labelling worksheet yet.
 
 - **`website_url` is a view column, not a table column.** V9 dropped it from `companies`. Enriched
   fields live in `company_canonical_field_sources`, read through `public.v_companies_enriched`.
-- **The import already carries 3,283 websites and nothing reads them** — the `Status` mistake again,
-  one field over. Discovery found 1,109; **2,394 more sit in the import for companies it never found**.
-  V14's `northdata_export` holds the export whole and feeds nothing. Its `status` is English
+- **The import carries 3,283 websites, and `import_northdata_websites.py` is the only thing that
+  reads them.** For months nothing did — the `Status` mistake again, one field over. Discovery had
+  found 1,136; **2,375 more sat in the import for companies it never found**. That script writes them
+  as `website` observations at **priority 50, beating all five discovery sources**, so it also
+  replaces **184** canonical websites where the two disagree (137 of them `combined_discovery`, mean
+  confidence 0.95). `--dry-run` prints that list; undo is `UPDATE public.sources SET priority = 200
+  WHERE key = 'northdata_export'` plus one `pipeline_coordinator` run, because the resolver only
+  un-canonicalises a displaced observation and never deletes it. The export's `status` is English
   (`active`) where `register_status` is German (`aktiv`), and the website is at `extras[].items[]`
   `id='url'`, not a top-level field: [data-model](docs/data-model.md).
 - **53% of `companies` is `erloschen`** — dissolved. V13 promoted the register's `Status` into

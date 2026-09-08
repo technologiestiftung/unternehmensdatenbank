@@ -1328,6 +1328,153 @@ check_true(
 )
 
 # ---------------------------------------------------------------------------------------
+# DISCOVERY_SKIP_RESOLVED_WEBSITE lands on the work list, never on the sample
+#
+# The runner must not re-discover a website the resolver has already settled — that is what the flag
+# is for, and `check_purpose_branch.py` already guards its definition in `source_enrichment_common`.
+# What is guarded here is WHERE this script applies it, because there are two places it could go and
+# only one of them is right.
+#
+# `load_sample` feeds `run` and it also feeds `sample_rows`, which is what `report --limit N` scopes
+# with. Filter `SAMPLE_SQL` and every already-solved company silently falls out of the report as
+# well as out of the work — the published numbers stop being reproducible, and nothing fails to say
+# so. `{active_only}` is already in that query carrying exactly that hazard, documented at length; a
+# second one is not worth having. So the filter belongs on `pending` inside `run`.
+#
+# Asserted on the syntax tree rather than by running anything, for the same reason
+# `check_purpose_branch.py` does it: this is a claim about where a line of code is, and no amount of
+# calling `run()` would prove it without a database.
+import ast  # noqa: E402
+
+_runner_path = REPO_ROOT / "scripts" / "run_combined_discovery.py"
+_runner_src = _runner_path.read_text(encoding="utf-8")
+_runner_tree = ast.parse(_runner_src)
+
+_accessor = next(
+    (n for n in _runner_tree.body
+     if isinstance(n, ast.FunctionDef) and n.name == "skip_resolved_website"),
+    None,
+)
+check_true("run_combined_discovery defines skip_resolved_website()", _accessor is not None)
+
+if _accessor is not None:
+    # One definition of the flag. The accessor reads the constant out of the shared module rather
+    # than calling getenv itself, or the script and the DAGs drift to two env var names — the
+    # failure mode this indirection exists to prevent.
+    _imported = {
+        alias.name
+        for node in ast.walk(_accessor)
+        if isinstance(node, ast.ImportFrom) and node.module == "source_enrichment_common"
+        for alias in node.names
+    }
+    check("…and reads SKIP_RESOLVED_WEBSITE from source_enrichment_common",
+          "SKIP_RESOLVED_WEBSITE" in _imported, True)
+    check_true(
+        "…rather than reading the env var a second time",
+        not any(isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute)
+                and n.func.attr == "getenv" for n in ast.walk(_accessor)),
+    )
+
+_run = next(
+    (n for n in _runner_tree.body if isinstance(n, ast.FunctionDef) and n.name == "run"),
+    None,
+)
+check_true("run_combined_discovery defines run()", _run is not None)
+
+if _run is not None:
+    _called_in_run = {
+        n.func.id for n in ast.walk(_run)
+        if isinstance(n, ast.Call) and isinstance(n.func, ast.Name)
+    }
+    check("run() consults skip_resolved_website()",
+          "skip_resolved_website" in _called_in_run, True)
+    # The predicate it filters by has to be the canonical one the resolver settled, and
+    # `load_db_websites` is the function that already asks the view for exactly that. A second
+    # spelling of the same question here is how the two would drift.
+    check("…and asks load_db_websites which companies have one",
+          "load_db_websites" in _called_in_run, True)
+    # The second way a website is already known: sitting in the register export, unimported.
+    check("…and load_export_websites for the ones only the export knows",
+          "load_export_websites" in _called_in_run, True)
+
+# The export loader has to be its own function, reading its own table.
+_export_loader = next(
+    (n for n in _runner_tree.body
+     if isinstance(n, ast.FunctionDef) and n.name == "load_export_websites"),
+    None,
+)
+check_true("run_combined_discovery defines load_export_websites()", _export_loader is not None)
+
+if _export_loader is not None:
+    check("…and it reads northdata_export",
+          "northdata_export" in ast.get_source_segment(_runner_src, _export_loader), True)
+
+# The half that protects the REPORT. `load_db_websites` feeds `agreement()`, which fills the CSV's
+# `agrees_with_db` column — `db_blank` means the database has nothing. Fold the export into that
+# function and every report silently reclassifies those rows, changing published numbers to fix a
+# skip. The export belongs in its own loader, and this is the check that keeps it there.
+_db_loader = next(
+    (n for n in _runner_tree.body
+     if isinstance(n, ast.FunctionDef) and n.name == "load_db_websites"),
+    None,
+)
+check_true("run_combined_discovery still defines load_db_websites()", _db_loader is not None)
+
+if _db_loader is not None:
+    check("load_db_websites does NOT read northdata_export — the report must keep its meaning",
+          "northdata_export" in ast.get_source_segment(_runner_src, _db_loader), False)
+
+# ---------------------------------------------------------------------------------------
+# The shared fragment the six provider DAGs interpolate
+#
+# `check_purpose_branch.py` guards the fragment's env var and its canonical-table half. What is
+# guarded here is the export half, and above all the SHAPE of it: `northdata_export.company_id` is
+# nullable, so `NOT IN` against it evaluates to UNKNOWN for every row the instant the subquery
+# yields one NULL, and all six candidate queries return zero companies with nothing logged. The
+# `website IS NOT NULL` filter hides that today and would not hide it after an export matched by a
+# different key.
+_common_path = REPO_ROOT / "airflow" / "dags" / "source_enrichment_common.py"
+_common_tree = ast.parse(_common_path.read_text(encoding="utf-8"))
+_skip_fragment = next(
+    (n.value for n in _common_tree.body
+     if isinstance(n, ast.Assign)
+     and any(isinstance(t, ast.Name) and t.id == "_SKIP_RESOLVED_WEBSITE_SQL" for t in n.targets)),
+    None,
+)
+check_true("_SKIP_RESOLVED_WEBSITE_SQL is a conditional expression",
+           isinstance(_skip_fragment, ast.IfExp))
+
+if isinstance(_skip_fragment, ast.IfExp) and isinstance(_skip_fragment.body, ast.Constant):
+    _on = _skip_fragment.body.value
+    check("its on branch asks northdata_export too", "northdata_export" in _on, True)
+    check("…filtered to rows that actually have a website",
+          "website IS NOT NULL" in _on, True)
+    check("…via NOT EXISTS, twice", _on.count("NOT EXISTS"), 2)
+    # The one that matters. A nullable column behind NOT IN silently empties the whole query.
+    check("…and never NOT IN, which a nullable company_id turns into a total filter",
+          "NOT IN" in _on, False)
+    check("the off branch is still empty", _skip_fragment.orelse.value, "")
+
+# The other half, and the one that would be silent: the sample query must stay unfiltered.
+_sample_sql = next(
+    (n.value.value for n in _runner_tree.body
+     if isinstance(n, ast.Assign)
+     and any(isinstance(t, ast.Name) and t.id == "SAMPLE_SQL" for t in n.targets)
+     and isinstance(n.value, ast.Constant) and isinstance(n.value.value, str)),
+    None,
+)
+check_true("SAMPLE_SQL is a string constant", _sample_sql is not None)
+
+if _sample_sql is not None:
+    check("SAMPLE_SQL does not filter on the canonical table",
+          "company_canonical_field_sources" in _sample_sql, False)
+    check("…nor on the observations table",
+          "company_field_observations" in _sample_sql, False)
+    # It still has to carry the active-only fragment, which is a different decision and belongs
+    # there: it scopes the measurement, and its consequences for `report` are documented on it.
+    check("…but still carries {active_only}", "{active_only}" in _sample_sql, True)
+
+# ---------------------------------------------------------------------------------------
 
 if failures:
     print(f"\n{len(failures)} FAILED:\n")

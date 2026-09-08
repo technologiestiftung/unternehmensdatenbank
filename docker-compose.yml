@@ -9,6 +9,38 @@ x-airflow-common: &airflow-common
     AIRFLOW__CORE__EXECUTOR: LocalExecutor
     AIRFLOW__CORE__AUTH_MANAGER: airflow.providers.fab.auth_manager.fab_auth_manager.FabAuthManager
     AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://${AIRFLOW_DB_USER:-airflow}:${AIRFLOW_DB_PASSWORD:-airflow}@postgres:5432/${AIRFLOW_DB_NAME:-airflow}
+    # Airflow's defaults are 5 + 10 overflow = 15 connections, and 15 is not enough here. The
+    # api-server's DAG-run detail endpoint leaves a transaction open per request: measured
+    # 2026-09-07, 15 sessions sat `idle in transaction` on `SELECT task_instance…` and
+    # `SELECT dag_version…`, the oldest for 23 minutes, each waiting on ClientRead. Once all 15
+    # are held every request blocks for the 30 s pool timeout and the UI stops answering — and
+    # task heartbeats are PUTs to that same server, so three timeouts in a row make the supervisor
+    # kill a running task. That is what ended two brave_search_discovery runs, at company 261 and
+    # at company 70, with no traceback in either task log.
+    #
+    # 20 + 40 = 60 slots is four times the headroom, so watching a run page costs minutes instead
+    # of killing it. It BUYS TIME and does not fix the leak, so it is only half of the change.
+    #
+    # The other half is server-side and is NOT in this file, because Postgres owns it — applied by
+    # hand on 2026-09-07 and recorded here because that is the one place somebody will look:
+    #
+    #     ALTER ROLE airflow SET idle_in_transaction_session_timeout = '120s';
+    #
+    # Postgres then reaps an abandoned transaction itself rather than waiting for Airflow to close
+    # it, so the pool recovers with no restart. It lives in `pg_roles.rolconfig`, survives a
+    # container rebuild, and applies only to NEW sessions — bounce the api-server after changing
+    # it. It is scoped to the `airflow` role, so the `app` role this project's own DAGs use is
+    # untouched and still has no timeout. Undo with `ALTER ROLE airflow RESET
+    # idle_in_transaction_session_timeout`. A fresh Postgres volume loses it.
+    #
+    # PRE_PING costs one `SELECT 1` per checkout and is what makes a reaped connection recover
+    # quietly rather than surfacing as one error to whoever asked next.
+    AIRFLOW__DATABASE__SQL_ALCHEMY_POOL_SIZE: ${AIRFLOW__DATABASE__SQL_ALCHEMY_POOL_SIZE:-20}
+    AIRFLOW__DATABASE__SQL_ALCHEMY_MAX_OVERFLOW: ${AIRFLOW__DATABASE__SQL_ALCHEMY_MAX_OVERFLOW:-40}
+    # No inner quotes on the default: `${VAR:-"True"}` interpolates the quote characters INTO the
+    # value, giving Airflow the 6-character string `"True"` instead of a boolean, and
+    # `getboolean` does not accept it.
+    AIRFLOW__DATABASE__SQL_ALCHEMY_POOL_PRE_PING: ${AIRFLOW__DATABASE__SQL_ALCHEMY_POOL_PRE_PING:-True}
     AIRFLOW__CORE__FERNET_KEY: ${AIRFLOW__CORE__FERNET_KEY}
     AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION: "true"
     AIRFLOW__CORE__LOAD_EXAMPLES: "false"
