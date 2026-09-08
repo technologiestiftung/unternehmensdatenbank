@@ -131,6 +131,20 @@ LIMIT %s
 _WRITE_LOCK = threading.Lock()
 
 
+#: What a labelling worksheet is written with. **A semicolon, because these files exist to be
+#: double-clicked in Excel on a German locale** — and there, a comma-delimited CSV opens with all 25
+#: columns in column A. Nobody labels 110 rows like that.
+#:
+#: This was comma-delimited on the reasoning that a comma is "the portable form". It is, and it was
+#: the wrong trade: the only consumer is `read_label_csv`, which sniffs either delimiter, and the only
+#: human is on a German locale. Portability was being bought with the one thing that mattered.
+#:
+#: Quoting is `csv`'s job either way, so a `purpose_text` containing a semicolon — and German
+#: register text does — survives the round trip. Overridable for anyone on an English locale, where
+#: Excel wants the comma back.
+LABEL_CSV_DELIMITER = os.getenv("COMBINED_LABEL_CSV_DELIMITER", ";")
+
+
 def read_label_csv(path: Path) -> list[dict[str, str]]:
     """Read a hand-labelling worksheet back, whatever Excel did to it on the way.
 
@@ -142,8 +156,11 @@ def read_label_csv(path: Path) -> list[dict[str, str]]:
 
     So the delimiter is sniffed from the header rather than assumed, and only from these two
     candidates — a real `csv` reader still handles quoting, so a company name containing a comma
-    survives either way. Writing stays comma-delimited, because that is the portable form; tolerating
-    the round trip on read is what makes an Excel visit harmless.
+    survives either way. Reading is therefore delimiter-agnostic in both directions, which is what
+    makes an Excel visit harmless.
+
+    **Writing uses `LABEL_CSV_DELIMITER`, which is `;`** — see the note there. These files exist to
+    be opened in Excel on a German locale, and a comma-delimited one lands entirely in column A.
     """
     text = path.read_text(encoding="utf-8-sig")
     header = text.splitlines()[0] if text else ""
@@ -1221,7 +1238,10 @@ def labels(limit: int | None = None, per_bucket: int = 20) -> None:
 
     LABELS_PATH.parent.mkdir(parents=True, exist_ok=True)
     with LABELS_PATH.open("w", encoding="utf-8-sig", newline="") as handle:
-        writer = csv.DictWriter(handle, fieldnames=LABEL_COLUMNS, extrasaction="ignore")
+        # `LABEL_CSV_DELIMITER` for the same reason as the other two worksheets: this one is opened
+        # in Excel to be filled in, and a comma file lands entirely in column A on a German locale.
+        writer = csv.DictWriter(handle, fieldnames=LABEL_COLUMNS, extrasaction="ignore",
+                                delimiter=LABEL_CSV_DELIMITER)
         writer.writeheader()
         for entry in out:
             writer.writerow(entry)
@@ -3394,7 +3414,8 @@ def branch_labels(per_bucket: int = 10) -> None:
 
     BRANCH_LABELS_PATH.parent.mkdir(parents=True, exist_ok=True)
     with BRANCH_LABELS_PATH.open("w", encoding="utf-8-sig", newline="") as handle:
-        writer = csv.DictWriter(handle, fieldnames=BRANCH_LABEL_COLUMNS, extrasaction="ignore")
+        writer = csv.DictWriter(handle, fieldnames=BRANCH_LABEL_COLUMNS, extrasaction="ignore",
+                                delimiter=LABEL_CSV_DELIMITER)
         writer.writeheader()
         writer.writerows(out)
 
@@ -3710,9 +3731,11 @@ def purpose_labels(per_bucket: int | None = None) -> None:
         log.info("%-16s %d rows (%d available)", bucket, len(keep), len(entries))
 
     PURPOSE_LABELS_PATH.parent.mkdir(parents=True, exist_ok=True)
-    # utf-8-sig: the BOM is what makes Excel show `Osnabrück` instead of `OsnabrÃ¼ck`.
+    # Two separate things Excel needs, and both are needed: `utf-8-sig` for the BOM, or `Osnabrück`
+    # renders as `OsnabrÃ¼ck`; and the semicolon delimiter, or all 25 columns land in column A.
     with PURPOSE_LABELS_PATH.open("w", encoding="utf-8-sig", newline="") as handle:
-        writer = csv.DictWriter(handle, fieldnames=PURPOSE_LABEL_COLUMNS, extrasaction="ignore")
+        writer = csv.DictWriter(handle, fieldnames=PURPOSE_LABEL_COLUMNS, extrasaction="ignore",
+                                delimiter=LABEL_CSV_DELIMITER)
         writer.writeheader()
         writer.writerows(out)
 

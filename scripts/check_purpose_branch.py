@@ -756,6 +756,16 @@ def main() -> int:
           ("model_77", "none_apply"), True)
     check("the draw is about 110 rows", sum(runner.PURPOSE_LABEL_DRAW.values()), 110)
 
+    # The worksheet is written to be opened in Excel on a German locale. A comma-delimited file lands
+    # all 25 columns in column A there, which is not a cosmetic problem — nobody labels 110 rows that
+    # way. Reading stays delimiter-agnostic, so the round trip survives either choice.
+    check("worksheets are written semicolon-delimited for Excel", runner.LABEL_CSV_DELIMITER, ";")
+    writer_source = inspect.getsource(runner.purpose_labels)
+    check("…and the purpose writer uses the constant, not a literal",
+          "delimiter=LABEL_CSV_DELIMITER" in writer_source, True)
+    # The BOM is the other half, and needed for both: without it `Osnabrück` renders `OsnabrÃ¼ck`.
+    check("…and writes a BOM so umlauts survive", "utf-8-sig" in writer_source, True)
+
     # `label_staleness` and `_stale_note` are column 1's, reused. They take the answer column's name
     # because the two worksheets do not share one — reading the wrong key compares "" against every
     # real field name, so EVERY label goes stale on the second run and leaves the precision count.
