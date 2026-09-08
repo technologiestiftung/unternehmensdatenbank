@@ -236,8 +236,9 @@ applied. Flyway is a one-shot service under `--profile tools`; it does **not** r
 
 Six guards, all free — no API, no model, no database, no network. Run them after touching
 `search_common.py`, `imprint_probe.py`, `url_discovery/imprint_extractor.py`, or anything in
-`combined_discovery/`. A `PostToolUse` hook in `.claude/settings.local.json` runs three automatically
-after an edit under `combined_discovery/` or `scripts/`.
+`combined_discovery/`. A `PostToolUse` hook in `.claude/settings.local.json` runs four automatically
+after an edit under `combined_discovery/` or `scripts/` — those three plus
+`check_ground_truth_columns.py` below.
 
 - `check_own_site_filter.py` · 21 real URLs guarding `is_own_site_candidate`
 - `check_imprint_owner_extraction.py` · 19 Impressum layouts guarding owner extraction
@@ -250,6 +251,20 @@ after an edit under `combined_discovery/` or `scripts/`.
   both), the floor keeps what it takes, and a failed model call never becomes `none_apply`
 - `replay_judge_gate.py` · re-runs the real gate over `results.jsonl`, failing if a change loses a
   discovery **or a demotion**
+
+Two more guards check the **numbers those rules last produced**. Both assert counts and bucket sums
+only — **never classification correctness**, since not one row of the three columns is hand-labelled.
+A failure means "these numbers moved, find out why". Change a weight on purpose and you re-measure
+with the `*-report` subcommands and edit the frozen block **in the same commit**.
+
+- `check_ground_truth_columns.py` · the buckets in `branches.jsonl` and `purpose_branches.jsonl` —
+  five outcomes and seven, each summing to 14,443, the set closed, no column name shared, every hand
+  label a value `LABEL_VALUES` knows. Free, 1.6 s, in the hook. Also the only thing that catches
+  `branches.jsonl` going **stale**: `run` appends to `results.jsonl`, `classify` reads a snapshot.
+- `check_ground_truth_discovery.py` · canonical websites per source (2,816 / 551 / 85 / 53 / 36 / 1
+  = 3,542), the priorities, four resolver invariants. **Needs Docker**, so not in the hook. Count
+  **through** `company_canonical_field_sources` — `candidate_url` is an alias for `website`, and
+  grouping on the observation's own name splits Brave's 85 into 82 + 3.
 
 `ac_measurement.py` measures what a name and address alone yield — 29% verified websites, 15% owners
 — and adding the Handelsregister number makes it *worse* (21% vs 25%) by pulling results toward
