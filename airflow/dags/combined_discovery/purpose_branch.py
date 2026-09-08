@@ -67,7 +67,7 @@ from __future__ import annotations
 
 import logging
 import os
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field, replace
 
 from . import branch_classifier as bc
@@ -155,7 +155,14 @@ class PurposeAssignment:
     runner_up: str | None = None
     runner_up_score: float = 0.0
     #: Every branch that scored anything, best first. Truncated by the caller when written out.
+    #: **Keyword weights only.** A model's ordering goes in `model_ranked`, never here — see there.
     ranked: list[tuple[str, float]] = field(default_factory=list)
+    #: The fields a model put in order, best first, and **nothing else**. Names only: a model has no
+    #: calibrated score, and inventing one would put a plausible decimal next to `ranked`'s measured
+    #: keyword-weight sums (7.487) with nothing downstream able to tell them apart. Kept in a second
+    #: field rather than folded into `ranked` with a zero score for exactly that reason — the two
+    #: kinds of ordering are different evidence and stay different data.
+    model_ranked: list[str] = field(default_factory=list)
     #: The keywords that fired. Maps keyword -> where it was found, always "purpose" here, kept as a
     #: dict so the row has the same shape as the Technologiefeld's and the two can be diffed.
     keywords: dict[str, str] = field(default_factory=dict)
@@ -314,6 +321,7 @@ def apply_model_verdict(
     reason: str,
     model_name: str,
     tier: str,
+    model_ranked: Sequence[str] = (),
 ) -> PurposeAssignment:
     """Fold a model's answer into an assignment. Pure, and the only place a model may change an outcome.
 
@@ -340,11 +348,19 @@ def apply_model_verdict(
 
     # `replace` rather than mutation, so a caller cannot accidentally keep a reference to a row that
     # has since changed outcome underneath it.
-    updated = replace(assignment, model_name=model_name, llm_reason=reason)
+    #
+    # `model_ranked` is recorded on EVERY path that got a usable answer, including the abstentions:
+    # a model that ranked three fields and then said `keine` has told us both things, and the ranking
+    # is what makes "was the right answer at rank 2" answerable for a row that ended up NONE.
+    # A refusal is the one exception — there was no answer, so there is no ordering.
+    updated = replace(
+        assignment, model_name=model_name, llm_reason=reason, model_ranked=list(model_ranked),
+    )
 
     if refused:
-        # The row keeps whatever the keywords said. Nothing about the company has been learned.
-        return replace(updated, llm_refused=refused)
+        # The row keeps whatever the keywords said. Nothing about the company has been learned, and
+        # that includes the ordering: a failed call leaves `model_ranked` empty rather than partial.
+        return replace(updated, llm_refused=refused, model_ranked=[])
     if branch:
         return replace(
             updated,
@@ -360,3 +376,61 @@ def apply_model_verdict(
     # No field, no abstention and no stated reason. That should be unreachable — the verdict types
     # are exhaustive — so record it as a failure rather than inventing an interpretation.
     return replace(updated, llm_refused="no answer and no refusal")
+
+
+#: How a candidate's score was arrived at. Two values, and the distinction is the whole point of the
+#: field: `keyword_weight` means a number was MEASURED (summed inverse-document-frequency weights
+#: over the corpus, e.g. 7.487), `model_rank` means a model put the fields in an order and has no
+#: number at all.
+BASIS_KEYWORD = "keyword_weight"
+BASIS_MODEL = "model_rank"
+
+#: How many candidates a row may carry. Three, because the question the worksheet asks is "was the
+#: right answer at rank 2 or 3" — beyond that a human is not choosing, they are reading a list.
+CANDIDATE_LIMIT = 3
+
+
+def purpose_candidates(
+    assignment: PurposeAssignment, limit: int = CANDIDATE_LIMIT
+) -> list[dict[str, object]]:
+    """The top candidates for one row, best first, as `{rank, field, score, basis}`.
+
+    Pure, and the only place this shape is built, so `scripts/check_purpose_branch.py` can call it
+    rather than restate it — the same arrangement as `verdict_from_answer` and `label_staleness`.
+
+    **A score is present only when one was measured.** `ranked` holds keyword weights, which are real
+    numbers over a real corpus; `model_ranked` holds an ordering a model produced, and for those
+    `score` is `None` with `basis` saying so. Folding the two into one list with a zero or an invented
+    decimal for the model's entries was the alternative, and it would put `0.87` in the same column as
+    `7.487` — different scales, different meanings, and nothing downstream able to tell them apart.
+    That is the failure mode `confidence.py` exists to prevent, one column over.
+
+    Which source wins when a row has both: **the model's.** A model is only ever asked about a row the
+    keywords could not settle (`torn`) or could not touch (`no_keyword`), so where an ordering exists
+    it is the later and better-informed judgement. The keyword weights stay in `ranked` and are not
+    lost.
+
+    A model answer from before the ranked prompt existed has no ordering, but it did name a field —
+    and that field *is* rank 1. It gets a one-entry list rather than an empty one, because "the model
+    chose Tourismus and we do not know its second choice" is a different fact from "nothing was
+    proposed", and an empty list would make 553 answered rows indistinguishable from 5,196
+    never-asked ones in the worksheet.
+
+    Returns `[]` only when nothing was proposed at all: no keyword scored, no model ranked, and no
+    model chose. That is 12,680 of the 14,443, and it is the honest answer both for a company whose
+    register purpose named nothing and for one whose purpose was too short to read.
+    """
+    if assignment.model_ranked:
+        return [
+            {"rank": index, "field": field_name, "score": None, "basis": BASIS_MODEL}
+            for index, field_name in enumerate(assignment.model_ranked[:limit], start=1)
+        ]
+    if assignment.ranked:
+        return [
+            {"rank": index, "field": field_name, "score": score, "basis": BASIS_KEYWORD}
+            for index, (field_name, score) in enumerate(assignment.ranked[:limit], start=1)
+        ]
+    # A pre-ranking model answer: one field, chosen by a model, so `model_rank` and no score.
+    if assignment.branch and assignment.decided_by in MODEL_DECIDED_BY:
+        return [{"rank": 1, "field": assignment.branch, "score": None, "basis": BASIS_MODEL}]
+    return []

@@ -436,6 +436,23 @@ def main() -> int:
           "purpose-llm-tiebreak" == "purpose-llm-direct", False)
     check("…and neither is the Technologiefeld's namespace",
           {"purpose-llm-tiebreak", "purpose-llm-direct"} & {"branch-llm", "branch-vocab"}, set())
+
+    # The ranked Tier B prompt MUST live in its own namespace. `purpose_cache_key` is built from
+    # taxonomy_version|model_name|company_id|options and does not include the prompt shape, so a
+    # ranked ask against the single-answer namespace is served the old one-answer verdicts and writes
+    # them as though they were ranked — a re-run that completes and reports success on stale data.
+    tier_b = runner.PURPOSE_TIER_B_NAMESPACES
+    check("tier B asks in its own ranked namespace", tier_b[0], "purpose-llm-direct-rank3")
+    check("…which differs from the single-answer one", tier_b[0] == "purpose-llm-direct", False)
+    # And it must still READ the old one. Moving namespace empties it, and this file is rewritten
+    # from scratch every run: the first free re-run after the move dropped 1,285 paid-for answers
+    # (553 fields, 732 abstentions) and reported them as `no_keyword`, cache still full.
+    check("…and the old namespace is still read", "purpose-llm-direct" in tier_b, True)
+    check("…newest first, so a NEW call never writes to history", tier_b[0] != "purpose-llm-direct", True)
+    check("tier A reads its own namespace only",
+          runner.PURPOSE_TIER_A_NAMESPACES, ("purpose-llm-tiebreak",))
+    check("the two tiers share no namespace",
+          set(runner.PURPOSE_TIER_A_NAMESPACES) & set(tier_b), set())
     check("choose_for_purpose defaults to the tie-break namespace",
           inspect.signature(branch_llm.choose_for_purpose).parameters["namespace"].default,
           "purpose-llm-tiebreak")
@@ -574,11 +591,169 @@ def main() -> int:
               "register_status=" in source, False)
 
     # -----------------------------------------------------------------------------------
+    section("the ranked Tier B answer: three field names, no invented scores")
+    # IMPORTED, never restated — same rule this repo applies to `verdict_from_answer`. A guard that
+    # rebuilds the rule it is checking agrees with itself whatever the real code does.
+    ranked_from = branch_llm.ranked_purpose_verdict_from_answer
+    options = ["Handel", "Logistik", "Gastgewerbe", "Medizintechnik"]
+
+    clean = ranked_from(["Logistik", "Handel", "Gastgewerbe"], "weil", options)
+    check("three on-list names -> three ranks", clean.ranked,
+          ["Logistik", "Handel", "Gastgewerbe"])
+    check("…and rank 1 is the branch", clean.branch, "Logistik")
+
+    # The important one. A model that gets rank 1 right and then drifts has still got one right, and
+    # discarding the row would report "no answer" for a row that was answered.
+    drifted = ranked_from(["Logistik", "Immersive Technologien", "Handel"], "weil", options)
+    check("an off-list rank 2 leaves rank 1 standing", drifted.branch, "Logistik")
+    check("…and is dropped rather than kept", drifted.ranked, ["Logistik", "Handel"])
+    check("…and the row is not refused", bool(drifted.refused), False)
+
+    # A model told to name three fields repeats its favourite to fill the slots. Three copies of one
+    # answer is one answer, and counting it as three would read padding as confidence.
+    repeated = ranked_from(["Handel", "handel", "HANDEL"], "weil", options)
+    check("duplicates collapse to one", repeated.ranked, ["Handel"])
+
+    check("list punctuation is stripped, as in the single-answer parser",
+          ranked_from(["- Logistik", "* Handel"], "weil", options).ranked, ["Logistik", "Handel"])
+    check("the TAXONOMY's spelling is returned, never the model's",
+          ranked_from(["logistik"], "weil", options).ranked, ["Logistik"])
+
+    # An abstention is answered INSTEAD of a list. Checked across every entry, so a hedge like
+    # ["Handel", "keine"] is read as wanting out rather than as a clean pick of Handel.
+    for label, answer in (("bare", "keine"), ("wrapped in a list", ["keine"]),
+                          ("hedged after a field", ["Handel", "keine"])):
+        verdict = ranked_from(answer, "weil", options)
+        check(f"keine {label} -> rejected_all", verdict.rejected_all, True)
+        check(f"…{label} carries no field", verdict.branch, None)
+        check(f"…{label} is not a refusal", bool(verdict.refused), False)
+    unsure = ranked_from(["unsicher"], "weil", options)
+    check("unsicher -> unsure, not rejected_all", (unsure.unsure, unsure.rejected_all), (True, False))
+
+    # Nothing usable is a REFUSAL, never an abstention: the row must keep what the keywords said.
+    for label, answer in (("all off-list", ["Blockchain", "Quantum"]), ("an empty list", []),
+                          ("None", None), ("a number", 7)):
+        verdict = ranked_from(answer, "weil", options)
+        check(f"{label} -> refused", bool(verdict.refused), True)
+        check(f"…{label} is not rejected_all", verdict.rejected_all, False)
+        check(f"…{label} is not unsure", verdict.unsure, False)
+        check(f"…{label} names no field", verdict.branch, None)
+
+    # -----------------------------------------------------------------------------------
+    section("candidates: a score only where one was measured")
+    # The invariant that stops an invented number reappearing. `keyword_weight` means a real summed
+    # weight; `model_rank` means a model produced an ordering and there is NO number.
+    keyword_row = pb.PurposeAssignment(
+        outcome=pb.ASSIGNED_KEYWORDS, branch="Handel", decided_by=pb.DECIDED_BY_KEYWORDS,
+        ranked=[("Handel", 7.487), ("Logistik", 2.1)],
+    )
+    model_row = pb.PurposeAssignment(
+        outcome=pb.ASSIGNED_MODEL_77, branch="Tourismus", decided_by=pb.DECIDED_BY_MODEL_DIRECT,
+        model_ranked=["Tourismus", "Gastgewerbe", "Handel", "Logistik"],
+    )
+    kw_cands = pb.purpose_candidates(keyword_row)
+    md_cands = pb.purpose_candidates(model_row)
+
+    check("keyword candidates carry a measured score",
+          [c["score"] for c in kw_cands], [7.487, 2.1])
+    check("…and say so", {c["basis"] for c in kw_cands}, {pb.BASIS_KEYWORD})
+    check("model candidates carry NO score",
+          {c["score"] for c in md_cands}, {None})
+    check("…and say so", {c["basis"] for c in md_cands}, {pb.BASIS_MODEL})
+    check("never more than three", len(md_cands), 3)
+    check("ranks are 1..n with no gaps", [c["rank"] for c in md_cands], [1, 2, 3])
+    for cands in (kw_cands, md_cands):
+        for entry in cands:
+            check(f"basis {entry['basis']} <-> score presence",
+                  (entry["basis"] == pb.BASIS_MODEL), entry["score"] is None)
+
+    # A model ordering outranks keyword weights: a model is only asked about a row the keywords could
+    # not settle, so where both exist the model's is the later judgement.
+    both = pb.PurposeAssignment(
+        outcome=pb.ASSIGNED_MODEL_3WAY, decided_by=pb.DECIDED_BY_MODEL_TIEBREAK,
+        ranked=[("Handel", 5.0)], model_ranked=["Logistik", "Handel"],
+    )
+    check("a model ordering wins over keyword weights",
+          [c["field"] for c in pb.purpose_candidates(both)], ["Logistik", "Handel"])
+
+    # A pre-ranking model answer still named a field, and that field IS rank 1. An empty list would
+    # make 553 answered rows indistinguishable from 5,196 never-asked ones in the worksheet.
+    legacy = pb.PurposeAssignment(
+        outcome=pb.ASSIGNED_MODEL_77, branch="Tourismus", decided_by=pb.DECIDED_BY_MODEL_DIRECT,
+    )
+    check("a legacy model answer is one model_rank candidate",
+          pb.purpose_candidates(legacy),
+          [{"rank": 1, "field": "Tourismus", "score": None, "basis": pb.BASIS_MODEL}])
+    check("a row with nothing proposed gets an empty list",
+          pb.purpose_candidates(pb.PurposeAssignment(outcome=pb.NO_KEYWORD)), [])
+    # A keyword row must never be relabelled as a model one by the fallback above.
+    check("the fallback needs a MODEL decider",
+          pb.purpose_candidates(pb.PurposeAssignment(
+              outcome=pb.ASSIGNED_KEYWORDS, branch="Handel",
+              decided_by=pb.DECIDED_BY_KEYWORDS)), [])
+
+    # -----------------------------------------------------------------------------------
+    section("column 3's labelling worksheet")
+    # Its own file. Sharing column 1's would mean a label for "what does it work in" counted as an
+    # answer to "what was it set up to do".
+    check("the worksheet is its own file",
+          runner.PURPOSE_LABELS_PATH.name, "purpose_labels_todo.csv")
+    check("…and is not column 1's", runner.PURPOSE_LABELS_PATH == runner.BRANCH_LABELS_PATH, False)
+
+    # The two columns that make labelling possible at all: the register's words, and the model's
+    # stated reason for what it did with them.
+    for column in ("purpose_text", "llm_reason"):
+        check(f"the worksheet has a column for {column}",
+              column in runner.PURPOSE_LABEL_COLUMNS, True)
+    for column in ("cand1_field", "cand2_field", "cand3_field", "cand_basis", "label", "stale"):
+        check(f"…and for {column}", column in runner.PURPOSE_LABEL_COLUMNS, True)
+    # `technologiefeld` here would mean the two worksheets had been merged.
+    check("the worksheet does not carry column 1's answer",
+          "technologiefeld" in runner.PURPOSE_LABEL_COLUMNS, False)
+
+    # The buckets must cover every outcome. `unsure` has no rows today and is the one most likely to
+    # be forgotten, which is exactly why it is checked: a dropped outcome is a silently smaller
+    # worksheet, and the seven outcomes are guaranteed to sum to the table.
+    fake = [{"outcome": outcome, "company_id": f"id-{index}"}
+            for index, outcome in enumerate(sorted(pb.ALL_OUTCOMES))]
+    bucketed = runner.purpose_label_buckets(fake)
+    placed = sum(len(rows_in) for rows_in in bucketed.values())
+    check("every outcome lands in a bucket", placed, len(fake))
+    check("the buckets are exactly the drawn ones",
+          sorted(bucketed), sorted(runner.PURPOSE_LABEL_DRAW))
+    check("unsure is not silently dropped",
+          any(r["outcome"] == pb.UNSURE for rows_in in bucketed.values() for r in rows_in), True)
+    # The draw is weighted toward the two buckets the Tier B decision rests on.
+    check("model_77 and none_apply get the biggest draw",
+          max(runner.PURPOSE_LABEL_DRAW, key=runner.PURPOSE_LABEL_DRAW.get) in
+          ("model_77", "none_apply"), True)
+    check("the draw is about 110 rows", sum(runner.PURPOSE_LABEL_DRAW.values()), 110)
+
+    # `label_staleness` and `_stale_note` are column 1's, reused. They take the answer column's name
+    # because the two worksheets do not share one — reading the wrong key compares "" against every
+    # real field name, so EVERY label goes stale on the second run and leaves the precision count.
+    was = {"bucket": "keyword_decided", "purpose_field": "Handel", "label": "yes", "stale": ""}
+    check("an unchanged purpose row is not stale",
+          runner.label_staleness(was, "keyword_decided", "Handel", field_key="purpose_field"),
+          (False, False))
+    check("a changed purpose_field is stale",
+          runner.label_staleness(was, "keyword_decided", "Logistik", field_key="purpose_field"),
+          (True, False))
+    check("reading the wrong key would flag everything (the bug this prevents)",
+          runner.label_staleness(was, "keyword_decided", "Handel")[0], True)
+    # The trail must name the field, and must not grow on a second run.
+    note = runner._stale_note(dict(was), field_key="purpose_field")
+    check("the trail names the field it was labelled against", "Handel" in note, True)
+    check("…and does not stack on a re-run",
+          runner._stale_note(dict(was, notes=note), field_key="purpose_field").count("[labelled "), 1)
+
+    # -----------------------------------------------------------------------------------
     section("every subcommand has a dispatch branch of its own")
     # The dispatch chain ends `else: write_csv(args.limit)`. A subcommand registered without its own
     # branch silently runs write_csv and looks like it worked.
     main_source = inspect.getsource(runner.main)
-    for command in ("classify-purpose", "classify-purpose-report"):
+    for command in ("classify-purpose", "classify-purpose-report",
+                    "classify-purpose-labels", "classify-purpose-labels-report"):
         check(f"{command!r} is registered", f'"{command}"' in main_source, True)
         check(f"{command!r} has an elif branch",
               f'args.command == "{command}"' in main_source, True)
