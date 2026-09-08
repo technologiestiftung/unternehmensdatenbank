@@ -4,7 +4,7 @@ Guidance for Claude Code (claude.ai/code) working in this repository.
 
 ## Where the detail lives
 
-**This file is a map and stays under 200 lines.** It holds only what has cost somebody real time
+**This file is a map and aims to stay under 300 lines.** It holds only what has cost somebody real time
 when they got it wrong. When a section wants to grow, the material goes to the repo docs or the
 vault and this file keeps the one-line rule plus the link.
 
@@ -107,7 +107,7 @@ python scripts/run_combined_discovery.py run --limit 1000 --stages url,osm,judge
 python scripts/run_combined_discovery.py report --limit 1000   # then: csv | labels | labels-report
 ```
 
-**902 websites** over the full table, 842 of them `high`. Read
+**940 websites** over the full table, 885 of them `high`. Read
 [combined-discovery-verification](docs/combined-discovery-verification.md) before touching
 `confidence.py`, the judge gate, or anything that reads a page. Three rules that keep being broken:
 
@@ -127,7 +127,7 @@ Ollama runs native on Windows with `OLLAMA_IGPU_ENABLE=1`, **74× faster** than 
 | the question | what field does it **work in**? | what is it **registered as**? | what was it **set up to do**? |
 | from | words the company published | its official WZ code | `business_purpose`, the register |
 | values | one of Berlin's 77, or `NONE` | 76 divisions in 20 sections | one of the same 77, or `NONE` |
-| filled for | **489** — 54% of the 902 with a website | **8,483** (58.7%) | **610** — 8.5% of the 7,141 usable purposes |
+| filled for | **381** — 40.5% of the 940 with a website | **8,483** (58.7%) | **610** — 8.5% of the 7,141 usable purposes |
 | requires | **a website**; no site, no field | nothing but the code | a purpose over 40 chars |
 | judgement | keyword weights, thresholds | **none** — a lookup | the same weights, plus a 3-way tie-break |
 | file | `branches.jsonl` | (same file) | `purpose_branches.jsonl` |
@@ -151,12 +151,12 @@ python scripts/run_combined_discovery.py classify-purpose-report
    a field nothing they published supported, and flattened 22 sections and 87 divisions to do it.
    `classify()` has **no WZ parameter at all**, and the guard fails if one reappears.
 2. **A Technologiefeld requires a website.** A register purpose says what a company is *permitted* to
-   do and much of it is boilerplate; a live website is evidence it trades. Price: **909 → 346**, 563
+   do and much of it is boilerplate; a live website is evidence it trades. Price: **938 → 381**, 557
    withheld and **kept** in `withheld_branch`, never deleted. `has_website` defaults to `False`.
-3. **`NONE` is normal, with four reasons kept apart**: `no_website` 563, `torn` 129, `no_keyword`
-   6,558, `no_text` 6,704. **Never add two together.** And `assigned` (489) does not mean the model
-   assigned it — `outcome` says whether there is a field, `decided_by` says who: keywords 346,
-   model 143.
+3. **`NONE` is normal, with four reasons kept apart**: `no_website` 557, `torn` 282, `no_keyword`
+   6,531, `no_text` 6,692. **Never add two together.** And `assigned` (381) does not mean the model
+   assigned it — `outcome` says whether there is a field, `decided_by` says who: keywords 381,
+   model 0.
 4. **Division = `wz_code[:2]`**, section = the letter above it, from `wz_titles.yaml` — 2,008 codes,
    **WZ 2025**. `70.10.4` and `62.10.9` do not exist in WZ 2008, so a 2008 table mismatches silently.
 5. **Never match a keyword inside a German compound.** Allowing it made Defence Tech the biggest
@@ -167,8 +167,10 @@ python scripts/run_combined_discovery.py classify-purpose-report
    Osnabrück: `clubs` scored just as badly here and was kept, because in Berlin a Club is a venue.
 7. **Keywords decide; the model only breaks ties, from three options.** Run once, 2026-08-25: 172
    rows, 29 min, **143 answered, 26 refused, 3 invented a field name** and were discarded by the
-   off-list check. It can never create a field from nothing — only convert `torn` → `assigned` — so it
-   reaches none of the 6,558 `no_keyword` ones. `think` stays off: with thinking on it spends the whole
+   off-list check. **None of that is in the current file**: `classify` was re-run without `--llm` on
+   2026-09-08, so `llm_branch` is empty on all 14,443 rows and `decided_by` is `keywords` for all
+   381. It can never create a field from nothing — only convert `torn` → `assigned` — so it
+   reaches none of the 6,531 `no_keyword` ones. `think` stays off: with thinking on it spends the whole
    120-token budget reasoning and returns nothing. The 26 refusals are the best list of bad keywords
    we have.
 8. **`classify` makes zero web requests**, two minutes over 14,443 companies — which is what makes
@@ -181,11 +183,12 @@ python scripts/run_combined_discovery.py classify-purpose-report
    in `withheld_by_floor`, `PURPOSE_MIN_CHARS` is the knob. Numbers:
    [purpose-classification](docs/purpose-classification.md).
 
-Not known: **whether any of the 489 are right** — no row is hand-checked, though the model's
+Not known: **whether any of the 381 are right** — no row is hand-checked, though the model's
 `llm_reason` per row is a cheap proxy and reads well. `classify-labels` writes a
 50-row worksheet in six buckets; only `classify-labels-report` reports precision. **Excel saves that
 worksheet with semicolons** on a German locale; the reader sniffs the delimiter, so a round trip is
-safe. The same is true of column 3, which has **no** labelling worksheet yet.
+safe. By contrast column 3 has a labelling worksheet with 50 labels (41 yes / 8 no / 1 fixed
+nein→no). No row has been verified as a ground-truth baseline.
 
 ## Facts that have misled people repeatedly
 
@@ -203,8 +206,9 @@ safe. The same is true of column 3, which has **no** labelling worksheet yet.
   `id='url'`, not a top-level field: [data-model](docs/data-model.md).
 - **53% of `companies` is `erloschen`** — dissolved. V13 promoted the register's `Status` into
   `companies.register_status` (`aktiv` 6,298 / `erloschen` 7,673 / `in Liquidation` 472); it had been
-  in `metadata` since the import, unread. Every published number — 902 websites, 842 `high`, 346
-  fields — was measured over the dead ones, which supplied 4.0% of the websites.
+  in `metadata` since the import, unread. Every published number — 940 websites, 885 `high`, 381
+  fields — was measured over the dead ones, which supplied 4.0% of the 902 websites of 2026-08-14,
+  the last time that split was counted.
   `DISCOVERY_ACTIVE_ONLY=1` skips them and is **off**: the limit applies *after* the filter, so a
   limited run gets a **different, not smaller** sample (`--limit 200` → 200 live, overlapping the
   unfiltered 200 by 78). Keywords still score all 14,443; only a **new** model call is withheld, and a
