@@ -62,16 +62,35 @@ TOTAL_COMPANIES = 14_443
 #: within the group, so combined's 0.99 now speaks for a value the export also holds.
 #:
 #: The total is the number to watch, and it did not move: 3,542 before and after.
+#: Step 5 (narrowed): `url_discovery` gained the `own_site_verdict` filter every other source DAG
+#: already had. It was the one DAG that filed each candidate without asking whether the host
+#: belongs to the company, and that admitted 16 false positives: domain-parking marketplaces
+#: (`fruits.co/de/domain/wilfried.de`), a reseller's landing pages (`ts.domainname.de/...`),
+#: `grow.google/intl/de/` as a company website, and two pairs of DIFFERENT companies sharing one
+#: short domain — `wm.de` for "WM Immo GmbH die Zweite" and "die Dritte", `zum.de/portal` for two
+#: unrelated "Zum ..." companies.
+#:
+#: 62 stored rows were refiled to `directory_url` under the new rule (34 converted, 28 duplicate
+#: twins removed — the best candidate had always been written twice, once as `candidate_url` and
+#: once as `website`, and the `website` row is one the new rule never writes).
+#:
+#: url_discovery 53 -> 37, exactly its 37 `own_site` survivors. Six of the 16 companies had a
+#: fallback above the 0.35 bar, so exa 36 -> 39 and combined_discovery 567 -> 570. Net coverage
+#: 3,542 -> 3,532: ten companies lost a website, and every one of the ten had only a wrong one.
 CANONICAL_WEBSITES = {
-    "northdata_export": 2_800, "combined_discovery": 567, "brave_search_discovery": 85,
-    "url_discovery": 53, "exa_search_discovery": 36, "parallel_search_discovery": 1,
+    "northdata_export": 2_800, "combined_discovery": 570, "brave_search_discovery": 85,
+    "url_discovery": 37, "exa_search_discovery": 39, "parallel_search_discovery": 1,
 }
-CANONICAL_TOTAL = 3_542
+CANONICAL_TOTAL = 3_532
 CANONICAL_OTHER_FIELDS = {"cluster": 532, "tech_field": 508}
 
 #: The alias itself, pinned. If a resolver change stopped promoting `candidate_url`, the totals
 #: above would fall by 3 and nothing would say why — this is the line that says why.
-CANONICAL_BY_OBSERVATION_NAME = {"website": 3_539, "candidate_url": 3}
+#:
+#: Step 5: 3,539 → 3,529, the ten companies that lost a website when url_discovery's false
+#: positives were refiled. The `candidate_url` side is untouched at 3 — all three are Brave's, and
+#: the alias still works.
+CANONICAL_BY_OBSERVATION_NAME = {"website": 3_529, "candidate_url": 3}
 CANONICAL_BRAVE_SPLIT = {"website": 82, "candidate_url": 3}
 
 #: Lower wins. The export at 50 outranks every discovery source, which is why 2,816 URLs nobody
@@ -94,7 +113,13 @@ WEBSITE_MIN_CONFIDENCE = 0.35   # resolver's bar; LLM-only guesses are capped at
 #: Step 3 raised this from 5,408 to 19,576: `candidate_url` went 483 → 14,094 because every
 #: runner-up answer is now written, not only the winner. Still a floor, not an equality — it may
 #: rise and must never fall.
-WEBSITE_OBSERVATION_FLOOR = 19_576
+#:
+#: Step 5 lowered it to 19,521, the second and last time a change was allowed to. 62 `url_discovery`
+#: rows left these two fields for `directory_url`, which the resolver never reads: 34 were refiled
+#: and 28 were exact duplicates of their own twin, because the best candidate had always been
+#: written twice — once as `candidate_url`, once as `website` — and the `website` row is one the new
+#: rule never writes. Nothing was lost; 34 rows are correctly filed and 28 said the same thing twice.
+WEBSITE_OBSERVATION_FLOOR = 19_521
 #: Live known bug: pipeline_coordinator inserts into company_managers with ON CONFLICT DO NOTHING
 #: against a table with no matching unique constraint, so every run adds another copy.
 #:
@@ -104,7 +129,12 @@ WEBSITE_OBSERVATION_FLOOR = 19_576
 #: excusing it: the fix is a unique constraint on (company_id, full_name), and until it lands every
 #: coordinator run makes this worse. That is now a live argument against step 7 of the unification
 #: plan, which would trigger the coordinator automatically.
-MANAGER_ROWS_CEILING = 8_181
+#:
+#: Step 5 needed one more coordinator run to re-resolve the refiled companies: 8,181 → 9,195, still
+#: 1,047 distinct. Three runs across steps 3 and 5 have now added 2,028 rows of pure duplication.
+#: The ceiling is a ratchet recording that cost, not a target — every raise is a coordinator run
+#: nobody can undo, and the constraint that would stop it is a one-line migration.
+MANAGER_ROWS_CEILING = 9_195
 MANAGER_DISTINCT = 1_047
 
 FAILURES: list[str] = []
