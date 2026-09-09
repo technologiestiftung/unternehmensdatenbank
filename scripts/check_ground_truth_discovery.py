@@ -12,12 +12,36 @@ that came from the export has ever been fetched.
 
 Not in the `PostToolUse` hook on purpose — it needs a running Postgres, and a guard that fails
 because Docker is down would block editing.
+
+**Two ways to run it, and both must keep working.**
+
+    python scripts/check_ground_truth_discovery.py    # standalone, exit 1 on failure
+    pytest scripts/check_ground_truth_discovery.py    # 9 tests
+
+Neither requires pytest to be importable: without it, `_run_without_pytest` opens the connection
+itself and calls each test. See the note on `check()` in `check_ground_truth_columns.py` for why it
+accumulates instead of raising.
 """
 from __future__ import annotations
 
+import inspect
 import os
 import sys
+from contextlib import contextmanager
 from pathlib import Path
+
+try:
+    import pytest
+except ImportError:            # the Airflow image has no pytest; standalone mode still works
+    pytest = None
+
+
+def _fixture(**kwargs):
+    """`pytest.fixture` when pytest is installed, a no-op decorator when it is not."""
+    if pytest is None:
+        return lambda fn: fn
+    return pytest.fixture(**kwargs)
+
 
 REPO = Path(__file__).resolve().parents[1]
 
@@ -51,12 +75,13 @@ CANONICAL_WEBSITES = {
     "url_discovery": 53, "exa_search_discovery": 36, "parallel_search_discovery": 1,
 }
 CANONICAL_TOTAL = 3_542
+CANONICAL_OTHER_FIELDS = {"cluster": 532, "tech_field": 508}
 
 #: The alias itself, pinned. If a resolver change stopped promoting `candidate_url`, the totals
 #: above would fall by 3 and nothing would say why — this is the line that says why.
 CANONICAL_BY_OBSERVATION_NAME = {"website": 3_539, "candidate_url": 3}
 CANONICAL_BRAVE_SPLIT = {"website": 82, "candidate_url": 3}
-CANONICAL_OTHER_FIELDS = {"cluster": 532, "tech_field": 508}
+
 #: Lower wins. The export at 50 outranks every discovery source, which is why 2,816 URLs nobody
 #: fetched beat pages that were downloaded and checked.
 SOURCE_PRIORITIES = {
@@ -75,9 +100,10 @@ FAILURES: list[str] = []
 
 
 def check(label: str, got, want) -> None:
+    """Record and print one comparison. Never raises — `checks()` does that, at the end."""
     ok = got == want
     if not ok:
-        FAILURES.append(label)
+        FAILURES.append(f"{label}  got={got!r} want={want!r}")
     print(f"{'ok  ' if ok else 'FAIL'} {label:<62} got={got!r:<28} want={want!r}")
 
 
@@ -85,114 +111,197 @@ def section(title: str) -> None:
     print(f"\n-- {title} --")
 
 
-def main() -> int:
+@contextmanager
+def checks(title: str):
+    """Every check in the block runs; the test then fails once, listing all of them."""
+    section(title)
+    first = len(FAILURES)
+    yield
+    new = FAILURES[first:]
+    assert not new, "\n".join(["", *new])
+
+
+def _one(cur, sql: str, params: tuple = ()) -> tuple:
+    cur.execute(sql, params)
+    return cur.fetchone()
+
+
+def _all(cur, sql: str, params: tuple = ()) -> list[tuple]:
+    cur.execute(sql, params)
+    return cur.fetchall()
+
+
+@_fixture()
+def cursor():
+    """A cursor on its own connection, closed after every test.
+
+    Function-scoped on purpose: nine short-lived local connections cost nothing, and a test that
+    leaves a transaction open cannot then affect the next one. `source_enrichment_common` sets an
+    `idle_in_transaction_session_timeout` on the role, which is the other reason not to hold one
+    open across tests.
+    """
     connection = get_connection()
     try:
         with connection, connection.cursor() as cur:
-            section("the table itself")
-            cur.execute("SELECT count(*) FROM public.companies")
-            check("companies", cur.fetchone()[0], TOTAL_COMPANIES)
-
-            section("source priorities — the thing that decides who wins")
-            cur.execute("SELECT key, priority FROM public.sources")
-            check("priorities", dict(cur.fetchall()), SOURCE_PRIORITIES)
-
-            section("canonical websites, per source (never regress)")
-            cur.execute("""
-                SELECT s.key, count(*)
-                FROM public.company_canonical_field_sources cf
-                JOIN public.company_field_observations o
-                  ON o.id = cf.company_field_observation_id
-                JOIN public.company_source_records r ON r.id = o.company_source_record_id
-                JOIN public.sources s ON s.id = r.source_id
-                WHERE cf.field_name = 'website'
-                GROUP BY 1
-            """)
-            got = dict(cur.fetchall())
-            for key, want in CANONICAL_WEBSITES.items():
-                check(f"canonical websites from {key}", got.get(key, 0), want)
-            check("canonical websites in total", sum(got.values()), CANONICAL_TOTAL)
-
-            section("candidate_url is an alias for website, not a second field")
-            cur.execute("""
-                SELECT o.field_name, count(*)
-                FROM public.company_canonical_field_sources cf
-                JOIN public.company_field_observations o
-                  ON o.id = cf.company_field_observation_id
-                WHERE cf.field_name = 'website'
-                GROUP BY 1
-            """)
-            check("canonical websites by observation name",
-                  dict(cur.fetchall()), CANONICAL_BY_OBSERVATION_NAME)
-            cur.execute("""
-                SELECT o.field_name, count(*)
-                FROM public.company_canonical_field_sources cf
-                JOIN public.company_field_observations o
-                  ON o.id = cf.company_field_observation_id
-                JOIN public.company_source_records r ON r.id = o.company_source_record_id
-                JOIN public.sources s ON s.id = r.source_id
-                WHERE cf.field_name = 'website' AND s.key = 'brave_search_discovery'
-                GROUP BY 1
-            """)
-            check("brave's 85 split by observation name",
-                  dict(cur.fetchall()), CANONICAL_BRAVE_SPLIT)
-
-            section("the other two canonical fields")
-            cur.execute("""SELECT field_name, count(*) FROM public.company_canonical_field_sources
-                           WHERE field_name <> 'website' GROUP BY 1""")
-            check("cluster and tech_field", dict(cur.fetchall()), CANONICAL_OTHER_FIELDS)
-
-            section("resolver invariants")
-            cur.execute("""SELECT count(*) FROM public.company_canonical_field_sources cf
-                           JOIN public.company_field_observations o
-                             ON o.id = cf.company_field_observation_id
-                           WHERE cf.field_name = 'website' AND o.confidence < %s""",
-                        (WEBSITE_MIN_CONFIDENCE,))
-            check("no canonical website below the bar", cur.fetchone()[0], 0)
-            cur.execute("""SELECT count(*) FROM public.company_canonical_field_sources cf
-                           JOIN public.company_field_observations o
-                             ON o.id = cf.company_field_observation_id
-                           WHERE cf.field_name = 'website'
-                             AND o.field_name = 'directory_url'""")
-            check("no directory_url promoted to website", cur.fetchone()[0], 0)
-            cur.execute("""SELECT count(*) FROM (
-                             SELECT company_id, field_name FROM public.company_field_observations
-                             WHERE is_canonical GROUP BY 1, 2 HAVING count(*) > 1) t""")
-            check("one canonical observation per company and field", cur.fetchone()[0], 0)
-            cur.execute("""SELECT count(*) FROM public.company_canonical_field_sources cf
-                           JOIN public.company_field_observations o
-                             ON o.id = cf.company_field_observation_id
-                           WHERE NOT o.is_canonical""")
-            check("every canonical row points at a canonical observation", cur.fetchone()[0], 0)
-
-            section("observations are never deleted, only un-canonicalised")
-            cur.execute("""SELECT count(*) FROM public.company_field_observations
-                           WHERE field_name IN ('website', 'candidate_url')""")
-            check("website-ish observations (>= baseline)",
-                  cur.fetchone()[0] >= WEBSITE_OBSERVATION_FLOOR, True)
-
-            section("known live bug: company_managers duplicates every run")
-            cur.execute("""SELECT count(*), count(DISTINCT (company_id, full_name))
-                           FROM public.company_managers""")
-            total, distinct = cur.fetchone()
-            check("duplication is not getting worse", total <= MANAGER_ROWS_CEILING, True)
-            check("distinct managers", distinct, MANAGER_DISTINCT)
-
-            section("the spend guard cannot fire (documented, still true)")
-            cur.execute("""SELECT max(data_quality_score),
-                                  count(*) FILTER (WHERE data_quality_score >= 0.90)
-                           FROM public.companies""")
-            best, at_guard = cur.fetchone()
-            check("ceiling is still 0.85", float(best), 0.85)
-            check("nobody reaches the 0.90 guard", at_guard, 0)
+            yield cur
     finally:
         connection.close()
 
+
+# ---- the tests --------------------------------------------------------------------------------
+
+def test_company_count(cursor):
+    with checks("the table itself"):
+        check("companies", _one(cursor, "SELECT count(*) FROM public.companies")[0],
+              TOTAL_COMPANIES)
+
+
+def test_source_priorities(cursor):
+    with checks("source priorities — the thing that decides who wins"):
+        check("priorities",
+              dict(_all(cursor, "SELECT key, priority FROM public.sources")),
+              SOURCE_PRIORITIES)
+
+
+def test_canonical_websites_per_source(cursor):
+    with checks("canonical websites, per source (never regress)"):
+        got = dict(_all(cursor, """
+            SELECT s.key, count(*)
+            FROM public.company_canonical_field_sources cf
+            JOIN public.company_field_observations o
+              ON o.id = cf.company_field_observation_id
+            JOIN public.company_source_records r ON r.id = o.company_source_record_id
+            JOIN public.sources s ON s.id = r.source_id
+            WHERE cf.field_name = 'website'
+            GROUP BY 1
+        """))
+        for key, want in CANONICAL_WEBSITES.items():
+            check(f"canonical websites from {key}", got.get(key, 0), want)
+        check("canonical websites in total", sum(got.values()), CANONICAL_TOTAL)
+
+
+def test_candidate_url_alias(cursor):
+    with checks("candidate_url is an alias for website, not a second field"):
+        check("canonical websites by observation name",
+              dict(_all(cursor, """
+                  SELECT o.field_name, count(*)
+                  FROM public.company_canonical_field_sources cf
+                  JOIN public.company_field_observations o
+                    ON o.id = cf.company_field_observation_id
+                  WHERE cf.field_name = 'website'
+                  GROUP BY 1
+              """)),
+              CANONICAL_BY_OBSERVATION_NAME)
+        check("brave's 85 split by observation name",
+              dict(_all(cursor, """
+                  SELECT o.field_name, count(*)
+                  FROM public.company_canonical_field_sources cf
+                  JOIN public.company_field_observations o
+                    ON o.id = cf.company_field_observation_id
+                  JOIN public.company_source_records r ON r.id = o.company_source_record_id
+                  JOIN public.sources s ON s.id = r.source_id
+                  WHERE cf.field_name = 'website' AND s.key = 'brave_search_discovery'
+                  GROUP BY 1
+              """)),
+              CANONICAL_BRAVE_SPLIT)
+
+
+def test_other_canonical_fields(cursor):
+    with checks("the other two canonical fields"):
+        check("cluster and tech_field",
+              dict(_all(cursor, """
+                  SELECT field_name, count(*) FROM public.company_canonical_field_sources
+                  WHERE field_name <> 'website' GROUP BY 1
+              """)),
+              CANONICAL_OTHER_FIELDS)
+
+
+def test_resolver_invariants(cursor):
+    with checks("resolver invariants"):
+        check("no canonical website below the bar",
+              _one(cursor, """SELECT count(*) FROM public.company_canonical_field_sources cf
+                              JOIN public.company_field_observations o
+                                ON o.id = cf.company_field_observation_id
+                              WHERE cf.field_name = 'website' AND o.confidence < %s""",
+                   (WEBSITE_MIN_CONFIDENCE,))[0], 0)
+        check("no directory_url promoted to website",
+              _one(cursor, """SELECT count(*) FROM public.company_canonical_field_sources cf
+                              JOIN public.company_field_observations o
+                                ON o.id = cf.company_field_observation_id
+                              WHERE cf.field_name = 'website'
+                                AND o.field_name = 'directory_url'""")[0], 0)
+        check("one canonical observation per company and field",
+              _one(cursor, """SELECT count(*) FROM (
+                                SELECT company_id, field_name
+                                FROM public.company_field_observations
+                                WHERE is_canonical GROUP BY 1, 2 HAVING count(*) > 1) t""")[0], 0)
+        check("every canonical row points at a canonical observation",
+              _one(cursor, """SELECT count(*) FROM public.company_canonical_field_sources cf
+                              JOIN public.company_field_observations o
+                                ON o.id = cf.company_field_observation_id
+                              WHERE NOT o.is_canonical""")[0], 0)
+
+
+def test_observations_never_deleted(cursor):
+    with checks("observations are never deleted, only un-canonicalised"):
+        check("website-ish observations (>= baseline)",
+              _one(cursor, """SELECT count(*) FROM public.company_field_observations
+                              WHERE field_name IN ('website', 'candidate_url')""")[0]
+              >= WEBSITE_OBSERVATION_FLOOR, True)
+
+
+def test_company_managers_bug(cursor):
+    with checks("known live bug: company_managers duplicates every run"):
+        total, distinct = _one(cursor, """SELECT count(*), count(DISTINCT (company_id, full_name))
+                                          FROM public.company_managers""")
+        check("duplication is not getting worse", total <= MANAGER_ROWS_CEILING, True)
+        check("distinct managers", distinct, MANAGER_DISTINCT)
+
+
+def test_spend_guard(cursor):
+    with checks("the spend guard cannot fire (documented, still true)"):
+        best, at_guard = _one(cursor, """SELECT max(data_quality_score),
+                                                count(*) FILTER (WHERE data_quality_score >= 0.90)
+                                         FROM public.companies""")
+        check("ceiling is still 0.85", float(best), 0.85)
+        check("nobody reaches the 0.90 guard", at_guard, 0)
+
+
+#: Definition order, which is the order both run modes report in.
+_TESTS = (
+    test_company_count,
+    test_source_priorities,
+    test_canonical_websites_per_source,
+    test_candidate_url_alias,
+    test_other_canonical_fields,
+    test_resolver_invariants,
+    test_observations_never_deleted,
+    test_company_managers_bug,
+    test_spend_guard,
+)
+
+
+def _run_without_pytest() -> int:
+    """Run every test on its own connection, the way the `cursor` fixture would. No pytest."""
+    for test in _TESTS:
+        if "cursor" not in inspect.signature(test).parameters:
+            continue
+        connection = get_connection()
+        try:
+            with connection, connection.cursor() as cur:
+                test(cur)
+        except AssertionError:
+            pass        # `check` has already recorded and printed every line of it
+        finally:
+            connection.close()
     print(f"\n{'FAILED' if FAILURES else 'all checks passed'}")
-    for label in FAILURES:
-        print(f"  - {label}")
+    for failure in FAILURES:
+        print(f"  - {failure}")
     return 1 if FAILURES else 0
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    if pytest is None:
+        raise SystemExit(_run_without_pytest())
+    # `-s` so the ok/FAIL table streams instead of being captured.
+    raise SystemExit(pytest.main([__file__, "-q", "-s"]))
