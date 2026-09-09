@@ -12,13 +12,12 @@ taxonomy, the numbers below are SUPPOSED to move: re-measure and edit the block,
 as the change, with the reason in the message.
 
 Nothing here restates a rule that lives in the code. `latest_rows`, `read_label_csv` and
-`LABEL_VALUES` are imported from the real script: a test that re-implements which line of an
-append-only file wins agrees with itself no matter what the pipeline does.
+`LABEL_VALUES` come out of the real script, via `tests/loaders.py`.
 
 **Two ways to run it, and both must keep working.**
 
-    python scripts/check_ground_truth_columns.py     # standalone, exit 1 on failure
-    pytest scripts/check_ground_truth_columns.py     # 7 tests
+    python tests/integration/test_ground_truth_columns.py    # standalone, exit 1 on failure
+    pytest tests/integration/test_ground_truth_columns.py    # 7 tests
 
 The standalone path is the one the `PostToolUse` hook uses, and it does **not** require pytest: if
 pytest cannot be imported, `_run_without_pytest` resolves each test's fixture names from the same
@@ -32,34 +31,24 @@ block of them into one test failure listing every mismatch.
 """
 from __future__ import annotations
 
-import importlib.util
 import inspect
-import json
 import sys
 from collections import Counter
 from contextlib import contextmanager
-from functools import lru_cache
 from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))   # repo root, for `tests.…`
+
+from tests import loaders                                     # noqa: E402
+from tests.paths import artifacts                             # noqa: E402
 
 try:
     import pytest
 except ImportError:            # the Airflow image has no pytest; standalone mode still works
     pytest = None
 
-
-def _fixture(**kwargs):
-    """`pytest.fixture` when pytest is installed, a no-op decorator when it is not."""
-    if pytest is None:
-        return lambda fn: fn
-    return pytest.fixture(**kwargs)
-
-
-REPO = Path(__file__).resolve().parents[1]
-
-for candidate in (REPO / "airflow" / "dags", Path("/opt/airflow/dags")):
-    if candidate.is_dir():
-        sys.path.insert(0, str(candidate))
-        break
+if pytest is not None:
+    pytestmark = pytest.mark.integration
 
 TOTAL_COMPANIES = 14_443
 
@@ -92,6 +81,14 @@ LABEL_FILES = ("labels_todo.csv", "branch_labels_todo.csv", "purpose_labels_todo
 
 FAILURES: list[str] = []
 
+#: Fixture name -> loader. The only thing the two run modes have to agree on; the fixtures in
+#: `tests/conftest.py` are the same one-line calls.
+_LOADERS = {
+    "runner": loaders.runner,
+    "branches": lambda: loaders.rows("branches.jsonl"),
+    "purposes": lambda: loaders.rows("purpose_branches.jsonl"),
+}
+
 
 def check(label: str, got, want) -> None:
     """Record and print one comparison. Never raises — `checks()` does that, at the end."""
@@ -113,73 +110,6 @@ def checks(title: str):
     yield
     new = FAILURES[first:]
     assert not new, "\n".join(["", *new])
-
-
-# ---- loaders: cached, so the two run modes share one code path -------------------------------
-
-@lru_cache(maxsize=None)
-def _out_dir() -> Path:
-    """Where the artifacts live. Same resolution order as the script that writes them.
-
-    A function rather than a module constant on purpose: as a constant this raised at *import*
-    time, which pytest reports as a collection error with no useful message instead of a failed
-    test.
-    """
-    for path in (
-        Path("/opt/airflow/data/combined_discovery"),
-        REPO / "airflow" / "data" / "combined_discovery",
-    ):
-        if path.is_dir():
-            return path
-    raise AssertionError(
-        "no combined_discovery output directory; run `classify` and `classify-purpose` first"
-    )
-
-
-@lru_cache(maxsize=None)
-def _runner():
-    """`run_combined_discovery.py` as a module, without running its CLI. Constants only."""
-    path = Path(__file__).resolve().parent / "run_combined_discovery.py"
-    spec = importlib.util.spec_from_file_location("_ground_truth_runner", path)
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
-
-
-@lru_cache(maxsize=None)
-def _rows(name: str) -> tuple[dict, ...]:
-    """One dict per line. These files are one row per company, not append-only like `results`."""
-    path = _out_dir() / name
-    if not path.exists():
-        raise AssertionError(f"no {path}; run `classify` and `classify-purpose` first")
-    with path.open(encoding="utf-8") as handle:
-        return tuple(json.loads(line) for line in handle if line.strip())
-
-
-#: Fixture name -> loader. The only thing the two run modes have to agree on.
-_LOADERS = {
-    "runner": _runner,
-    "branches": lambda: _rows("branches.jsonl"),
-    "purposes": lambda: _rows("purpose_branches.jsonl"),
-}
-
-
-# ---- fixtures: one-line wrappers over the loaders above ---------------------------------------
-
-@_fixture(scope="session")
-def runner():
-    """`run_combined_discovery.py`, exec'd once for the whole session — it is 4,115 lines."""
-    return _LOADERS["runner"]()
-
-
-@_fixture(scope="session")
-def branches():
-    return _LOADERS["branches"]()
-
-
-@_fixture(scope="session")
-def purposes():
-    return _LOADERS["purposes"]()
 
 
 # ---- the tests --------------------------------------------------------------------------------
@@ -267,14 +197,14 @@ def test_column1_not_stale(runner):
     with checks("column 1 is not stale against the run that feeds it"):
         # classify reads results.jsonl through the pipeline's own selector. If run has since found
         # more websites, every branch bucket above is describing a population that no longer exists.
-        live = sum(1 for r in runner.latest_rows(_out_dir() / "results.jsonl") if r.get("website"))
+        live = sum(1 for r in runner.latest_rows(artifacts() / "results.jsonl") if r.get("website"))
         check("results.jsonl websites == branches.jsonl websites", live, BRANCH_WITH_WEBSITE)
 
 
 def test_labels_recognised(runner):
     with checks("every hand label is a value the reader recognises"):
         for name in LABEL_FILES:
-            path = _out_dir() / name
+            path = artifacts() / name
             if not path.exists():
                 print(f"     skipped {name}: not written yet")
                 continue
@@ -301,7 +231,7 @@ _TESTS = (
 
 def _run_without_pytest() -> int:
     """Run every test with its fixtures resolved from `_LOADERS`. No pytest required."""
-    print(f"reading {_out_dir()}")
+    print(f"reading {artifacts()}")
     for test in _TESTS:
         kwargs = {name: _LOADERS[name]() for name in inspect.signature(test).parameters}
         try:

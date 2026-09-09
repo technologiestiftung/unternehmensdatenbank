@@ -15,51 +15,31 @@ because Docker is down would block editing.
 
 **Two ways to run it, and both must keep working.**
 
-    python scripts/check_ground_truth_discovery.py    # standalone, exit 1 on failure
-    pytest scripts/check_ground_truth_discovery.py    # 9 tests
+    python tests/integration/test_ground_truth_discovery.py    # standalone, exit 1 on failure
+    pytest tests/integration/test_ground_truth_discovery.py    # 9 tests
 
 Neither requires pytest to be importable: without it, `_run_without_pytest` opens the connection
-itself and calls each test. See the note on `check()` in `check_ground_truth_columns.py` for why it
+itself and calls each test. See the note on `check()` in `test_ground_truth_columns.py` for why it
 accumulates instead of raising.
 """
 from __future__ import annotations
 
 import inspect
-import os
 import sys
 from contextlib import contextmanager
 from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))   # repo root, for `tests.…`
+
+from tests import loaders                                     # noqa: E402
 
 try:
     import pytest
 except ImportError:            # the Airflow image has no pytest; standalone mode still works
     pytest = None
 
-
-def _fixture(**kwargs):
-    """`pytest.fixture` when pytest is installed, a no-op decorator when it is not."""
-    if pytest is None:
-        return lambda fn: fn
-    return pytest.fixture(**kwargs)
-
-
-REPO = Path(__file__).resolve().parents[1]
-
-for candidate in (REPO / "airflow" / "dags", Path("/opt/airflow/dags")):
-    if candidate.is_dir():
-        sys.path.insert(0, str(candidate))
-        break
-
-# Running on the host means Postgres is on localhost:5433, not on the compose network. The DAG
-# default (`host=postgres port=5432`) is right inside a container and wrong outside one, so supply
-# a host-shaped default without overriding an explicit PG_DSN. Same line as
-# import_northdata_websites.py, and it has to be set BEFORE source_enrichment_common is imported --
-# that module reads PG_DSN at import time.
-os.environ.setdefault(
-    "PG_DSN", "host=localhost port=5433 dbname=unternehmensdatenbank user=app password=app"
-)
-
-from source_enrichment_common import get_connection  # noqa: E402
+if pytest is not None:
+    pytestmark = pytest.mark.integration
 
 TOTAL_COMPANIES = 14_443
 
@@ -129,23 +109,6 @@ def _one(cur, sql: str, params: tuple = ()) -> tuple:
 def _all(cur, sql: str, params: tuple = ()) -> list[tuple]:
     cur.execute(sql, params)
     return cur.fetchall()
-
-
-@_fixture()
-def cursor():
-    """A cursor on its own connection, closed after every test.
-
-    Function-scoped on purpose: nine short-lived local connections cost nothing, and a test that
-    leaves a transaction open cannot then affect the next one. `source_enrichment_common` sets an
-    `idle_in_transaction_session_timeout` on the role, which is the other reason not to hold one
-    open across tests.
-    """
-    connection = get_connection()
-    try:
-        with connection, connection.cursor() as cur:
-            yield cur
-    finally:
-        connection.close()
 
 
 # ---- the tests --------------------------------------------------------------------------------
@@ -286,14 +249,11 @@ def _run_without_pytest() -> int:
     for test in _TESTS:
         if "cursor" not in inspect.signature(test).parameters:
             continue
-        connection = get_connection()
         try:
-            with connection, connection.cursor() as cur:
+            with loaders.db_cursor() as cur:
                 test(cur)
         except AssertionError:
             pass        # `check` has already recorded and printed every line of it
-        finally:
-            connection.close()
     print(f"\n{'FAILED' if FAILURES else 'all checks passed'}")
     for failure in FAILURES:
         print(f"  - {failure}")
