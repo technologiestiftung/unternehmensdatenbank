@@ -17,7 +17,7 @@ thing that may.
 
 ## Northdata wins, and that is a decision, not an accident
 
-`SOURCE_PRIORITY = 50` against 100 for all five discovery sources. The resolver orders winners by
+`SOURCE_PRIORITY = 50` against 100 for every other source in the table. The resolver orders winners by
 `best_priority ASC` **before** confidence (`pipeline_coordinator/resolver.py`), so this source takes
 every company it has an opinion about. Measured over the 908 companies where the export and
 discovery both name a website, on 2026-09-03:
@@ -45,8 +45,8 @@ then trigger `pipeline_coordinator` once. No re-discovery, nothing lost.
 **Nobody has fetched any of these URLs.** They are a third-party register aggregator's opinion, and
 they carry `verified: False` in their metadata to say so. That matters because after this import
 `v_companies_enriched` serves websites of two very different provenances, and every number published
-in `docs/` — 902 websites, 842 of them `high` — was measured before that. `website_source =
-'northdata_export'` separates them.
+in `docs/` for combined discovery alone — 943 websites, 886 of them `high` — counts that pipeline's
+own finds and not these. `website_source = 'northdata_export'` separates them.
 
 `OBSERVATION_CONFIDENCE` is a flat 0.50 for every row, and flat is deliberate: the export gives no
 per-row evidence to vary it by, and a number invented here would look like a measurement. It exists
@@ -55,10 +55,29 @@ contests, not confidence.
 
 ## Re-running
 
-Idempotent. This source's previous website observations for the companies being written are deleted
-inside the same transaction, so running twice leaves one observation per company rather than two.
-Scoped to the companies in *this* run, not the whole source: a company that drops out of a later
-export keeps its old observation rather than silently losing its website.
+Idempotent, and since 2026-09-09 idempotent **without un-publishing anything in between**.
+
+`company_field_observations` is what `company_canonical_field_sources` points at, and that pointer
+**cascades when the observation is deleted**. So this script used to delete its own `website` rows
+for the companies it was about to re-write, which took every one of them out of the canonical table
+until the next `pipeline_coordinator` run. Running the import therefore dropped **2,815 canonical
+websites** — 80% of the application's coverage — and left them dropped for as long as the gap
+lasted. It is the same failure that cost 558 websites for four days on 2026-09-03, when the Brave
+runs meant to follow the import failed and a failed task never triggers the coordinator.
+
+Now the write is an **upsert**. `insert_text_observation` has a unique key on
+`(company_id, field_name, source_id, value_text)` from V17, so re-confirming a URL updates the row
+in place, keeps its id, and keeps it canonical. Nothing is un-published, and no coordinator run is
+needed to get back to where you were.
+
+One delete remains and it is narrow: a value this export has **superseded**. If a company's website
+genuinely changed between snapshots, the old observation is wrong and has to go, canonical pointer
+included — leaving it would let a stale URL out-rank the correction, since both carry this source's
+flat 0.50 and the resolver then falls back to the value itself. Measured 2026-09-09: on a repeat
+import of the same snapshot this deletes **0 rows**, which is the whole point.
+
+Still scoped to the companies in *this* run, not the whole source: a company that drops out of a
+later export keeps its old observation rather than silently losing its website.
 
 `--source-file` scopes to one snapshot. The export table is keyed on `(source_file, internal_id)`
 precisely so two snapshots a week apart can coexist; importing observations from both at once would
@@ -70,8 +89,9 @@ mix them.
     python scripts/import_northdata_websites.py
     python scripts/import_northdata_websites.py --source-file 2026-04-01-osnabrueck
 
-Then trigger `pipeline_coordinator` in Airflow. Until that runs the observations exist but no
-canonical field has changed, and `v_companies_enriched` looks exactly as it did before.
+Trigger `pipeline_coordinator` afterwards only if the run reports new or superseded rows — it says
+so explicitly, and a re-import of an unchanged snapshot needs nothing. A row updated in place keeps
+its id, so it keeps its canonical pointer and `v_companies_enriched` never stops serving it.
 """
 from __future__ import annotations
 
@@ -372,20 +392,61 @@ def write(rows: list[dict[str, Any]]) -> None:
 
             sync_run_id = start_sync_run(cur, source_id=source_id)
 
-            # Idempotence, scoped to the companies in THIS run rather than to the whole source: a
-            # company that has dropped out of a later export keeps its old observation instead of
-            # silently losing its website. Same reasoning as import_combined_discovery.py.
             company_ids = [r["company_id"] for r in rows]
+            websites = [r["website"] for r in rows]
+
+            # What this source already holds for these companies, read BEFORE anything is written.
+            # Two things need it, and neither can be got from `rowcount` afterwards:
+            #
+            # 1. Splitting inserts from updates. The write below is `ON CONFLICT DO UPDATE`, which
+            #    returns a row either way, so `rowcount` is 1 whether it inserted or updated and
+            #    cannot tell the sync run which happened.
+            # 2. Deciding what the export has SUPERSEDED — see the delete below.
             cur.execute(
                 """
-                DELETE FROM public.company_field_observations
+                SELECT company_id::text, value_text
+                FROM public.company_field_observations
                 WHERE source_id = %s AND field_name = 'website' AND company_id = ANY(%s::uuid[])
                 """,
                 (source_id, company_ids),
             )
-            replaced = cur.rowcount
+            held: set[tuple[str, str]] = {(cid, url) for cid, url in cur.fetchall()}
+
+            # Clear only the values this export has SUPERSEDED — one company, one website here
+            # (verified: 3,283 rows, 3,283 distinct companies), so this fires when a company's URL
+            # has genuinely changed between snapshots. A row merely being re-confirmed is left alone
+            # and updated in place by the upsert below.
+            #
+            # That distinction is the entire reason V17 added the unique key. A blanket
+            # `DELETE ... WHERE source_id = %s AND field_name = 'website'` stood here until
+            # 2026-09-09 and cascaded through `company_canonical_field_sources`, so every run took
+            # this source's 2,815 canonical websites out of the application until the coordinator
+            # ran again. On 2026-09-03 the same shape of delete in the combined-discovery importer
+            # cost 558 websites for four days.
+            #
+            # A superseded row still has to go, canonical pointer and all: the old URL is wrong, and
+            # this source's confidence is a flat 0.50 on every row, so the resolver could not prefer
+            # the correction on confidence. Measured 2026-09-09: re-importing the same snapshot
+            # deletes 0.
+            cur.execute(
+                """
+                DELETE FROM public.company_field_observations o
+                WHERE o.source_id = %s
+                  AND o.field_name = 'website'
+                  AND o.company_id = ANY(%s::uuid[])
+                  AND NOT EXISTS (
+                    SELECT 1
+                    FROM unnest(%s::uuid[], %s::text[]) AS f(company_id, website)
+                    WHERE f.company_id = o.company_id
+                      AND f.website = o.value_text
+                  )
+                """,
+                (source_id, company_ids, company_ids, websites),
+            )
+            superseded = cur.rowcount
 
             created = 0
+            updated = 0
             for row in rows:
                 record_id, _is_new = upsert_source_record(
                     cur,
@@ -415,21 +476,42 @@ def write(rows: list[dict[str, Any]]) -> None:
                     confidence=OBSERVATION_CONFIDENCE,
                     metadata=observation_metadata(row),
                 )
-                created += 1
+                # Decided from what was held before the write, not from `rowcount`: the upsert
+                # returns a row whether it inserted or updated.
+                if (row["company_id"], row["website"]) in held:
+                    updated += 1
+                else:
+                    created += 1
 
             finish_sync_run(
                 cur,
                 sync_run_id=sync_run_id,
                 records_seen=len(rows),
                 records_created=created,
-                records_updated=replaced,
+                records_updated=updated,
                 records_failed=0,
             )
     finally:
         connection.close()
 
-    log.info("wrote %d website observations (%d replaced a previous import)", created, replaced)
-    log.info("Nothing is canonical yet. Trigger pipeline_coordinator in Airflow to resolve.")
+    log.info(
+        "%d website observations: %d new, %d updated in place, %d superseded values removed",
+        len(rows), created, updated, superseded,
+    )
+    # An update in place keeps the observation's id, so it keeps its `company_canonical_field_sources`
+    # pointer and stays canonical. Only a NEW row or a REMOVED one leaves something for the resolver
+    # to do, which is why this is conditional: telling somebody to run the coordinator after a no-op
+    # import is how the previous version hid the fact that it had just un-published 2,815 websites.
+    if created or superseded:
+        log.info(
+            "%d new and %d removed rows need resolving. Trigger pipeline_coordinator in Airflow.",
+            created, superseded,
+        )
+    else:
+        log.info(
+            "nothing changed: every row was already stored with this value, and no canonical "
+            "website was touched. No coordinator run needed."
+        )
 
 
 def main() -> int:
