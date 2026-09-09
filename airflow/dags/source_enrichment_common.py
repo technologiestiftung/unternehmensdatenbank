@@ -462,10 +462,14 @@ def insert_text_observation(
 ) -> str:
     """Write one claim by one source about one text field of one company. Returns the row's id.
 
-    An append for every field except `website` and `candidate_url`, which V17 gave a unique key so a
-    re-run can update rather than write a second copy. Without that, a source re-writing what it
-    already wrote had to DELETE first, and `company_canonical_field_sources` cascades off these rows —
-    which un-published 558 websites for four days on 2026-09-03.
+    An append for most fields. Six of them — `website`, `candidate_url`, `directory_url`,
+    `discovery_tier`, `search_query`, `osm_id` — have a unique key (V17, widened by V18) so a re-run
+    updates rather than writing a second copy. Without that, a source re-writing what it already
+    wrote had to DELETE first, and `company_canonical_field_sources` cascades off these rows — which
+    un-published 558 websites for four days on 2026-09-03.
+
+    The predicate below must stay identical to the index predicate in V18. Widen one and you widen
+    the other, in the same commit.
 
     **Newest write wins**, unconditionally. Not highest-confidence-wins: a re-score has to be able to
     DEMOTE, and this repo has already been bitten by a change that could only ever promote
@@ -497,7 +501,10 @@ def insert_text_observation(
         )
         VALUES (%s, %s, %s, %s, %s, %s, now(), %s, %s, now(), now())
         ON CONFLICT (company_id, field_name, source_id, value_text)
-          WHERE field_name IN ('website', 'candidate_url')
+          WHERE field_name IN (
+            'website', 'candidate_url', 'directory_url',
+            'discovery_tier', 'search_query', 'osm_id'
+          )
         DO UPDATE SET
           confidence = EXCLUDED.confidence,
           metadata   = EXCLUDED.metadata,

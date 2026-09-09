@@ -50,8 +50,20 @@ TOTAL_COMPANIES = 14_443
 #: winning observation is stored as `candidate_url` still has a canonical website. Grouping on the
 #: observation name splits Brave's 85 into 82 + 3 and reads like three lost websites; the first
 #: version of this baseline said 82 for exactly that reason.
+#: Step 3: `observations.py` now writes directly, so this source contributes runner-up
+#: `candidate_url` rows, `directory_url` rows, a three-row `discovery_tier` ledger per company, an
+#: `osm_id` where OpenStreetMap matched, and a `website` row per qualifying **answer** rather than
+#: one per company. 951 website rows became 1,025 across 68 companies with more than one.
+#:
+#: That moved 16 canonical rows from `northdata_export` to `combined_discovery` — 2,816 → 2,800 and
+#: 551 → 567 — and **changed no company's website**. Of the 567 now owned by this source, 438 carry
+#: the export's exact URL and 0 disagree. The resolver takes a group's rank from the lowest
+#: `sources.priority` in it (the export's 50) but its representative observation by confidence
+#: within the group, so combined's 0.99 now speaks for a value the export also holds.
+#:
+#: The total is the number to watch, and it did not move: 3,542 before and after.
 CANONICAL_WEBSITES = {
-    "northdata_export": 2_816, "combined_discovery": 551, "brave_search_discovery": 85,
+    "northdata_export": 2_800, "combined_discovery": 567, "brave_search_discovery": 85,
     "url_discovery": 53, "exa_search_discovery": 36, "parallel_search_discovery": 1,
 }
 CANONICAL_TOTAL = 3_542
@@ -79,10 +91,20 @@ WEBSITE_MIN_CONFIDENCE = 0.35   # resolver's bar; LLM-only guesses are capped at
 #: rows removed were exact duplicates: same company, same field, same source, same URL. The loser of
 #: each pair was never canonical — all six per-source counts above are unchanged — so nothing was
 #: un-published. If this floor ever falls again, that is the failure this assertion exists to catch.
-WEBSITE_OBSERVATION_FLOOR = 5_408
+#: Step 3 raised this from 5,408 to 19,576: `candidate_url` went 483 → 14,094 because every
+#: runner-up answer is now written, not only the winner. Still a floor, not an equality — it may
+#: rise and must never fall.
+WEBSITE_OBSERVATION_FLOOR = 19_576
 #: Live known bug: pipeline_coordinator inserts into company_managers with ON CONFLICT DO NOTHING
 #: against a table with no matching unique constraint, so every run adds another copy.
-MANAGER_ROWS_CEILING = 7_167
+#:
+#: Step 3 triggered the coordinator and this went 7,167 → 8,181 while `distinct` stayed at 1,047 —
+#: one more copy of roughly a thousand names, for no new information. The assertion caught it, which
+#: is the only reason it is here. Raising the ceiling records the cost of that run rather than
+#: excusing it: the fix is a unique constraint on (company_id, full_name), and until it lands every
+#: coordinator run makes this worse. That is now a live argument against step 7 of the unification
+#: plan, which would trigger the coordinator automatically.
+MANAGER_ROWS_CEILING = 8_181
 MANAGER_DISTINCT = 1_047
 
 FAILURES: list[str] = []

@@ -682,6 +682,105 @@ def run(
 
     log.info("Done. %d companies written to %s", counter["n"], RESULTS_PATH)
 
+    written = write_observations_for([c.id for c in pending])
+    if written is not None:
+        log.info(
+            "%d observations in the database for these %d companies. Trigger "
+            "pipeline_coordinator to resolve them.", written, len(pending),
+        )
+
+
+def write_observations_for(company_ids: list[str]) -> int | None:
+    """Land this run's results in Postgres. Returns the row count, or None if it could not.
+
+    Postgres is the store the application reads; `results.jsonl` is the cache that makes this
+    resumable and lets the judge gate be replayed offline. Both are written, in that order, and the
+    file is written first on purpose: if this function fails, the run's work is still on disk and
+    `scripts/import_combined_discovery.py` can land it later. A run that has already cost an hour
+    must not be lost to a database that happens to be down.
+
+    One transaction at the end rather than a write per company, because `run` fans out over eight
+    threads and a psycopg2 connection is not thread-safe. It reads the rows back through
+    `latest_rows`, so what lands is exactly what the file says — the same path the importer takes,
+    and the reason a live run and a file replay produce identical rows.
+    """
+    if not company_ids:
+        return None
+    try:
+        from combined_discovery import observations
+        from source_enrichment_common import (
+            ensure_source,
+            finish_sync_run,
+            get_connection,
+            start_sync_run,
+        )
+    except Exception as exc:  # noqa: BLE001
+        log.warning("no database write: %s. The file is intact; use import_combined_discovery.py", exc)
+        return None
+
+    wanted = set(company_ids)
+    rows = [r for r in latest_rows(RESULTS_PATH) if r.get("company_id") in wanted]
+    try:
+        connection = get_connection()
+    except Exception as exc:  # noqa: BLE001
+        log.warning("no database write: %s. The file is intact; use import_combined_discovery.py", exc)
+        return None
+    try:
+        with connection, connection.cursor() as cur:
+            source_id = ensure_source(
+                cur,
+                key=observations.SOURCE_KEY,
+                name="Combined Discovery (URL patterns + OpenStreetMap + local judge)",
+                source_type="combined",
+                metadata={"script": "scripts/run_combined_discovery.py"},
+            )
+            sync_run_id = start_sync_run(cur, source_id=source_id)
+            created = 0
+            for row in rows:
+                created += int(
+                    observations.write_company_result(
+                        cur,
+                        company=_company_for_observations(row),
+                        result=row,
+                        source_id=source_id,
+                        sync_run_id=sync_run_id,
+                        stages_run=set(row.get("stages_run") or ()),
+                    )
+                )
+            cur.execute(
+                """
+                SELECT count(*) FROM public.company_field_observations
+                WHERE source_id = %s AND company_id = ANY(%s::uuid[])
+                """,
+                (source_id, list(wanted)),
+            )
+            total = cur.fetchone()[0]
+            finish_sync_run(
+                cur,
+                sync_run_id=sync_run_id,
+                records_seen=len(rows),
+                records_created=created,
+                records_updated=len(rows) - created,
+                records_failed=0,
+            )
+        return total
+    finally:
+        connection.close()
+
+
+def _company_for_observations(row: dict[str, Any]) -> Any:
+    """A `CompanyCandidate` from a result row. Every field it needs is a key in the file."""
+    from source_enrichment_common import CompanyCandidate
+
+    return CompanyCandidate(
+        id=row["company_id"],
+        company_name=row["company_name"],
+        address=row.get("address"),
+        postcode=row.get("postcode"),
+        city=row.get("city"),
+        registration_number=row.get("registration_number"),
+    )
+
 
 # ---------------------------------------------------------------------------------------
 # report

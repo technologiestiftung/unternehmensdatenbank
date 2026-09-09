@@ -11,20 +11,34 @@ rediscovered a few hundred of them. Tradineo GmbH is the example that made this 
 guessing found `tradineo.com` at confidence 0.99 with a register-number match, and the company
 still showed up in the database as a Brave find, because Brave was the only one that wrote.
 
-This script closes that gap, and nothing else. It reads the file, writes one `website`
-observation per company, and stops. It decides no winners — `pipeline_coordinator` does that,
-and it is the only thing that may.
+This script closes that gap. It decides no winners — `pipeline_coordinator` does that, and it is
+the only thing that may.
 
-## What it writes, and what it refuses to write
+## What it writes
 
-One observation per company that has a website, carrying the confidence the pipeline already
-measured (0.5687 to 0.99 over the 902) and the evidence behind it. Nothing is re-scored here: a
-number invented at import time would be a second opinion competing with the first, and there
-would be no way to tell later which one a canonical field came from.
+Since step 3 of the unification it writes nothing itself: every row goes through
+`combined_discovery/observations.py`, the module that was written for this job in the same commit
+that created the package and then sat unused for a month. So the shape of the write is decided in
+one place, and a live run and a file replay produce the same rows.
 
-The `reject` band is not imported, and neither are the runner-up answers. A rejected URL is a
-useful record of *why* coverage is what it is, but it is not a claim that a company has a
-website, and the observations table is for claims.
+Per company, `observations.write_company_result` writes:
+
+- one `search_query` marker, so the company is visible in `v_discovery_scorecard` at all;
+- three `discovery_tier` rows, one per method, recording whether it ran and what it found. Without
+  these, "OpenStreetMap had nothing for this company" and "OpenStreetMap was never asked" are the
+  same absence, and the second reads as evidence that a company has no website;
+- one row **per answer**, not just the winner, filed as `website` (confidence ≥ 0.35),
+  `candidate_url` (below the bar) or `directory_url` (a page *about* the company);
+- an `osm_id` row when OpenStreetMap matched, which is a stable handle for the business whether or
+  not the map knew a website.
+
+Nothing is re-scored here. A number invented at import time would be a second opinion competing
+with the first, and there would be no way to tell later which one a canonical field came from.
+
+Two filters were removed in step 3, both of which had been losing data. The band filter dropped
+`low`, which is at or above 0.35 and therefore promotable — a coverage bug. And requiring a website
+dropped every company that found nothing, which is the population the tier ledger exists to
+describe.
 
 ## Re-running
 
@@ -88,8 +102,13 @@ DEFAULT_RESULTS = REPO / "airflow" / "data" / "combined_discovery" / "results.js
 SOURCE_KEY = "combined_discovery"
 SOURCE_NAME = "Combined Discovery (URL patterns + OpenStreetMap + local judge)"
 
-#: Bands worth importing, best first. `reject` is excluded on purpose — see the module docstring.
-IMPORTABLE_BANDS = ("high", "medium")
+#: Bands that used to be worth importing. **No longer applied**, and kept only so the removal is
+#: legible: this filter dropped the `low` band, which is at or above `WEBSITE_MIN_CONFIDENCE` (0.35)
+#: and therefore promotable by `pipeline_coordinator`. That was a coverage bug, not a policy — the
+#: gate belongs at 0.35, where `observations.field_name_for` already puts it, not at a band name.
+#: `reject` needs no filter either: a rejected URL lands under `candidate_url`, which the resolver
+#: reads at 0.35 and so never promotes.
+_REMOVED_IMPORTABLE_BANDS = ("high", "medium")
 
 
 def load_rows(path: Path) -> list[dict[str, Any]]:
@@ -111,61 +130,83 @@ def load_rows(path: Path) -> list[dict[str, Any]]:
 
 
 def importable(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Every company the runner looked at — which is now all of them.
+
+    The band filter is gone (see `_REMOVED_IMPORTABLE_BANDS`) and so is the website requirement.
+    `observations.write_company_result` writes a `search_query` marker and three `discovery_tier`
+    rows for every company whether it found anything or not, and those rows are the whole point:
+    without them "OpenStreetMap had nothing for this company" and "OpenStreetMap was never asked"
+    are the same absence in the database, and the second one reads as evidence that a company has
+    no website.
+
+    The only row still refused is one claiming a website with no confidence behind it. A number the
+    pipeline never assigned cannot be invented here; it would land NULL, and the resolver's
+    `COALESCE(confidence, 0) >= 0.35` would silently exclude it anyway.
+    """
     out = []
     for row in rows:
-        if not row.get("website") or row.get("band") not in IMPORTABLE_BANDS:
-            continue
-        # A confidence the pipeline never assigned cannot be invented here; without one the row
-        # would land at NULL and the resolver could not compare it to anything.
-        if row.get("confidence_value") is None:
-            log.warning("skipping %s: band %s but no confidence_value", row["company_id"], row["band"])
+        if row.get("website") and row.get("confidence_value") is None:
+            log.warning(
+                "skipping %s: band %s claims a website with no confidence_value",
+                row["company_id"], row.get("band"),
+            )
             continue
         out.append(row)
     return out
 
 
-def observation_metadata(row: dict[str, Any]) -> dict[str, Any]:
-    """What a reader needs to judge this claim without opening results.jsonl.
-
-    `verified_by` and `why` are the two that matter: the first says which rule accepted the URL,
-    the second is the full confidence arithmetic as a string. Both travel to the canonical field
-    source, so "why does this company have this website" is answerable from the database alone.
-    """
-    return {
-        "verified_by": row.get("verified_by"),
-        "band": row.get("band"),
-        "methods": row.get("methods") or [],
-        "pattern": row.get("pattern"),
-        "evidence": sorted(row.get("evidence") or []),
-        "imprint_url": row.get("imprint_url"),
-        "why": row.get("why"),
-    }
-
-
 def summarise(rows: list[dict[str, Any]]) -> None:
-    log.info("%d companies with an importable website", len(rows))
+    """What is about to be written. Every company now, not only the ones with a website.
+
+    The band and confidence lines describe the subset that claims a website; the rest of the rows
+    are the `search_query` and `discovery_tier` ledger, which is exactly the population that used
+    to be invisible.
+    """
+    with_website = [r for r in rows if r.get("website")]
+    log.info("%d companies to write, %d of them claiming a website", len(rows), len(with_website))
     for label, counter in (
-        ("band", Counter(r["band"] for r in rows)),
-        ("verified_by", Counter(r.get("verified_by") for r in rows)),
-        ("methods", Counter(",".join(sorted(r.get("methods") or [])) for r in rows)),
+        ("band", Counter(r.get("band") for r in rows)),
+        ("verified_by", Counter(r.get("verified_by") for r in with_website)),
+        ("methods", Counter(",".join(sorted(r.get("methods") or [])) for r in with_website)),
+        ("stages_run", Counter(",".join(sorted(r.get("stages_run") or [])) for r in rows)),
     ):
-        log.info("  %s: %s", label, dict(counter.most_common()))
-    values = sorted(r["confidence_value"] for r in rows)
+        log.info("  %s: %s", label, dict(counter.most_common(8)))
+    values = sorted(r["confidence_value"] for r in with_website if r.get("confidence_value"))
     if values:
         log.info(
-            "  confidence: min %.4f, median %.4f, max %.4f",
+            "  confidence of the website claims: min %.4f, median %.4f, max %.4f",
             values[0], values[len(values) // 2], values[-1],
         )
+    answers = sum(len(r.get("answers") or []) for r in rows)
+    log.info("  %d answers across those companies — each one becomes a URL observation", answers)
+
+
+def _company_from_row(row: dict[str, Any]) -> Any:
+    """A `CompanyCandidate` built from the file, so no read of `public.companies` is needed.
+
+    `observations.write_company_result` only ever touches `.id`, `.company_name` and — through
+    `build_search_queries` — `.address`, `.postcode`, `.city`, `.registration_number`. Every one of
+    those is a top-level key in `results.jsonl`.
+    """
+    from source_enrichment_common import CompanyCandidate
+
+    return CompanyCandidate(
+        id=row["company_id"],
+        company_name=row["company_name"],
+        address=row.get("address"),
+        postcode=row.get("postcode"),
+        city=row.get("city"),
+        registration_number=row.get("registration_number"),
+    )
 
 
 def write(rows: list[dict[str, Any]]) -> None:
+    from combined_discovery import observations
     from source_enrichment_common import (
         ensure_source,
         finish_sync_run,
         get_connection,
-        insert_text_observation,
         start_sync_run,
-        upsert_source_record,
     )
 
     connection = get_connection()
@@ -176,26 +217,29 @@ def write(rows: list[dict[str, Any]]) -> None:
                 key=SOURCE_KEY,
                 name=SOURCE_NAME,
                 source_type="combined",
-                metadata={"script": "scripts/run_combined_discovery.py", "writes": "website only"},
+                metadata={
+                    "script": "scripts/run_combined_discovery.py",
+                    "writes": "website, candidate_url, directory_url, discovery_tier, "
+                              "search_query, osm_id",
+                },
             )
             sync_run_id = start_sync_run(cur, source_id=source_id)
 
             company_ids = [r["company_id"] for r in rows]
-            websites = [r["website"] for r in rows]
+            websites = [r["website"] for r in rows if r.get("website")]
+            website_ids = [r["company_id"] for r in rows if r.get("website")]
 
-            # Which of these claims the table already holds, so the sync run can report inserts and
-            # updates apart. Read before anything is written; the upsert itself cannot tell us,
+            # How many rows this source already holds, so the sync run can say what the write
+            # actually changed. Counted before anything is written: the upsert cannot tell us,
             # because ON CONFLICT DO UPDATE returns a row either way.
             cur.execute(
                 """
-                SELECT company_id::text, value_text
-                FROM public.company_field_observations
-                WHERE source_id = %s AND field_name = 'website'
-                  AND company_id = ANY(%s::uuid[])
+                SELECT count(*) FROM public.company_field_observations
+                WHERE source_id = %s AND company_id = ANY(%s::uuid[])
                 """,
                 (source_id, company_ids),
             )
-            already = {(company_id, value) for company_id, value in cur.fetchall()}
+            rows_before = cur.fetchone()[0]
 
             # Clear only the values the file has SUPERSEDED — a company whose website has changed
             # since the last import. The row that is merely being re-confirmed is left alone and
@@ -221,61 +265,55 @@ def write(rows: list[dict[str, Any]]) -> None:
                       AND f.website <> o.value_text
                   )
                 """,
-                (source_id, company_ids, websites),
+                (source_id, website_ids, websites),
             )
             superseded = cur.rowcount
 
-            created = 0
-            replaced = 0
+            # The whole write, for every company, is `observations.write_company_result`. Nothing is
+            # duplicated here: it decides the field name per answer, files third-party pages under
+            # `directory_url`, gates `website` at 0.35, and writes the tier ledger. This script's
+            # remaining job is to turn a file row into the two arguments that function needs.
+            records_created = 0
             for row in rows:
-                record_id, _is_new = upsert_source_record(
+                was_created = observations.write_company_result(
                     cur,
-                    company_id=row["company_id"],
-                    source_id=source_id,
-                    external_id=f"{SOURCE_KEY}:{row['company_id']}",
-                    external_url=row["website"],
-                    source_company_name=row["company_name"],
-                    source_payload={
-                        "website": row["website"],
-                        "band": row.get("band"),
-                        "confidence_value": row.get("confidence_value"),
-                        "verified_by": row.get("verified_by"),
-                        "candidates_generated": row.get("candidates_generated"),
-                        "candidates_resolved": row.get("candidates_resolved"),
-                    },
-                )
-                insert_text_observation(
-                    cur,
-                    company_id=row["company_id"],
-                    source_record_id=record_id,
+                    company=_company_from_row(row),
+                    result=row,
                     source_id=source_id,
                     sync_run_id=sync_run_id,
-                    field_name="website",
-                    value_text=row["website"],
-                    confidence=row["confidence_value"],
-                    metadata=observation_metadata(row),
+                    # From the file, not invented. `run` records which methods it actually ran per
+                    # company, and the tier rows are only meaningful because of it.
+                    stages_run=set(row.get("stages_run") or ()),
                 )
-                if (row["company_id"], row["website"]) in already:
-                    replaced += 1
-                else:
-                    created += 1
+                records_created += int(was_created)
+
+            cur.execute(
+                """
+                SELECT count(*) FROM public.company_field_observations
+                WHERE source_id = %s AND company_id = ANY(%s::uuid[])
+                """,
+                (source_id, company_ids),
+            )
+            rows_after = cur.fetchone()[0]
 
             finish_sync_run(
                 cur,
                 sync_run_id=sync_run_id,
                 records_seen=len(rows),
-                records_created=created,
-                records_updated=replaced,
+                records_created=records_created,
+                records_updated=len(rows) - records_created,
                 records_failed=0,
             )
     finally:
         connection.close()
 
     log.info(
-        "%d website observations: %d new, %d updated in place, %d superseded values removed",
-        created + replaced, created, replaced, superseded,
+        "%d companies written. observations for this source: %d -> %d (%+d); "
+        "%d new source records, %d superseded website values removed",
+        len(rows), rows_before, rows_after, rows_after - rows_before,
+        records_created, superseded,
     )
-    if created or superseded:
+    if rows_after != rows_before or superseded:
         log.info("Nothing is canonical yet. Trigger pipeline_coordinator in Airflow to resolve.")
     else:
         log.info(
@@ -289,11 +327,19 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--results", type=Path, default=DEFAULT_RESULTS, help="path to results.jsonl")
     parser.add_argument("--dry-run", action="store_true", help="count and summarise, write nothing")
+    parser.add_argument(
+        "--limit", type=int, default=None,
+        help="write only the first N companies of the file, in file order. For inspecting the "
+             "shape of the write before committing to all 14,443.",
+    )
     args = parser.parse_args()
 
     rows = load_rows(args.results)
     log.info("%s: %d companies", args.results, len(rows))
     keep = importable(rows)
+    if args.limit:
+        keep = keep[: args.limit]
+        log.info("--limit %d: writing a prefix of the file", args.limit)
     summarise(keep)
 
     if not keep:

@@ -60,12 +60,16 @@ TOTAL_COMPANIES = 14_443
 #: `results.jsonl` since `classify` last read it. The published 346/272/563/6,558/6,704 was measured
 #: over 902 websites; these numbers are the same rule over 940. The 38 extra websites bought 35
 #: fields, and every bucket moved.
+#: Step 3 moved these by three websites. Proving the new Postgres write path needed a real
+#: `run --force`, which re-discovered 3 companies and found websites they did not have, so
+#: `results.jsonl` went 940 -> 943. The staleness check below caught it immediately, `classify` was
+#: re-run, and one of the three cleared the keyword bar: assigned 381 -> 382.
 BRANCH_OUTCOMES = {
-    "assigned": 381, "torn": 282, "no_website": 557,
-    "no_keyword": 6_531, "no_text": 6_692,
+    "assigned": 382, "torn": 282, "no_website": 556,
+    "no_keyword": 6_532, "no_text": 6_691,
 }
-BRANCH_WITHHELD = 557           # every one of them an outcome == no_website row
-BRANCH_WITH_WEBSITE = 940       # must equal the websites in results.jsonl — see the staleness check
+BRANCH_WITHHELD = 556           # every one of them an outcome == no_website row
+BRANCH_WITH_WEBSITE = 943       # must equal the websites in results.jsonl — see the staleness check
 PURPOSE_OUTCOMES = {
     "assigned_keywords": 596, "assigned_model_77": 590, "assigned_model_3way": 14,
     "none_apply": 758, "torn": 47, "no_keyword": 5_136, "no_purpose": 7_302,
