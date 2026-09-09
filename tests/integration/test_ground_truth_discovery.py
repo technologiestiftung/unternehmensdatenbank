@@ -88,7 +88,21 @@ CANONICAL_WEBSITES = {
     "url_discovery": 37, "exa_search_discovery": 39, "parallel_search_discovery": 1,
 }
 CANONICAL_TOTAL = 3_529
+#: technologiefeld and purpose_field were added to the view in V20 but the write path is deferred to
+#: after the Berlin import, so their canonical count is 0 and they are deliberately NOT in this
+#: dict — a 0 here would assert the absence rather than describe it. Add them once Berlin has been
+#: imported and classify writes observations; the counts to expect then are the `assigned` totals
+#: from classify-report and classify-purpose-report.
 CANONICAL_OTHER_FIELDS = {"cluster": 532, "tech_field": 508}
+
+#: The six columns V20 appended, and the two views that read this one. Appending is the only shape
+#: of change `CREATE OR REPLACE VIEW` allows, and neither dependent uses a star-select, so this is
+#: the assertion that would catch a future edit which reordered a column or broke a dependent.
+V20_VIEW_COLUMNS = (
+    "technologiefeld", "technologiefeld_confidence", "technologiefeld_source",
+    "purpose_field", "purpose_field_confidence", "purpose_field_source",
+)
+DEPENDENT_VIEWS = ("v_company_full", "v_website_provenance")
 
 #: The alias itself, pinned. If a resolver change stopped promoting `candidate_url`, the totals
 #: above would fall by 3 and nothing would say why — this is the line that says why.
@@ -104,6 +118,10 @@ CANONICAL_BRAVE_SPLIT = {"website": 82, "candidate_url": 3}
 SOURCE_PRIORITIES = {
     "northdata_export": 50, "combined_discovery": 100, "brave_search_discovery": 100,
     "exa_search_discovery": 100, "parallel_search_discovery": 100, "url_discovery": 100,
+    # V20. Its own source rather than reusing combined_discovery, because sources.priority governs
+    # every field a source writes and the website priority has already been edited once as a side
+    # effect of an import. Writes nothing yet: V20 is schema only.
+    "branch_classifier": 100,
 }
 WEBSITE_MIN_CONFIDENCE = 0.35   # resolver's bar; LLM-only guesses are capped at 0.34
 #: Observations are never deleted, only un-canonicalised, so this floor may rise and never fall.
@@ -292,6 +310,35 @@ def test_company_managers_no_duplicates(cursor):
                               WHERE conname = 'uq_company_managers_company_name'""")[0], 1)
 
 
+def test_v20_columns_exist_and_are_empty(cursor):
+    with checks("V20 reserved the two industry columns, and wrote nothing"):
+        cur_cols = {
+            row[0] for row in _all(cursor, """
+                SELECT column_name FROM information_schema.columns
+                WHERE table_schema = 'public' AND table_name = 'v_companies_enriched'
+            """)
+        }
+        for column in V20_VIEW_COLUMNS:
+            check(f"v_companies_enriched has {column}", column in cur_cols, True)
+        # Zero until the write path lands. When it does, these two numbers become the `assigned`
+        # counts from classify-report, and this check becomes an equality against the files.
+        filled = _one(cursor, """
+            SELECT count(technologiefeld), count(purpose_field)
+            FROM public.v_companies_enriched
+        """)
+        check("technologiefeld is NULL until the write path lands", filled[0], 0)
+        check("purpose_field is NULL until the write path lands", filled[1], 0)
+        check("the branch_classifier source exists and writes nothing yet",
+              _one(cursor, """SELECT count(*) FROM public.company_field_observations o
+                              JOIN public.sources s ON s.id = o.source_id
+                              WHERE s.key = 'branch_classifier'""")[0], 0)
+        # The reason a CREATE OR REPLACE was safe: both dependents name their columns explicitly.
+        # If a future edit drops or reorders a column they read, this is what fails.
+        for view in DEPENDENT_VIEWS:
+            check(f"{view} still returns rows",
+                  _one(cursor, f"SELECT count(*) FROM public.{view}")[0], TOTAL_COMPANIES)
+
+
 def test_spend_guard(cursor):
     with checks("the spend guard cannot fire (documented, still true)"):
         best, at_guard = _one(cursor, """SELECT max(data_quality_score),
@@ -311,6 +358,7 @@ _TESTS = (
     test_resolver_invariants,
     test_observations_never_deleted,
     test_company_managers_no_duplicates,
+    test_v20_columns_exist_and_are_empty,
     test_spend_guard,
 )
 

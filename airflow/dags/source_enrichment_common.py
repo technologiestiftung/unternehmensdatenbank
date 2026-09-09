@@ -462,14 +462,20 @@ def insert_text_observation(
 ) -> str:
     """Write one claim by one source about one text field of one company. Returns the row's id.
 
-    An append for most fields. Six of them — `website`, `candidate_url`, `directory_url`,
-    `discovery_tier`, `search_query`, `osm_id` — have a unique key (V17, widened by V18) so a re-run
-    updates rather than writing a second copy. Without that, a source re-writing what it already
-    wrote had to DELETE first, and `company_canonical_field_sources` cascades off these rows — which
-    un-published 558 websites for four days on 2026-09-03.
+    An append for most fields. Ten of them — the six discovery ones (`website`, `candidate_url`,
+    `directory_url`, `discovery_tier`, `search_query`, `osm_id`) and the four classification ones
+    (`technologiefeld`, `purpose_field` and their `_withheld` variants) — have a unique key (V17,
+    widened by V18 and again by V20) so a re-run updates rather than writing a second copy. Without
+    that, a source re-writing what it already wrote had to DELETE first, and
+    `company_canonical_field_sources` cascades off these rows — which un-published 558 websites for
+    four days on 2026-09-03.
 
-    The predicate below must stay identical to the index predicate in V18. Widen one and you widen
-    the other, in the same commit.
+    The predicate below must stay identical to the index predicate in V20. Widen one and you widen
+    the other, in the same commit — Postgres infers the partial index from this predicate, so a
+    field name present in one and absent from the other cannot be upserted at all.
+
+    The last four names have no writer yet: V20 is schema only and the classification write path
+    lands after the Berlin import. They are listed now so that path cannot arrive without its key.
 
     **Newest write wins**, unconditionally. Not highest-confidence-wins: a re-score has to be able to
     DEMOTE, and this repo has already been bitten by a change that could only ever promote
@@ -503,7 +509,9 @@ def insert_text_observation(
         ON CONFLICT (company_id, field_name, source_id, value_text)
           WHERE field_name IN (
             'website', 'candidate_url', 'directory_url',
-            'discovery_tier', 'search_query', 'osm_id'
+            'discovery_tier', 'search_query', 'osm_id',
+            'technologiefeld', 'purpose_field',
+            'technologiefeld_withheld', 'purpose_field_withheld'
           )
         DO UPDATE SET
           confidence = EXCLUDED.confidence,
