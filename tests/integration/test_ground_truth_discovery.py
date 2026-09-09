@@ -70,7 +70,16 @@ SOURCE_PRIORITIES = {
 }
 WEBSITE_MIN_CONFIDENCE = 0.35   # resolver's bar; LLM-only guesses are capped at 0.34
 #: Observations are never deleted, only un-canonicalised, so this floor may rise and never fall.
-WEBSITE_OBSERVATION_FLOOR = 5_457
+#:
+#: V17 deduped 49 duplicate groups; floor is now 5,408, down from 5,457. `candidate_url`
+#: legitimately has up to 5 rows per company/source — the key includes value_text so a re-run of the
+#: same URL updates while a new URL still inserts.
+#:
+#: This is the one number in this file that a migration was allowed to lower, and only because the
+#: rows removed were exact duplicates: same company, same field, same source, same URL. The loser of
+#: each pair was never canonical — all six per-source counts above are unchanged — so nothing was
+#: un-published. If this floor ever falls again, that is the failure this assertion exists to catch.
+WEBSITE_OBSERVATION_FLOOR = 5_408
 #: Live known bug: pipeline_coordinator inserts into company_managers with ON CONFLICT DO NOTHING
 #: against a table with no matching unique constraint, so every run adds another copy.
 MANAGER_ROWS_CEILING = 7_167

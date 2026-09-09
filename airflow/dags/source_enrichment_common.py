@@ -460,6 +460,26 @@ def insert_text_observation(
     metadata: dict[str, Any] | None = None,
     confidence: float | None = None,
 ) -> str:
+    """Write one claim by one source about one text field of one company. Returns the row's id.
+
+    An append for every field except `website` and `candidate_url`, which V17 gave a unique key so a
+    re-run can update rather than write a second copy. Without that, a source re-writing what it
+    already wrote had to DELETE first, and `company_canonical_field_sources` cascades off these rows —
+    which un-published 558 websites for four days on 2026-09-03.
+
+    **Newest write wins**, unconditionally. Not highest-confidence-wins: a re-score has to be able to
+    DEMOTE, and this repo has already been bitten by a change that could only ever promote
+    (`scripts/replay_judge_gate.py` exists because of it). A conditional `DO UPDATE ... WHERE` would
+    also return no row when it declined to fire, and the `RETURNING id` below would then raise.
+
+    Two things it deliberately does not refresh on conflict: `observed_at` and `source_sync_run_id`
+    keep the values from the first write, so a row updated by a later run still points at the run that
+    created it. Add them to the SET list if run attribution ever matters more than the original
+    timestamp.
+
+    The `WHERE` in the conflict target is not optional — it is how Postgres infers a *partial* index.
+    A row in any other field satisfies no predicate, finds no arbiter index, and inserts as before.
+    """
     cur.execute(
         """
         INSERT INTO public.company_field_observations (
@@ -476,6 +496,12 @@ def insert_text_observation(
           updated_at
         )
         VALUES (%s, %s, %s, %s, %s, %s, now(), %s, %s, now(), now())
+        ON CONFLICT (company_id, field_name, source_id, value_text)
+          WHERE field_name IN ('website', 'candidate_url')
+        DO UPDATE SET
+          confidence = EXCLUDED.confidence,
+          metadata   = EXCLUDED.metadata,
+          updated_at = now()
         RETURNING id
         """,
         (
