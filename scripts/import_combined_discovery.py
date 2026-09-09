@@ -28,10 +28,26 @@ website, and the observations table is for claims.
 
 ## Re-running
 
-Idempotent. Observations from a previous import are deleted inside the same transaction before
-the new ones land, so running it twice leaves one observation per company rather than two. That
-is a deliberate difference from the provider DAGs, which append: they see the live web, which
-changes, so their history is worth keeping. This reads a file, and a file's history is the file.
+Idempotent, and since V17 it is idempotent *without deleting what it is about to rewrite*. The
+unique key on `(company_id, field_name, source_id, value_text)` lets `insert_text_observation`
+update a row in place, so a company whose website has not changed keeps the same observation row —
+and therefore keeps its canonical field, because `company_canonical_field_sources` points at that
+row and cascades when it is deleted.
+
+That cascade is why this matters. Until V17 this script deleted every one of its own `website`
+rows for the companies it was about to write, which took them out of the canonical table for the
+length of the gap between the import and the next `pipeline_coordinator` run. On 2026-09-03 that
+gap lasted four days and 558 websites: the Brave runs that were meant to follow failed, and a
+failed task never triggers the coordinator.
+
+One delete remains, and it is narrow: a value the file has **superseded**. If a company's website
+has genuinely changed since the last import, the old observation is wrong and has to go, canonical
+pointer included, or it would out-rank the correction on confidence alone. Measured on 2026-09-09,
+940 of 940 rows in the file carry the URL already in the table, so that statement removes nothing
+today.
+
+Still a deliberate difference from the provider DAGs, which append: they watch a web that changes,
+so their history is worth keeping. This reads a file, and a file's history is the file.
 
 ## Usage
 
@@ -164,20 +180,53 @@ def write(rows: list[dict[str, Any]]) -> None:
             )
             sync_run_id = start_sync_run(cur, source_id=source_id)
 
-            # Idempotence. Delete this source's previous website observations for the companies
-            # being written, not for every company: a company that has since dropped out of the
-            # file keeps its old observation rather than silently losing its website.
             company_ids = [r["company_id"] for r in rows]
+            websites = [r["website"] for r in rows]
+
+            # Which of these claims the table already holds, so the sync run can report inserts and
+            # updates apart. Read before anything is written; the upsert itself cannot tell us,
+            # because ON CONFLICT DO UPDATE returns a row either way.
             cur.execute(
                 """
-                DELETE FROM public.company_field_observations
-                WHERE source_id = %s AND field_name = 'website' AND company_id = ANY(%s::uuid[])
+                SELECT company_id::text, value_text
+                FROM public.company_field_observations
+                WHERE source_id = %s AND field_name = 'website'
+                  AND company_id = ANY(%s::uuid[])
                 """,
                 (source_id, company_ids),
             )
-            replaced = cur.rowcount
+            already = {(company_id, value) for company_id, value in cur.fetchall()}
+
+            # Clear only the values the file has SUPERSEDED — a company whose website has changed
+            # since the last import. The row that is merely being re-confirmed is left alone and
+            # updated in place by the upsert below, which is the entire point of V17: on 2026-09-03
+            # a blanket delete of this source's rows took 558 websites out of
+            # `company_canonical_field_sources` (it cascades) and they stayed out for four days,
+            # because the Brave runs that followed failed and a failed task never reaches
+            # `pipeline_coordinator`. Nothing that survives is un-published now.
+            #
+            # A superseded row still has to go, and its canonical pointer with it: the old answer is
+            # wrong, and leaving it would let it out-rank the correction on confidence alone.
+            # Measured 2026-09-09: 940 of 940 file rows carry the URL already in the table, so this
+            # statement deletes nothing today. It exists for the run where that stops being true.
+            cur.execute(
+                """
+                DELETE FROM public.company_field_observations o
+                WHERE o.source_id = %s
+                  AND o.field_name = 'website'
+                  AND EXISTS (
+                    SELECT 1
+                    FROM unnest(%s::uuid[], %s::text[]) AS f(company_id, website)
+                    WHERE f.company_id = o.company_id
+                      AND f.website <> o.value_text
+                  )
+                """,
+                (source_id, company_ids, websites),
+            )
+            superseded = cur.rowcount
 
             created = 0
+            replaced = 0
             for row in rows:
                 record_id, _is_new = upsert_source_record(
                     cur,
@@ -206,7 +255,10 @@ def write(rows: list[dict[str, Any]]) -> None:
                     confidence=row["confidence_value"],
                     metadata=observation_metadata(row),
                 )
-                created += 1
+                if (row["company_id"], row["website"]) in already:
+                    replaced += 1
+                else:
+                    created += 1
 
             finish_sync_run(
                 cur,
@@ -219,8 +271,18 @@ def write(rows: list[dict[str, Any]]) -> None:
     finally:
         connection.close()
 
-    log.info("wrote %d website observations (%d replaced a previous import)", created, replaced)
-    log.info("Nothing is canonical yet. Trigger pipeline_coordinator in Airflow to resolve.")
+    log.info(
+        "%d website observations: %d new, %d updated in place, %d superseded values removed",
+        created + replaced, created, replaced, superseded,
+    )
+    if created or superseded:
+        log.info("Nothing is canonical yet. Trigger pipeline_coordinator in Airflow to resolve.")
+    else:
+        log.info(
+            "Every row was an update in place, so no canonical field was disturbed and "
+            "`v_companies_enriched` is unchanged. A pipeline_coordinator run is still the way to "
+            "pick up any confidence that moved."
+        )
 
 
 def main() -> int:
