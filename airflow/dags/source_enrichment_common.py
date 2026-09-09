@@ -326,20 +326,6 @@ def ensure_source(cur: Any, *, key: str, name: str, source_type: str, metadata: 
     return cur.fetchone()[0]
 
 
-def delete_planned_source_records(cur: Any, *, company_id: str, source_key: str) -> None:
-    cur.execute(
-        """
-        DELETE FROM public.company_source_records csr
-        USING public.sources s
-        WHERE csr.source_id = s.id
-          AND csr.company_id = %s
-          AND s.key = %s
-          AND COALESCE(csr.source_payload ->> 'status', '') = 'planned'
-        """,
-        (company_id, source_key),
-    )
-
-
 def start_sync_run(cur: Any, *, source_id: str, sync_type: str = "manual") -> str:
     cur.execute(
         """
