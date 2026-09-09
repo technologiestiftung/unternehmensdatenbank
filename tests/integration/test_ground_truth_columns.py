@@ -64,12 +64,26 @@ TOTAL_COMPANIES = 14_443
 #: `run --force`, which re-discovered 3 companies and found websites they did not have, so
 #: `results.jsonl` went 940 -> 943. The staleness check below caught it immediately, `classify` was
 #: re-run, and one of the three cleared the keyword bar: assigned 381 -> 382.
+#: Step 6: the website GATE now comes from Postgres, not from `results.jsonl`. `classify` asks the
+#: database "did anybody fetch and check a page for this company", so a page Brave or Exa
+#: downloaded now counts even though combined discovery never saw it. 1,150 companies qualify
+#: against the file's 943, and that released **26** withheld fields: assigned 382 → 408,
+#: no_website 556 → 530. Nothing else moved — `torn`, `no_keyword` and `no_text` are untouched,
+#: because the gate only ever bit where keywords had already found a field.
+#:
+#: It is deliberately NOT all 3,532 canonical websites. 2,800 of those came from the Northdata
+#: export and not one has been fetched; gating on them would have released 188 fields, 169 of them
+#: computed from the register purpose alone because those companies have no downloaded page — which
+#: is column 3's job, and would make column 1 a partial duplicate of it.
 BRANCH_OUTCOMES = {
-    "assigned": 382, "torn": 282, "no_website": 556,
+    "assigned": 408, "torn": 282, "no_website": 530,
     "no_keyword": 6_532, "no_text": 6_691,
 }
-BRANCH_WITHHELD = 556           # every one of them an outcome == no_website row
+BRANCH_WITHHELD = 530           # every one of them an outcome == no_website row
 BRANCH_WITH_WEBSITE = 943       # must equal the websites in results.jsonl — see the staleness check
+#: Fields resting on a website `results.jsonl` never recorded — the 26 the database gate recovered.
+#: Handel 10, Gastgewerbe 4, Telekommunikationsanbieter 3, and eight others.
+BRANCH_ASSIGNED_WITHOUT_FILE_WEBSITE = 26
 PURPOSE_OUTCOMES = {
     "assigned_keywords": 596, "assigned_model_77": 590, "assigned_model_3way": 14,
     "none_apply": 758, "torn": 47, "no_keyword": 5_136, "no_purpose": 7_302,
@@ -146,8 +160,13 @@ def test_column1_outcomes(branches):
               {r["outcome"] for r in branches if r["withheld_branch"]}, {"no_website"})
         check("companies with a website",
               sum(1 for r in branches if r["website"]), BRANCH_WITH_WEBSITE)
-        check("no website, no field",
-              {r["technologiefeld"] for r in branches if not r["website"]}, {NO_FIELD})
+        # This used to assert that a row with no `website` in the file never has a field. Since
+        # step 6 the gate is the database, not the file, so 26 rows legitimately have a field and
+        # no file website. Pinning the count keeps the check meaningful: if it moves, either the
+        # gate or the file did.
+        check("fields resting on a website the file never saw",
+              sum(1 for r in branches if r["outcome"] == "assigned" and not r["website"]),
+              BRANCH_ASSIGNED_WITHOUT_FILE_WEBSITE)
 
 
 def test_column3_outcomes(purposes):

@@ -280,6 +280,63 @@ WHERE id::text = ANY(%s)
 """
 
 
+#: Companies whose canonical website was actually FETCHED. Not every canonical website: 2,800 of
+#: the 3,532 came from the Northdata export and not one of them has ever been loaded.
+#:
+#: This is the gate for the Technologiefeld, and the gate's whole justification is that a live
+#: website is evidence a company trades, where a register purpose is only evidence of what it is
+#: permitted to do. A URL in a CSV is neither — it is evidence that somebody recorded a URL. Gating
+#: on all 3,532 would release 188 withheld fields, but 169 of them would be computed from the
+#: register purpose alone, because those companies have no downloaded page. Column 1 would then be
+#: a partial duplicate of column 3 for those 169, which is the one thing the three-column split
+#: exists to prevent.
+#:
+#: "Fetched" is recorded two ways, and both are needed: a `verified_by` that implies a download
+#: (`register_number_match`, `page_content_match`, `method_agreement`, `url_pattern` — but never
+#: `llm_snippet`, which is a model reading search snippets), or an `imprint_url`, which only exists
+#: because a page was fetched and its Impressum probed. Three Brave rows have the second and not
+#: the first.
+#:
+#: **Any observation, not the canonical one.** This asked the canonical row first, and that was
+#: wrong in a way worth recording: the canonical row is picked by `sources.priority`, the export
+#: sits at 50, and it wins every contest it enters. So for the ~370 companies where the export
+#: displaced a page combined discovery had actually downloaded — same URL, 438 of them agree
+#: exactly — the surviving row is the unfetched one, and the company failed a gate it used to pass.
+#: `assigned` fell 382 → 270 and `no_website` rose 556 → 668 before this was fixed. The question is
+#: "did anybody fetch a page for this company", which is a question about the evidence, not about
+#: which row won a priority contest. Above the resolver's own 0.35 bar, so a rejected candidate
+#: cannot answer it. 1,150 companies of 14,443.
+VERIFIED_WEBSITE_SQL = """
+SELECT DISTINCT o.company_id::text
+FROM public.company_field_observations o
+WHERE o.field_name IN ('website', 'candidate_url')
+  AND COALESCE(o.confidence, 0) >= 0.35
+  AND (
+        (o.metadata->>'verified_by' IS NOT NULL AND o.metadata->>'verified_by' <> 'llm_snippet')
+     OR o.metadata ? 'imprint_url'
+  )
+"""
+
+
+def load_verified_websites() -> set[str]:
+    """Company ids with a canonical website somebody actually downloaded.
+
+    Read from the database rather than from `results.jsonl`, which is the point of this function:
+    the file only knows what combined discovery found itself, so it saw 940 websites while the
+    resolver had settled 3,532. Every source that fetched and checked a page now counts, whoever
+    fetched it.
+    """
+    from source_enrichment_common import get_connection
+
+    connection = get_connection()
+    try:
+        with connection, connection.cursor() as cur:
+            cur.execute(VERIFIED_WEBSITE_SQL)
+            return {row[0] for row in cur.fetchall()}
+    finally:
+        connection.close()
+
+
 def load_db_websites(company_ids: list[str]) -> dict[str, dict[str, Any]]:
     """Company id -> the website already stored, its source and its confidence.
 
@@ -1768,6 +1825,25 @@ def classify(
     scope = [cid for cid in facts if cid in rows] if rows else list(facts)
     log.info("%d companies in scope", len(scope))
 
+    # The website GATE comes from the database; the website TEXT still comes from the file. That
+    # asymmetry is deliberate and worth stating, because it looks like an oversight.
+    #
+    # The gate asks "did anyone prove this company trades", and the answer belongs to the resolver:
+    # any source that fetched and checked a page counts, not only this script's own guesses. The
+    # text asks "what words are on that page", and only the file can answer, because the page cache
+    # is keyed by the URL as it was requested and the canonical string often differs by scheme,
+    # `www` or a trailing slash — 300 of the 3,532 canonical URLs hit the cache, against 940 of the
+    # file's own. So a company can now pass the gate and still have nothing to read, which lands it
+    # in `no_keyword` or `no_text` rather than `no_website`. That is the honest outcome: we know it
+    # trades and we have not read its words.
+    verified = load_verified_websites()
+    in_scope = sum(1 for cid in scope if cid in verified)
+    log.info(
+        "%d companies have a website somebody downloaded; %d of them are in scope. The file knows "
+        "of %d — the difference is what this gate exists to recover.",
+        len(verified), in_scope, sum(1 for r in rows.values() if r.get("website")),
+    )
+
     # ---- pass 1: read every text once ---------------------------------------------------
     per_company: dict[str, dict[str, Any]] = {}
     for company_id in scope:
@@ -1829,7 +1905,9 @@ def classify(
         # A Technologiefeld requires a website. The register purpose may still be what DECIDES the
         # field — it does for 15 companies — but a company we never found a website for gets NONE
         # with the reason `no_website`, and what it would have been is kept beside it.
-        has_website = bool(rows.get(company_id, {}).get("website"))
+        # From the resolver, not from this script's own file. See the note where `verified` is
+        # loaded for why the gate and the text now come from different places.
+        has_website = company_id in verified
         result = bc.classify(
             taxonomy=taxonomy,
             df=df,
