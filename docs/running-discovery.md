@@ -131,9 +131,17 @@ rm airflow/data/exa_search_discovery_checkpoint.json
 `pipeline_coordinator` runs automatically when the discovery job finishes. It is what turns
 observations into answers. You do not need to trigger it.
 
-> **Do not trigger `pipeline_coordinator` by hand more often than necessary.** It has a bug:
-> every run adds duplicate rows to `company_managers`, because the table has no unique
-> constraint for its `ON CONFLICT DO NOTHING` to catch. It is otherwise safe to re-run.
+> **Re-running `pipeline_coordinator` by hand is safe.** This used to carry a warning that every run
+> added duplicate rows to `company_managers`, and it was true: `resolve_ceo_contact` ended in
+> `ON CONFLICT DO NOTHING` with no target, which can only suppress a conflict on a constraint that
+> exists — and the only one was the primary key on a randomly generated id, which never collides. So
+> each run appended a fresh copy of every name it could resolve, and the table reached 9,195 rows.
+>
+> **`V19__fix_company_managers_unique.sql` fixed it.** It deduped to 1,047 rows keeping the earliest
+> one of each pair, added `uq_company_managers_company_name UNIQUE (company_id, full_name)`, and the
+> statement now names that constraint. A coordinator run after the migration added zero rows, and
+> `tests/integration/test_ground_truth_discovery.py` asserts total == distinct, so a regression fails
+> a test instead of quietly growing the table.
 
 ---
 
