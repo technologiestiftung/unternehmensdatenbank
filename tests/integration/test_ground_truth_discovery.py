@@ -120,21 +120,19 @@ WEBSITE_MIN_CONFIDENCE = 0.35   # resolver's bar; LLM-only guesses are capped at
 #: written twice — once as `candidate_url`, once as `website` — and the `website` row is one the new
 #: rule never writes. Nothing was lost; 34 rows are correctly filed and 28 said the same thing twice.
 WEBSITE_OBSERVATION_FLOOR = 19_521
-#: Live known bug: pipeline_coordinator inserts into company_managers with ON CONFLICT DO NOTHING
-#: against a table with no matching unique constraint, so every run adds another copy.
+#: V19 fixed the duplication this used to record. `resolve_ceo_contact` had always ended in
+#: `ON CONFLICT DO NOTHING`, but with no target that can only suppress a conflict on a constraint
+#: that exists, and the only one was the primary key on a `gen_random_uuid()` column, which never
+#: collides. So every coordinator run appended a full copy of every name it could resolve — a flat
+#: ~1,014 rows, because the statement has no batch and no changed-companies filter.
 #:
-#: Step 3 triggered the coordinator and this went 7,167 → 8,181 while `distinct` stayed at 1,047 —
-#: one more copy of roughly a thousand names, for no new information. The assertion caught it, which
-#: is the only reason it is here. Raising the ceiling records the cost of that run rather than
-#: excusing it: the fix is a unique constraint on (company_id, full_name), and until it lands every
-#: coordinator run makes this worse. That is now a live argument against step 7 of the unification
-#: plan, which would trigger the coordinator automatically.
+#: The ceiling this file used to assert went 7,167 -> 8,181 -> 9,195 across steps 3 and 5, each raise
+#: recording a run nobody could undo. V19 deduped to 1,047 and added
+#: `uq_company_managers_company_name`, so the assertion below is now an equality: total == distinct.
+#: A coordinator run after the migration added zero rows.
 #:
-#: Step 5 needed one more coordinator run to re-resolve the refiled companies: 8,181 → 9,195, still
-#: 1,047 distinct. Three runs across steps 3 and 5 have now added 2,028 rows of pure duplication.
-#: The ceiling is a ratchet recording that cost, not a target — every raise is a coordinator run
-#: nobody can undo, and the constraint that would stop it is a one-line migration.
-MANAGER_ROWS_CEILING = 9_195
+#: `MANAGER_ROWS_CEILING` is gone on purpose. A ceiling was the right shape for a cost being
+#: tracked and the wrong shape for an invariant being enforced.
 MANAGER_DISTINCT = 1_047
 
 FAILURES: list[str] = []
@@ -274,12 +272,18 @@ def test_observations_never_deleted(cursor):
               >= WEBSITE_OBSERVATION_FLOOR, True)
 
 
-def test_company_managers_bug(cursor):
-    with checks("known live bug: company_managers duplicates every run"):
+def test_company_managers_no_duplicates(cursor):
+    with checks("company_managers holds each manager exactly once (V19)"):
         total, distinct = _one(cursor, """SELECT count(*), count(DISTINCT (company_id, full_name))
                                           FROM public.company_managers""")
-        check("duplication is not getting worse", total <= MANAGER_ROWS_CEILING, True)
+        # An equality, not a ceiling. The ceiling version of this assertion was raised twice while
+        # it recorded the cost of a bug it could not stop; V19 made the invariant enforceable, so
+        # the test now states it.
+        check("no duplicate managers", total, distinct)
         check("distinct managers", distinct, MANAGER_DISTINCT)
+        check("the constraint that guarantees it is still there",
+              _one(cursor, """SELECT count(*) FROM pg_constraint
+                              WHERE conname = 'uq_company_managers_company_name'""")[0], 1)
 
 
 def test_spend_guard(cursor):
@@ -300,7 +304,7 @@ _TESTS = (
     test_other_canonical_fields,
     test_resolver_invariants,
     test_observations_never_deleted,
-    test_company_managers_bug,
+    test_company_managers_no_duplicates,
     test_spend_guard,
 )
 

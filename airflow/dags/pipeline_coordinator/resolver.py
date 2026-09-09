@@ -226,7 +226,27 @@ def resolve_employee_count(cur: Any) -> int:
 
 
 def resolve_ceo_contact(cur: Any) -> int:
-    """Upsert best ceo_name_or_contact observation into company_managers."""
+    """Upsert best ceo_name_or_contact observation into company_managers.
+
+    Idempotent since V19, and it was not before. The `ON CONFLICT` below has always been here, but
+    with no target it could only suppress a conflict on a unique constraint that existed — and the
+    only one was the primary key on `id`, defaulted to `gen_random_uuid()`, which never collides. So
+    every run appended a fresh copy of every name: 9,195 rows for 1,047 distinct
+    `(company_id, full_name)` pairs by the time it was fixed, 21 copies at worst.
+
+    V19 added `uq_company_managers_company_name`, and the clause below now names it. Naming rather
+    than relying on inference means a migration that drops the constraint breaks this statement
+    loudly instead of quietly restoring the duplication.
+
+    Two things this still does not do, both deliberate for now and both worth knowing:
+
+    - No batch and no changed-companies filter. It re-runs over every company with a qualifying
+      observation, which is cheap now that repeats collapse, but means `rowcount` counts inserts
+      only and reads as 0 on a run that changed nothing.
+    - It records no reference to the observation a name came from, so a name read off an Impressum
+      cannot be told from one a model guessed. `v_discovery_results` works around this by reading
+      observations directly.
+    """
     cur.execute(
         """
         WITH best AS (
@@ -245,7 +265,7 @@ def resolve_ceo_contact(cur: Any) -> int:
           (company_id, full_name, role, is_current, metadata, created_at, updated_at)
         SELECT b.company_id, b.full_name, 'Geschäftsführer', true, '{}'::jsonb, now(), now()
         FROM best b
-        ON CONFLICT DO NOTHING
+        ON CONFLICT ON CONSTRAINT uq_company_managers_company_name DO NOTHING
         """,
         (_FIELD_MIN_CONF,),
     )
