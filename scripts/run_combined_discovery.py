@@ -537,6 +537,7 @@ def run(
     limit: int,
     stages: set[str],
     workers: int,
+    skip_coordinator: bool = False,
     refresh_osm: bool = False,
     force: bool = False,
 ) -> None:
@@ -740,11 +741,16 @@ def run(
     log.info("Done. %d companies written to %s", counter["n"], RESULTS_PATH)
 
     written = write_observations_for([c.id for c in pending])
-    if written is not None:
+    if written is None:
+        return
+    log.info("%d observations in the database for these %d companies.", written, len(pending))
+    if skip_coordinator:
         log.info(
-            "%d observations in the database for these %d companies. Trigger "
-            "pipeline_coordinator to resolve them.", written, len(pending),
+            "--skip-coordinator: the observations are written and unresolved. Nothing is canonical "
+            "until pipeline_coordinator runs."
         )
+        return
+    trigger_coordinator()
 
 
 def write_observations_for(company_ids: list[str]) -> int | None:
@@ -823,6 +829,48 @@ def write_observations_for(company_ids: list[str]) -> int | None:
         return total
     finally:
         connection.close()
+
+
+def trigger_coordinator() -> bool:
+    """Resolve the observations just written into canonical fields. Returns True if it ran.
+
+    **A direct call, not an Airflow trigger.** `pipeline_coordinator/main.py` keeps its Airflow
+    imports inside `_make_dag()` behind a `try/except ImportError`, so `run_pipeline_coordinator`
+    is importable from the host and opens its own psycopg2 connection. It is the same function the
+    DAG's `PythonOperator` calls, so there is one implementation and two callers rather than a copy
+    that can drift.
+
+    What that costs: no `dag_run` row, so this does not appear in the Airflow UI or in
+    `airflow.dag_run`. What it buys: no scheduler, no container spin-up, no REST auth, and it works
+    when Airflow is not running at all — which is the normal state for a script that is
+    deliberately not a DAG. A caller who wants the Airflow bookkeeping can pass
+    `--skip-coordinator` and trigger the DAG itself.
+
+    Never fatal. A run of this script can cost an hour and its results are already safe in
+    `results.jsonl` and in `company_field_observations`; failing the whole thing because the
+    resolver could not be reached would throw that away. The observations simply stay unresolved,
+    which is exactly the state every previous version of this script left them in.
+
+    Safe to call repeatedly since V19: `resolve_ceo_contact` used to append a duplicate
+    `company_managers` row for every company on every run — 9,195 rows for 1,047 distinct names —
+    and `uq_company_managers_company_name` now makes a repeat run a no-op.
+    """
+    log.info("triggering pipeline_coordinator")
+    try:
+        coordinator = REPO_ROOT / "airflow" / "dags" / "pipeline_coordinator"
+        if str(coordinator) not in sys.path:
+            sys.path.insert(0, str(coordinator))
+        from pipeline_coordinator.main import run_pipeline_coordinator
+
+        run_pipeline_coordinator()
+    except Exception as exc:  # noqa: BLE001
+        log.warning(
+            "pipeline_coordinator did not run: %s. The observations are written and unresolved; "
+            "trigger the DAG in Airflow, or re-run this script with the same arguments.", exc,
+        )
+        return False
+    log.info("pipeline_coordinator finished. Canonical fields are up to date.")
+    return True
 
 
 def _company_for_observations(row: dict[str, Any]) -> Any:
@@ -4099,6 +4147,14 @@ def main() -> None:
         "--force", action="store_true",
         help="re-run every company in the sample, including ones that already have every method",
     )
+    p_run.add_argument(
+        "--skip-coordinator", action="store_true",
+        help=(
+            "write the observations but do not resolve them. Nothing becomes a canonical website "
+            "until pipeline_coordinator runs, so use this only when you intend to trigger it "
+            "yourself -- in Airflow, for the dag_run record this direct call does not create."
+        ),
+    )
 
     p_report = sub.add_parser("report", help="print the scorecard")
     p_report.add_argument(
@@ -4227,6 +4283,7 @@ def main() -> None:
             raise SystemExit(f"unknown stage(s): {sorted(unknown)}")
         run(
             args.limit, stages, args.workers,
+            skip_coordinator=args.skip_coordinator,
             refresh_osm=args.refresh_osm, force=args.force,
         )
     elif args.command == "report":

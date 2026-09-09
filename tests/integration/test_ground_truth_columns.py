@@ -75,15 +75,19 @@ TOTAL_COMPANIES = 14_443
 #: export and not one has been fetched; gating on them would have released 188 fields, 169 of them
 #: computed from the register purpose alone because those companies have no downloaded page — which
 #: is column 3's job, and would make column 1 a partial duplicate of it.
+#: Step 7 moved these by five. Proving the coordinator trigger needed real `run --force` passes,
+#: which replaced the answers of eight companies, and the bridge then correctly removed 38 stored
+#: rows whose URLs the file no longer claims. The verified-website gate fell 1,150 -> 1,113 and
+#: assigned 408 -> 403. Churn from verification, not from the trigger.
 BRANCH_OUTCOMES = {
-    "assigned": 408, "torn": 282, "no_website": 530,
+    "assigned": 403, "torn": 282, "no_website": 535,
     "no_keyword": 6_532, "no_text": 6_691,
 }
-BRANCH_WITHHELD = 530           # every one of them an outcome == no_website row
+BRANCH_WITHHELD = 535           # every one of them an outcome == no_website row
 BRANCH_WITH_WEBSITE = 943       # must equal the websites in results.jsonl — see the staleness check
 #: Fields resting on a website `results.jsonl` never recorded — the 26 the database gate recovered.
 #: Handel 10, Gastgewerbe 4, Telekommunikationsanbieter 3, and eight others.
-BRANCH_ASSIGNED_WITHOUT_FILE_WEBSITE = 26
+BRANCH_ASSIGNED_WITHOUT_FILE_WEBSITE = 25
 PURPOSE_OUTCOMES = {
     "assigned_keywords": 596, "assigned_model_77": 590, "assigned_model_3way": 14,
     "none_apply": 758, "torn": 47, "no_keyword": 5_136, "no_purpose": 7_302,

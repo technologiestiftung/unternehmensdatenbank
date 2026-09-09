@@ -68,8 +68,9 @@ so their history is worth keeping. This reads a file, and a file's history is th
     python scripts/import_combined_discovery.py --dry-run     # counts only, writes nothing
     python scripts/import_combined_discovery.py
 
-Then trigger `pipeline_coordinator` in Airflow. Until that runs, the observations exist but no
-canonical field has changed, and `v_companies_enriched` looks exactly as it did before.
+Since step 7 it resolves what it wrote: `pipeline_coordinator` is called directly when anything
+changed, so `v_companies_enriched` is up to date when the script exits. Pass `--skip-coordinator` to
+leave the observations unresolved for somebody else to pick up.
 """
 from __future__ import annotations
 
@@ -181,6 +182,35 @@ def summarise(rows: list[dict[str, Any]]) -> None:
     log.info("  %d answers across those companies — each one becomes a URL observation", answers)
 
 
+def trigger_coordinator() -> bool:
+    """Resolve what was just written into canonical fields. Returns True if it ran.
+
+    A direct call to `run_pipeline_coordinator`, not an Airflow trigger, for the reasons set out at
+    length in `run_combined_discovery.trigger_coordinator` -- one implementation, two callers, no
+    scheduler required, and no `dag_run` row to show for it. Deliberately duplicated here rather
+    than imported: this script has no other reason to load 4,200 lines of runner.
+
+    Never fatal. The observations are already written; leaving them unresolved is the state every
+    previous version of this script left them in, and the log says so.
+    """
+    log.info("triggering pipeline_coordinator")
+    try:
+        coordinator = REPO / "airflow" / "dags" / "pipeline_coordinator"
+        if str(coordinator) not in sys.path:
+            sys.path.insert(0, str(coordinator))
+        from pipeline_coordinator.main import run_pipeline_coordinator
+
+        run_pipeline_coordinator()
+    except Exception as exc:  # noqa: BLE001
+        log.warning(
+            "pipeline_coordinator did not run: %s. The observations are written and unresolved; "
+            "trigger the DAG in Airflow, or re-run this script.", exc,
+        )
+        return False
+    log.info("pipeline_coordinator finished. Canonical fields are up to date.")
+    return True
+
+
 def _company_from_row(row: dict[str, Any]) -> Any:
     """A `CompanyCandidate` built from the file, so no read of `public.companies` is needed.
 
@@ -200,7 +230,7 @@ def _company_from_row(row: dict[str, Any]) -> Any:
     )
 
 
-def write(rows: list[dict[str, Any]]) -> None:
+def write(rows: list[dict[str, Any]]) -> bool:
     from combined_discovery import observations
     from source_enrichment_common import (
         ensure_source,
@@ -226,8 +256,20 @@ def write(rows: list[dict[str, Any]]) -> None:
             sync_run_id = start_sync_run(cur, source_id=source_id)
 
             company_ids = [r["company_id"] for r in rows]
-            websites = [r["website"] for r in rows if r.get("website")]
-            website_ids = [r["company_id"] for r in rows if r.get("website")]
+            # Every (company, url) this import will file as `website` -- one per qualifying ANSWER,
+            # not one per company. Comparing against `row["website"]` alone was wrong: since step 3
+            # `observations.py` writes a website row for each answer above the bar, so a runner-up
+            # URL that also clears 0.35 is legitimate and permanent. The old comparison called all
+            # 78 of those superseded on every run, deleted them, and let the upsert put them back --
+            # net zero rows and pure churn, which is exactly what V17 existed to stop.
+            website_ids: list[str] = []
+            websites: list[str] = []
+            for row in rows:
+                for answer in row.get("answers") or []:
+                    url = answer.get("url")
+                    if url and observations.field_name_for(answer) == "website":
+                        website_ids.append(row["company_id"])
+                        websites.append(url)
 
             # How many rows this source already holds, so the sync run can say what the write
             # actually changed. Counted before anything is written: the upsert cannot tell us,
@@ -251,21 +293,23 @@ def write(rows: list[dict[str, Any]]) -> None:
             #
             # A superseded row still has to go, and its canonical pointer with it: the old answer is
             # wrong, and leaving it would let it out-rank the correction on confidence alone.
-            # Measured 2026-09-09: 940 of 940 file rows carry the URL already in the table, so this
-            # statement deletes nothing today. It exists for the run where that stops being true.
+            # Measured 2026-09-09: with the comparison made against every website-eligible answer
+            # (916 winners plus 78 runners-up), this deletes nothing on a repeat run. It exists for
+            # the run where a company's website genuinely changes.
             cur.execute(
                 """
                 DELETE FROM public.company_field_observations o
                 WHERE o.source_id = %s
                   AND o.field_name = 'website'
-                  AND EXISTS (
+                  AND o.company_id = ANY(%s::uuid[])
+                  AND NOT EXISTS (
                     SELECT 1
                     FROM unnest(%s::uuid[], %s::text[]) AS f(company_id, website)
                     WHERE f.company_id = o.company_id
-                      AND f.website <> o.value_text
+                      AND f.website = o.value_text
                   )
                 """,
-                (source_id, website_ids, websites),
+                (source_id, company_ids, website_ids, websites),
             )
             superseded = cur.rowcount
 
@@ -313,20 +357,22 @@ def write(rows: list[dict[str, Any]]) -> None:
         len(rows), rows_before, rows_after, rows_after - rows_before,
         records_created, superseded,
     )
-    if rows_after != rows_before or superseded:
-        log.info("Nothing is canonical yet. Trigger pipeline_coordinator in Airflow to resolve.")
-    else:
+    if rows_after == rows_before and not superseded:
         log.info(
             "Every row was an update in place, so no canonical field was disturbed and "
-            "`v_companies_enriched` is unchanged. A pipeline_coordinator run is still the way to "
-            "pick up any confidence that moved."
+            "`v_companies_enriched` is unchanged."
         )
+    return rows_after != rows_before or bool(superseded)
 
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--results", type=Path, default=DEFAULT_RESULTS, help="path to results.jsonl")
     parser.add_argument("--dry-run", action="store_true", help="count and summarise, write nothing")
+    parser.add_argument(
+        "--skip-coordinator", action="store_true",
+        help="write the observations but leave them unresolved for somebody else to resolve",
+    )
     parser.add_argument(
         "--limit", type=int, default=None,
         help="write only the first N companies of the file, in file order. For inspecting the "
@@ -348,7 +394,13 @@ def main() -> int:
     if args.dry_run:
         log.info("--dry-run: nothing written")
         return 0
-    write(keep)
+    changed = write(keep)
+    if args.skip_coordinator:
+        log.info("--skip-coordinator: nothing is canonical until pipeline_coordinator runs.")
+    elif changed:
+        trigger_coordinator()
+    else:
+        log.info("nothing changed, so there is nothing for pipeline_coordinator to resolve.")
     return 0
 
 

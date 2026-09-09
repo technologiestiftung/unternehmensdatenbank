@@ -77,11 +77,17 @@ TOTAL_COMPANIES = 14_443
 #: url_discovery 53 -> 37, exactly its 37 `own_site` survivors. Six of the 16 companies had a
 #: fallback above the 0.35 bar, so exa 36 -> 39 and combined_discovery 567 -> 570. Net coverage
 #: 3,542 -> 3,532: ten companies lost a website, and every one of the ten had only a wrong one.
+#: Step 7: the bridge's superseded-delete was comparing against `row["website"]` -- the winner --
+#: while `observations.py` writes a website row per qualifying ANSWER. So 78 legitimate runner-up
+#: rows looked superseded on every run and were deleted then rewritten: net zero rows, pure churn,
+#: exactly what V17 existed to stop. Fixed to compare against every website-eligible answer, which
+#: then correctly removed 38 genuinely stale rows left by this session's own `--force` verification
+#: runs. 15 of those companies fell back to the export and 3 lost a website.
 CANONICAL_WEBSITES = {
-    "northdata_export": 2_800, "combined_discovery": 570, "brave_search_discovery": 85,
+    "northdata_export": 2_815, "combined_discovery": 552, "brave_search_discovery": 85,
     "url_discovery": 37, "exa_search_discovery": 39, "parallel_search_discovery": 1,
 }
-CANONICAL_TOTAL = 3_532
+CANONICAL_TOTAL = 3_529
 CANONICAL_OTHER_FIELDS = {"cluster": 532, "tech_field": 508}
 
 #: The alias itself, pinned. If a resolver change stopped promoting `candidate_url`, the totals
@@ -90,7 +96,7 @@ CANONICAL_OTHER_FIELDS = {"cluster": 532, "tech_field": 508}
 #: Step 5: 3,539 → 3,529, the ten companies that lost a website when url_discovery's false
 #: positives were refiled. The `candidate_url` side is untouched at 3 — all three are Brave's, and
 #: the alias still works.
-CANONICAL_BY_OBSERVATION_NAME = {"website": 3_529, "candidate_url": 3}
+CANONICAL_BY_OBSERVATION_NAME = {"website": 3_526, "candidate_url": 3}
 CANONICAL_BRAVE_SPLIT = {"website": 82, "candidate_url": 3}
 
 #: Lower wins. The export at 50 outranks every discovery source, which is why 2,816 URLs nobody
@@ -119,7 +125,7 @@ WEBSITE_MIN_CONFIDENCE = 0.35   # resolver's bar; LLM-only guesses are capped at
 #: and 28 were exact duplicates of their own twin, because the best candidate had always been
 #: written twice — once as `candidate_url`, once as `website` — and the `website` row is one the new
 #: rule never writes. Nothing was lost; 34 rows are correctly filed and 28 said the same thing twice.
-WEBSITE_OBSERVATION_FLOOR = 19_521
+WEBSITE_OBSERVATION_FLOOR = 19_483
 #: V19 fixed the duplication this used to record. `resolve_ceo_contact` had always ended in
 #: `ON CONFLICT DO NOTHING`, but with no target that can only suppress a conflict on a constraint
 #: that exists, and the only one was the primary key on a `gen_random_uuid()` column, which never
