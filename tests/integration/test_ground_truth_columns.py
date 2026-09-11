@@ -88,12 +88,24 @@ BRANCH_WITH_WEBSITE = 943       # must equal the websites in results.jsonl — s
 #: Fields resting on a website `results.jsonl` never recorded — the 26 the database gate recovered.
 #: Handel 10, Gastgewerbe 4, Telekommunikationsanbieter 3, and eight others.
 BRANCH_ASSIGNED_WITHOUT_FILE_WEBSITE = 25
+#: Full Tier B run completed 2026-09-10: no_keyword collapsed as most companies were finally asked;
+#: assigned_model_77 and none_apply grew accordingly. 5,114 new model calls, and the three counts
+#: that did not move are the ones no model touched -- `assigned_keywords` 596, `assigned_model_3way`
+#: 14 and `no_purpose` 7,302 are decided before Tier B is ever reached.
+#:
+#: `unsure` IS NEW and is pinned here rather than absorbed. It holds 5 rows where a model read the
+#: register text and said it could not tell, which is a different claim from `none_apply` ("I read it
+#: and no field fits"). A bucket appearing silently is exactly what the closed outcome set below
+#: exists to catch, and it caught this one -- the set is now eight, and a ninth still fails.
+#:
+#: What this does NOT change: column 1 is untouched, because the two columns share no file, no
+#: vocabulary and no model call. Verified after the run -- every BRANCH_* number above still measures.
 PURPOSE_OUTCOMES = {
-    "assigned_keywords": 596, "assigned_model_77": 590, "assigned_model_3way": 14,
-    "none_apply": 758, "torn": 47, "no_keyword": 5_136, "no_purpose": 7_302,
+    "assigned_keywords": 596, "assigned_model_77": 4_095, "assigned_model_3way": 14,
+    "none_apply": 2_225, "torn": 47, "unsure": 5, "no_keyword": 159, "no_purpose": 7_302,
 }
 PURPOSE_WITHHELD_BY_FLOOR = 17
-PURPOSE_FIELDS = 1_200
+PURPOSE_FIELDS = 4_705
 TAXONOMY_VERSION = "c154c74cf003"
 
 #: `NONE` is the sentinel for "no field", not an empty string: the column is filled on every row.
@@ -174,17 +186,17 @@ def test_column1_outcomes(branches):
 
 
 def test_column3_outcomes(purposes):
-    with checks("column 3: seven outcomes, disjoint, summing to the table"):
+    with checks("column 3: eight outcomes, disjoint, summing to the table"):
         got = Counter(r["outcome"] for r in purposes)
         for outcome, want in PURPOSE_OUTCOMES.items():
             check(f"purpose outcome {outcome}", got[outcome], want)
-        check("no eighth purpose outcome", sorted(got), sorted(PURPOSE_OUTCOMES))
+        check("no ninth purpose outcome", sorted(got), sorted(PURPOSE_OUTCOMES))
         check("purpose outcomes sum to the table", sum(got.values()), TOTAL_COMPANIES)
         check("a purpose_field iff the outcome is an assigned_* one",
               {(r["purpose_field"] != NO_FIELD) == r["outcome"].startswith("assigned")
                for r in purposes},
               {True})
-        check("1,200 purpose fields in total",
+        check("4,705 purpose fields in total",
               sum(1 for r in purposes if r["purpose_field"] != NO_FIELD), PURPOSE_FIELDS)
         check("withheld_by_floor count",
               sum(1 for r in purposes if r["withheld_by_floor"]), PURPOSE_WITHHELD_BY_FLOOR)
