@@ -7,12 +7,23 @@ company). The companies table holds only identity + pipeline metadata.
 Application code queries through the v_companies_enriched view.
 
 Logical field names → observation field_name aliases:
-  website       ← candidate_url, website
-  cluster       ← cluster
-  tech_field    ← tech_field
-  ceo_contact   → company_managers (not canonical field sources)
-  revenue       ← revenue
-  employee_count← employee_count, number_of_employees
+  website        ← candidate_url, website
+  cluster        ← cluster
+  tech_field     ← tech_field
+  ceo_contact    → company_managers (not canonical field sources)
+  revenue        ← revenue
+  employee_count ← employee_count, number_of_employees
+  technologiefeld← technologiefeld        (V20; Berlin's 77 fields, website-gated)
+  purpose_field  ← purpose_field          (V20; the same 77, from the register purpose)
+
+Two field names are resolved by NOTHING and must stay that way: `technologiefeld_withheld` and
+`purpose_field_withheld`, which hold the fields the website rule and the length floor refused to
+publish. Naming either one in an `obs_field_names` array publishes every withheld row at once.
+`directory_url` is the third name in that category, for third-party pages.
+
+`cluster`/`tech_field` and `technologiefeld`/`purpose_field` are FOUR different questions and must
+never be merged or coalesced -- the first two are free text an LLM typed, the last two are a
+controlled vocabulary. A WZ code may never fill `technologiefeld`.
 
 Source priority: lower integer wins. Cross-source agreement bonus: +0.10 per
 additional source agreeing on the same value, capped at 1.0.
@@ -272,10 +283,61 @@ def resolve_ceo_contact(cur: Any) -> int:
     return cur.rowcount
 
 
+def resolve_technologiefeld(cur: Any) -> int:
+    """Berlin's 77-field taxonomy, from words the company published on its own site.
+
+    No alias list, and there must never be one. `technologiefeld_withheld` holds the 535 fields the
+    website rule refused to publish, and it is a field name **nothing resolves** -- the same trick
+    `directory_url` uses. Adding it here, or to any other `obs_field_names` array, would publish
+    every withheld row at once and no threshold change could take it back.
+
+    `branch_classifier` is currently the only source writing this name, so there is no priority
+    contest and no agreement bonus; the resolution is a formality that exists so the column reaches
+    `v_companies_enriched` through the same path as every other field.
+    """
+    return _apply_canonical(
+        cur,
+        logical_field="technologiefeld",
+        obs_field_names=["technologiefeld"],
+        value_col="value_text",
+        min_confidence=_FIELD_MIN_CONF,
+    )
+
+
+def resolve_purpose_field(cur: Any) -> int:
+    """The same 77 fields, from the register's Gegenstand. A different question, and no website gate.
+
+    Same rule as above: `purpose_field_withheld` -- the 17 fields the 40-character floor cost -- gets
+    no resolver, ever.
+
+    The confidence policy behind these rows has its lowest value at 0.52, deliberately above
+    `_FIELD_MIN_CONF`. It used to be 0.50, exactly on the bar, where 4,095 rows promoted only because
+    the filter reads `>=`. `combined_discovery/branch_observations.py` asserts the gap at import.
+    """
+    return _apply_canonical(
+        cur,
+        logical_field="purpose_field",
+        obs_field_names=["purpose_field"],
+        value_col="value_text",
+        min_confidence=_FIELD_MIN_CONF,
+    )
+
+
 def compute_quality_scores(cur: Any) -> int:
     """
     Recompute data_quality_score for every company from company_canonical_field_sources
     and company_managers (for ceo_contact). Binary presence per field, weighted sum.
+
+    **`technologiefeld` and `purpose_field` are deliberately absent from these weights.** The six
+    below sum to 1.00, so adding two more means either giving them no weight -- nothing moves and
+    every stored score stays valid -- or re-weighting all eight, which invalidates all 14,443 stored
+    `data_quality_score` values and shifts the tier histogram. `test_spend_guard` pins the ceiling at
+    0.850 with 0 companies at the 0.90 spend guard, so a re-weighting would fail that test for a
+    reason having nothing to do with the industry columns.
+
+    The choice is open, not settled: whoever wants these two to count towards data quality should
+    make it as its own change, with the new histogram measured and the pinned numbers moved in the
+    same commit.
     """
     cur.execute(
         """
@@ -343,7 +405,8 @@ def report_field_coverage(cur: Any) -> dict[str, Any]:
         """
         SELECT field_name, COUNT(DISTINCT company_id) AS cnt
         FROM public.company_canonical_field_sources
-        WHERE field_name = ANY(ARRAY['website','cluster','tech_field','revenue','employee_count'])
+        WHERE field_name = ANY(ARRAY['website','cluster','tech_field','revenue','employee_count',
+                                     'technologiefeld','purpose_field'])
         GROUP BY field_name
         """
     )
@@ -361,9 +424,14 @@ def report_field_coverage(cur: Any) -> dict[str, Any]:
     def pct(n: int) -> str:
         return f"{n / total * 100:.1f}%" if total else "0%"
 
+    # This tuple and the SQL ARRAY above are the same list written twice, and they MUST move
+    # together. Widen one and not the other and this function under-reports with no error: the SQL
+    # counts a field the Python never prints, or the Python prints a field the SQL never counted and
+    # it silently reads 0.
     fields = {
         f: {"filled": field_counts.get(f, 0), "pct": pct(field_counts.get(f, 0))}
-        for f in ("website", "cluster", "tech_field", "revenue", "employee_count")
+        for f in ("website", "cluster", "tech_field", "revenue", "employee_count",
+                  "technologiefeld", "purpose_field")
     }
     fields["ceo_contact"] = {"filled": ceo_count, "pct": pct(ceo_count)}
 

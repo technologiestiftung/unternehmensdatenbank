@@ -88,12 +88,35 @@ CANONICAL_WEBSITES = {
     "url_discovery": 37, "exa_search_discovery": 39, "parallel_search_discovery": 1,
 }
 CANONICAL_TOTAL = 3_529
-#: technologiefeld and purpose_field were added to the view in V20 but the write path is deferred to
-#: after the Berlin import, so their canonical count is 0 and they are deliberately NOT in this
-#: dict — a 0 here would assert the absence rather than describe it. Add them once Berlin has been
-#: imported and classify writes observations; the counts to expect then are the `assigned` totals
-#: from classify-report and classify-purpose-report.
+#: technologiefeld and purpose_field are written but NOT YET PUBLISHED, so they are still absent
+#: here — a canonical count exists only once `pipeline_coordinator` has run, and the import was
+#: deliberately staged with `--skip-coordinator` so that publishing stays a separate decision.
+#:
+#: FLIP AFTER PUBLISHING — after one `pipeline_coordinator` run, this dict becomes:
+#:     CANONICAL_OTHER_FIELDS = {
+#:         "cluster": 532, "tech_field": 508, "technologiefeld": 403, "purpose_field": 4_705,
+#:     }
+#: and `test_v20_columns_staged_not_published` becomes `..._populated` with its two zeros replaced by
+#: 403 and 4,705. Nothing else moves: this source writes no URL, so every website baseline and the
+#: quality ceiling stay exactly where they are.
 CANONICAL_OTHER_FIELDS = {"cluster": 532, "tech_field": 508}
+
+#: What `branch_classifier` has written, by observation field name. Measured 2026-09-11 from
+#: `branches.jsonl` and `purpose_branches.jsonl` after the full Tier B run, and forecast by
+#: `import_branch_classification.py --dry-run` before the write.
+#:
+#: The two `_withheld` names are the 535 fields the website rule refused and the 17 the 40-character
+#: floor cost. They are stored as evidence and **no `resolve_*` function names them**, which is why
+#: `test_resolver_invariants` can assert that no withheld row ever reaches a canonical pointer.
+BRANCH_CLASSIFIER_OBSERVATIONS = {
+    "technologiefeld": 403, "technologiefeld_withheld": 535,
+    "purpose_field": 4_705, "purpose_field_withheld": 17,
+}
+BRANCH_CLASSIFIER_TOTAL = 5_660
+#: The lowest confidence this source may write. `model_direct` was 0.50 — exactly on the resolver's
+#: `_FIELD_MIN_CONF`, promoting only because the filter reads `>=`. Raised to 0.52 so the margin is
+#: real, and `combined_discovery/branch_observations.py` asserts the gap at import time.
+BRANCH_CLASSIFIER_MIN_CONFIDENCE = 0.52
 
 #: The six columns V20 appended, and the two views that read this one. Appending is the only shape
 #: of change `CREATE OR REPLACE VIEW` allows, and neither dependent uses a star-select, so this is
@@ -310,8 +333,20 @@ def test_company_managers_no_duplicates(cursor):
                               WHERE conname = 'uq_company_managers_company_name'""")[0], 1)
 
 
-def test_v20_columns_exist_and_are_empty(cursor):
-    with checks("V20 reserved the two industry columns, and wrote nothing"):
+def test_v20_columns_staged_not_published(cursor):
+    """The write path has landed; the publish decision has not been taken.
+
+    This is the middle path and it is a real state worth asserting, not a half-finished one:
+    `import_branch_classification.py --skip-coordinator` writes every observation and resolves none,
+    so the evidence is queryable while `v_companies_enriched` still reads NULL and no consumer sees
+    a number nobody has hand-checked.
+
+    **FLIP AFTER PUBLISHING.** One `pipeline_coordinator` run turns the two zeros below into 403 and
+    4,705, and `CANONICAL_OTHER_FIELDS` gains the same two entries. That is the whole diff; the
+    observation counts, the confidences and every website baseline are unaffected, because resolution
+    only marks an existing row canonical.
+    """
+    with checks("V20's columns: written, deliberately not yet published"):
         cur_cols = {
             row[0] for row in _all(cursor, """
                 SELECT column_name FROM information_schema.columns
@@ -320,18 +355,48 @@ def test_v20_columns_exist_and_are_empty(cursor):
         }
         for column in V20_VIEW_COLUMNS:
             check(f"v_companies_enriched has {column}", column in cur_cols, True)
-        # Zero until the write path lands. When it does, these two numbers become the `assigned`
-        # counts from classify-report, and this check becomes an equality against the files.
+
+        # What was written. Counted on the observation's own field_name rather than through the
+        # canonical table, because nothing is canonical yet — and because the two `_withheld` names
+        # never will be, so they have no canonical count to read.
+        check("branch_classifier observations by field name",
+              dict(_all(cursor, """
+                  SELECT o.field_name, count(*)
+                  FROM public.company_field_observations o
+                  JOIN public.sources s ON s.id = o.source_id
+                  WHERE s.key = 'branch_classifier'
+                  GROUP BY 1
+              """)),
+              BRANCH_CLASSIFIER_OBSERVATIONS)
+        check("branch_classifier observations in total",
+              _one(cursor, """SELECT count(*) FROM public.company_field_observations o
+                              JOIN public.sources s ON s.id = o.source_id
+                              WHERE s.key = 'branch_classifier'""")[0],
+              BRANCH_CLASSIFIER_TOTAL)
+
+        # The NONE trap, asserted rather than assumed. Every unassigned row in both files carries the
+        # literal string "NONE" as its value — 23,778 of them — and a filter written on the value
+        # instead of the outcome would write all of them and make 'NONE' a canonical industry field.
+        check("no observation carries the literal 'NONE'",
+              _one(cursor, """SELECT count(*) FROM public.company_field_observations o
+                              JOIN public.sources s ON s.id = o.source_id
+                              WHERE s.key = 'branch_classifier' AND o.value_text = 'NONE'""")[0], 0)
+
+        # The confidence floor. Nothing this source writes may sit at or below the resolver's bar.
+        check("nothing written at or below the resolver's field minimum",
+              float(_one(cursor, """SELECT min(o.confidence)
+                                    FROM public.company_field_observations o
+                                    JOIN public.sources s ON s.id = o.source_id
+                                    WHERE s.key = 'branch_classifier'""")[0]),
+              BRANCH_CLASSIFIER_MIN_CONFIDENCE)
+
+        # NOT PUBLISHED. Flip these two to 403 and 4,705 after a coordinator run.
         filled = _one(cursor, """
             SELECT count(technologiefeld), count(purpose_field)
             FROM public.v_companies_enriched
         """)
-        check("technologiefeld is NULL until the write path lands", filled[0], 0)
-        check("purpose_field is NULL until the write path lands", filled[1], 0)
-        check("the branch_classifier source exists and writes nothing yet",
-              _one(cursor, """SELECT count(*) FROM public.company_field_observations o
-                              JOIN public.sources s ON s.id = o.source_id
-                              WHERE s.key = 'branch_classifier'""")[0], 0)
+        check("technologiefeld staged, not published", filled[0], 0)
+        check("purpose_field staged, not published", filled[1], 0)
         # The reason a CREATE OR REPLACE was safe: both dependents name their columns explicitly.
         # If a future edit drops or reorders a column they read, this is what fails.
         for view in DEPENDENT_VIEWS:
@@ -358,7 +423,7 @@ _TESTS = (
     test_resolver_invariants,
     test_observations_never_deleted,
     test_company_managers_no_duplicates,
-    test_v20_columns_exist_and_are_empty,
+    test_v20_columns_staged_not_published,
     test_spend_guard,
 )
 

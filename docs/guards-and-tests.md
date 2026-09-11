@@ -13,7 +13,7 @@ Neither kind checks whether the answers are *correct*. Nothing in this repo does
 row of the three industry columns has ever been hand-labelled.** A failure means "these numbers
 moved, find out why", not "the classification got worse".
 
-## The seven guards
+## The eight guards
 
 Run them after touching `search_common.py`, `imprint_probe.py`,
 `url_discovery/imprint_extractor.py`, or anything under `combined_discovery/`.
@@ -26,6 +26,7 @@ Run them after touching `search_common.py`, `imprint_probe.py`,
 | `check_branch_classifier.py` | the compound rule and the hyphen knob, keyword weights, the WZ lookup, the `content-index` key, label staleness, and the model's answer validation |
 | `check_purpose_branch.py` | 154 checks on column 3: the seven outcomes stay disjoint, the website gate and WZ code cannot get in, the 40-character floor keeps what it takes, a failed model call never becomes `none_apply` |
 | `check_osm_match.py` | `osm_snapshot`, used by combined discovery's `osm` stage |
+| `check_branch_observations.py` | the classification WRITE path: that every field name the emitter can write is covered by V20's index predicate *and* `insert_text_observation`'s `ON CONFLICT`, that no confidence the policy can produce sits at or below `_FIELD_MIN_CONF`, that **no `resolve_*` names either `_withheld` field**, and that `ASSIGNED_OUTCOMES` is imported rather than restated |
 | `replay_judge_gate.py` | re-runs the real judge gate over `results.jsonl`, failing if a change loses a discovery **or a demotion** |
 
 ### Two rules a guard here must follow
@@ -45,7 +46,7 @@ Both were learned by writing a guard that did not.
 ## The `PostToolUse` hook
 
 `.claude/hooks/guard_after_edit.py`, wired from `.claude/settings.local.json`. After an edit under
-`combined_discovery/`, `scripts/` or `tests/` it runs **five** things — four guards plus
+`combined_discovery/`, `scripts/` or `tests/` it runs **six** things — five guards plus
 `tests/integration/test_ground_truth_columns.py` — and blocks the edit if one fails, so a breakage
 reports in the same turn it happened rather than three edits later. About four seconds total.
 
@@ -71,7 +72,7 @@ python tests/integration/test_ground_truth_discovery.py    # standalone, needs D
 
 `tests/` splits into `unit/` (needs nothing but the code) and `integration/` (reads the artifacts on
 disk, or the database). Integration modules carry `pytest.mark.integration`. `pytest.ini` sets
-`testpaths = tests`, so the seven guards are never collected — they are scripts, not tests.
+`testpaths = tests`, so the eight guards are never collected — they are scripts, not tests.
 
 ### `test_ground_truth_columns.py` — 7 tests, free, 1.6 s, in the hook
 

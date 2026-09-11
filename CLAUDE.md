@@ -101,7 +101,7 @@ pinned in `tests/integration/test_ground_truth_discovery.py`.
 | P2 | `brave_` / `exa_` / `parallel_search_discovery` | 100 | 85 / 39 / 1 | **paid** |
 | P3 | `combined_discovery` — a script, not a DAG | 100 | 552 | free |
 | P4 | `url_discovery` | 100 | 37 | free |
-| P5 | `branch_classifier` — the 77-field taxonomy | 100 | 0, V20 is schema only | free |
+| P5 | `branch_classifier` — the 77-field taxonomy | 100 | 0 websites; 5,660 classification rows, staged | free |
 | | | | **3,529** | |
 
 **Priority is sorted before confidence, so it is absolute** — nothing at 100 beats anything at 50 at
@@ -231,9 +231,11 @@ python scripts/run_combined_discovery.py classify-purpose-report
 
 9. **Column 3 has no website gate — that is its point**, and `purpose_branch` never calls
    `classify()` (the guard asserts it on the *syntax tree*, since the docstring discusses both).
-   Own file, own vocabulary: `assigned_keywords` not `assigned`. Seven outcomes summing to 14,443:
-   `assigned_keywords` 596, `assigned_model_77` 590, `assigned_model_3way` 14, `none_apply` 758,
-   `torn` 47, `no_keyword` 5,136, `no_purpose` 7,302 — **1,200 fields** in total.
+   Own file, own vocabulary: `assigned_keywords` not `assigned`. **Eight** outcomes summing to
+   14,443, after the full Tier B run of 2026-09-10: `assigned_keywords` 596, `assigned_model_77`
+   **4,095**, `assigned_model_3way` 14, `none_apply` **2,225**, `torn` 47, **`unsure` 5**,
+   `no_keyword` **159**, `no_purpose` 7,302 — **4,705 fields** in total. `unsure` is new: a model
+   read the text and could not tell, which is not the same claim as `none_apply`.
    A **failed** model call is never `none_apply`, and the 40-char floor costs 17 real fields — kept
    in `withheld_by_floor`, `PURPOSE_MIN_CHARS` is the knob. Numbers:
    [purpose-classification](docs/purpose-classification.md).
@@ -315,9 +317,9 @@ name in one and not the other cannot be upserted at all. Widen one, widen the ot
 
 ## Guards and tests
 
-**Seven guards** in `scripts/` check the *rules*; **17 pytest tests** in `tests/` check the *numbers
+**Eight guards** in `scripts/` check the *rules*; **17 pytest tests** in `tests/` check the *numbers
 those rules last produced*. All the guards are free — no API, no model, no database, no network. The
-`PostToolUse` hook `.claude/hooks/guard_after_edit.py` runs five of them after an edit under
+`PostToolUse` hook `.claude/hooks/guard_after_edit.py` runs six things after an edit under
 `combined_discovery/`, `scripts/` or `tests/` and blocks the edit if one fails.
 
 Neither kind checks whether the answers are **correct** — nothing here does, because not one row of
@@ -344,10 +346,14 @@ them one level deeper broke it. See `scripts/archive/README.md`.
 
 Decided, not forgotten; each for a stated reason.
 
-1. **Write path for `technologiefeld`/`purpose_field`** — `classify`/`classify-purpose` emitting
-   observations, `--skip-observations`, two `resolve_*` wrappers, the two hardcoded field arrays in
-   `resolver.py` (`report_field_coverage` ~:346, `compute_quality_scores`). *After Berlin*: both
-   columns' values are Osnabrück figures Berlin replaces wholesale.
+1. ✅ **Write path for `technologiefeld`/`purpose_field` — BUILT, and staged rather than published.**
+   `scripts/import_branch_classification.py` reads both JSONL files and writes through
+   `combined_discovery/branch_observations.py`; `classify` stays compute-only. Both `resolve_*`
+   wrappers exist and all five hardcoded field sites are widened — the quality-score weights
+   deliberately are **not**, so no stored score moved. 5,660 observations are in the database and
+   **both columns still read NULL**: the import ran with `--skip-coordinator`, so publishing is one
+   deliberate `pipeline_coordinator` run. What remains: taking that decision, knowing the values are
+   Osnabrück figures Berlin replaces wholesale and that not one row is hand-checked.
 2. **Full `search_discovery_runner.py` scoring unification** — P2 has a 2-signal scorer, P3 has 25
    evidence constants. *After Berlin*: Brave costs money to re-run, and **P2 stored no page evidence,
    so its rows cannot be re-scored offline** the way P3's can from `results.jsonl`.

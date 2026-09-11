@@ -62,7 +62,7 @@ provider READMEs around 2026-08-11.
 
 | file | covers |
 |---|---|
-| [guards-and-tests.md](guards-and-tests.md) | the 7 guards, the 17 tests, which 5 the edit hook runs |
+| [guards-and-tests.md](guards-and-tests.md) | the 8 guards, the 17 tests, which 6 the edit hook runs |
 | [core-queries-current.sql](core-queries-current.sql) | **the queries that work**, each naming the constant that pins it |
 | [combined-discovery-verification.md](combined-discovery-verification.md) | why a page is judged to belong to a company (numbers scoped to a dated 1,000-company run) |
 | [website-and-owner-discovery-results.md](website-and-owner-discovery-results.md) | a dated measurement, correctly scoped |
@@ -178,7 +178,7 @@ company. They meet in exactly one place: `pipeline_coordinator`.
 | **P2** | paid search + Impressum check | `brave_` / `exa_` / `parallel_search_discovery` | 100 | **money** | `website`, `candidate_url`, `directory_url`, `phone`, `email`, `ceo_name_or_contact`, `cluster`, `tech_field` | yes, `TriggerDagRunOperator` |
 | **P3** | combined discovery — **a script, not a DAG** | `combined_discovery` | 100 | free | `website`, `candidate_url`, `directory_url`, `discovery_tier`, `search_query`, `osm_id` | yes, calls it directly |
 | **P4** | url_discovery — name → domain, in Airflow | `url_discovery` | 100 | free | `candidate_url`, `directory_url`, `website`, `phone`, `email`, `ceo_name_or_contact` | yes |
-| **P5** | the 77-field Berlin taxonomy | `branch_classifier` | 100 | free | **nothing yet** — see §1.4 and §5.1 | n/a |
+| **P5** | the 77-field Berlin taxonomy | `branch_classifier` | 100 | free | `technologiefeld`, `purpose_field`, and their two `_withheld` names | yes, unless `--skip-coordinator` |
 
 Per-source canonical website counts: `CANONICAL_WEBSITES` and `CANONICAL_TOTAL` in
 `tests/integration/test_ground_truth_discovery.py`. Priorities: `SOURCE_PRIORITIES` in the same file.
@@ -216,16 +216,18 @@ get wrong.
  ─────────────────────────────────────────────                    [ what the app and
  airflow/data/combined_discovery/                                   Hasura read ]
    results.jsonl            ← run              ─── replay ──►
-   branches.jsonl           ← classify         ─── ✗ stops here
-   purpose_branches.jsonl   ← classify-purpose ─── ✗ stops here
+   branches.jsonl           ← classify         ── import_branch ──►
+   purpose_branches.jsonl   ← classify-purpose ──  _classification ──►
    pages/…                  ← fetch-content    (the page cache)
    combined_discovery_urls.csv ← csv  [ url = P3's own find
                                         db_website = what the DB serves — §6.2 ]
  airflow/data/
    <source_key>_checkpoint.json  ← every P2 / P4 run
 
- ✗ = the gap. technologiefeld and purpose_field exist ONLY in those two JSONL files.
-     v_companies_enriched serves NULL for both on every row. Fix: §5.1.
+ Both classification files reach Postgres through
+ scripts/import_branch_classification.py -> branch_observations.py. STAGED, NOT
+ PUBLISHED: 5,660 observations are written and NOTHING is canonical until one
+ pipeline_coordinator run, so both view columns still read NULL. See §5.1.
 ```
 
 `airflow/data/**` is gitignored **on purpose**: the register data carries managing-director names,
@@ -525,7 +527,7 @@ subset** — see §6.14.
 ⚠️ **Both columns stop at the file.** Nothing here writes to Postgres, so
 `v_companies_enriched.technologiefeld` and `.purpose_field` are NULL on every row. If you need those
 values today, read `airflow/data/combined_discovery/branches.jsonl` and `purpose_branches.jsonl`, or
-the handover CSV. The write path is §5.1.
+the handover CSV, or the staged observations. Publishing is §5.1.
 
 Depth: vault `Branch Classification` · [running-branch-classification.md](running-branch-classification.md)
 (**stale numbers, correct command order**).
@@ -539,12 +541,13 @@ python scripts/check_combined_discovery.py
 python scripts/check_branch_classifier.py
 python scripts/check_purpose_branch.py
 python scripts/check_osm_match.py
+python scripts/check_branch_observations.py
 python scripts/replay_judge_gate.py
 
 pytest -q                        # 17 tests; the discovery module needs Postgres up
 ```
 
-All seven guards are free — no API, no model, no database, no network — and take a second or two each.
+All eight guards are free — no API, no model, no database, no network — and take a second or two each.
 **Neither guards nor tests check whether the answers are correct**; nothing in this repo does, because
 not one row of the three industry columns has ever been hand-labelled. A failure means "these numbers
 moved, find out why".
@@ -603,10 +606,10 @@ The `run_combined_discovery.py` module docstring — printed by `--help` — sti
 | get a handover CSV | `run_combined_discovery.py csv` | `combined_discovery_urls.csv` | Postgres. **Read `db_website`, not `url` — §6.2** |
 | find out whether any of it is *right* | `classify-labels` / `classify-purpose-labels`, fill in `label`, then the matching `*-labels-report` | the worksheets | — |
 | ask the model what unclassified companies call themselves | `propose-keywords` | a worksheet only | Ollama |
-| **sync tech fields to Postgres** | `import_branch_classification.py` — ⏳ **PENDING, NOT BUILT. §5.1** | — | — |
+| sync tech fields to Postgres | `import_branch_classification.py` (`--dry-run`, `--limit`, `--skip-coordinator`) | observations, and resolves unless skipped | Postgres |
 | rebuild the Berlin taxonomy from a new spreadsheet | `import_branch_taxonomy.py <csv> --out C:\temp\new.yaml` — **never overwrite the live file**, it carries hand edits and comments | a YAML to diff | — |
 | rebuild the WZ titles | `import_wz_titles.py <wz.xlsx>` | `wz_titles.yaml` | — |
-| verify nothing broke | the 7 guards, then `pytest -q` — **§2.7** | — | Postgres for 10 of the 17 tests |
+| verify nothing broke | the 8 guards, then `pytest -q` — **§2.7** | — | Postgres for 10 of the 17 tests |
 | query the database | [core-queries-current.sql](core-queries-current.sql). **Never `core-queries.sql`** — §0.3 | — | Postgres |
 | resolve observations by hand | trigger `pipeline_coordinator` in the UI, or call `run_pipeline_coordinator` directly | canonical fields | Postgres |
 | reset one provider's data | `reset_provider_observations.sql` — **and delete the checkpoint JSON, which it does not clear. §6.13** | deletes rows | Postgres |
@@ -732,12 +735,22 @@ Per-source SQL and the four resolver invariants: [core-queries-current.sql](core
 
 Decided, not forgotten. Each for a stated reason.
 
-### 5.1 ⏳ The tech-field write path — the biggest gap
+### 5.1 The tech-field write path — built, staged, not yet published
 
-**`technologiefeld` and `purpose_field` exist only in two JSONL files. `v_companies_enriched` serves
-NULL for both on every row, so Hasura and every other consumer see nothing.**
+**The write path exists and has run. 5,660 observations are in the database and neither column is
+published yet** — the import was deliberately staged with `--skip-coordinator`, so
+`v_companies_enriched` still reads NULL for both and no consumer sees a number nobody has
+hand-checked. **One `pipeline_coordinator` run publishes them**, and that decision is the only thing
+left.
 
-What already exists, verified against the live database on 2026-09-10:
+What is written, measured 2026-09-11 and pinned as `BRANCH_CLASSIFIER_OBSERVATIONS` in
+`tests/integration/test_ground_truth_discovery.py`: `technologiefeld` and `purpose_field` plus the
+two `_withheld` names that **nothing resolves**, at confidences 0.60 / 0.55 / 0.52 by `decided_by`.
+Publishing turns the two zeros in `test_v20_columns_staged_not_published` into the assigned counts
+and adds both to `CANONICAL_OTHER_FIELDS`; the file carries the exact diff under
+`FLIP AFTER PUBLISHING`.
+
+What already existed, verified against the live database on 2026-09-10:
 
 - V20 reserved both columns in the view, plus `technologiefeld_withheld` and `purpose_field_withheld`
   as field names **nothing resolves** — the `directory_url` trick, so no threshold change can
@@ -747,7 +760,7 @@ What already exists, verified against the live database on 2026-09-10:
 - The observation upsert key covers all ten field names, and `insert_text_observation`'s
   `ON CONFLICT … WHERE` predicate matches it exactly.
 
-**No further migration is needed.** What is missing:
+**No migration was needed.** What was built:
 
 1. **An emitter** — the decided approach is a separate importer, `scripts/import_branch_classification.py`,
    mirroring `import_combined_discovery.py`: `classify` stays compute-only, the importer reads the
@@ -784,7 +797,7 @@ Nothing is wired yet. **Recommendation: a plain view over `v_companies_enriched`
 resolution layer — the resolver is already the single place that decides a winner, and a second one
 would be the "one predicate per decision" rule broken at the API boundary.
 
-Today Hasura would serve NULL for both industry columns. §5.1 is the blocker.
+Hasura serves NULL for both industry columns until the coordinator runs once. §5.1.
 
 ### 5.4 `fetch-content` over the canonical URLs with no cached page
 
