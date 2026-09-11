@@ -88,18 +88,17 @@ CANONICAL_WEBSITES = {
     "url_discovery": 37, "exa_search_discovery": 39, "parallel_search_discovery": 1,
 }
 CANONICAL_TOTAL = 3_529
-#: technologiefeld and purpose_field are written but NOT YET PUBLISHED, so they are still absent
-#: here — a canonical count exists only once `pipeline_coordinator` has run, and the import was
-#: deliberately staged with `--skip-coordinator` so that publishing stays a separate decision.
+#: FLIP APPLIED 2026-09-11. The import was staged with `--skip-coordinator` so that publishing stayed
+#: a separate decision from the write; the coordinator has since run and both industry columns are
+#: live, so the two entries the flip prescribed are here.
 #:
-#: FLIP AFTER PUBLISHING — after one `pipeline_coordinator` run, this dict becomes:
-#:     CANONICAL_OTHER_FIELDS = {
-#:         "cluster": 532, "tech_field": 508, "technologiefeld": 403, "purpose_field": 4_705,
-#:     }
-#: and `test_v20_columns_staged_not_published` becomes `..._populated` with its two zeros replaced by
-#: 403 and 4,705. Nothing else moves: this source writes no URL, so every website baseline and the
-#: quality ceiling stay exactly where they are.
-CANONICAL_OTHER_FIELDS = {"cluster": 532, "tech_field": 508}
+#: Nothing else moved, and that was the prediction worth checking: `branch_classifier` writes no URL,
+#: so `CANONICAL_WEBSITES`, `CANONICAL_TOTAL` and the quality ceiling are all untouched, and the
+#: 5,660 observations below are unchanged because resolution marks an existing row canonical rather
+#: than writing a new one. Verified against the live database before this was edited.
+CANONICAL_OTHER_FIELDS = {
+    "cluster": 532, "tech_field": 508, "technologiefeld": 403, "purpose_field": 4_705,
+}
 
 #: What `branch_classifier` has written, by observation field name. Measured 2026-09-11 from
 #: `branches.jsonl` and `purpose_branches.jsonl` after the full Tier B run, and forecast by
@@ -333,20 +332,19 @@ def test_company_managers_no_duplicates(cursor):
                               WHERE conname = 'uq_company_managers_company_name'""")[0], 1)
 
 
-def test_v20_columns_staged_not_published(cursor):
-    """The write path has landed; the publish decision has not been taken.
+def test_v20_columns_populated(cursor):
+    """V20's two industry columns, written and now published.
 
-    This is the middle path and it is a real state worth asserting, not a half-finished one:
-    `import_branch_classification.py --skip-coordinator` writes every observation and resolves none,
-    so the evidence is queryable while `v_companies_enriched` still reads NULL and no consumer sees
-    a number nobody has hand-checked.
+    The write and the publish were deliberately separate: `import_branch_classification.py
+    --skip-coordinator` wrote every observation and resolved none, so the evidence sat queryable
+    while `v_companies_enriched` still read NULL. One `pipeline_coordinator` run then promoted them.
 
-    **FLIP AFTER PUBLISHING.** One `pipeline_coordinator` run turns the two zeros below into 403 and
-    4,705, and `CANONICAL_OTHER_FIELDS` gains the same two entries. That is the whole diff; the
-    observation counts, the confidences and every website baseline are unaffected, because resolution
-    only marks an existing row canonical.
+    This test spans both halves, which is why it did not need splitting when the flip was applied:
+    the observation counts describe what the emitter wrote, and the two view counts describe what the
+    resolver published. Those are different claims and both are worth pinning — a number moving in
+    one and not the other says immediately which half broke.
     """
-    with checks("V20's columns: written, deliberately not yet published"):
+    with checks("V20's columns: written by the emitter, published by the coordinator"):
         cur_cols = {
             row[0] for row in _all(cursor, """
                 SELECT column_name FROM information_schema.columns
@@ -356,9 +354,10 @@ def test_v20_columns_staged_not_published(cursor):
         for column in V20_VIEW_COLUMNS:
             check(f"v_companies_enriched has {column}", column in cur_cols, True)
 
-        # What was written. Counted on the observation's own field_name rather than through the
-        # canonical table, because nothing is canonical yet — and because the two `_withheld` names
-        # never will be, so they have no canonical count to read.
+        # What the emitter WROTE, as opposed to what the resolver published. Counted on the
+        # observation's own field_name rather than through the canonical table, because the two
+        # `_withheld` names have no canonical count and never will — that is the whole point of
+        # giving them a name no `resolve_*` function reads.
         check("branch_classifier observations by field name",
               dict(_all(cursor, """
                   SELECT o.field_name, count(*)
@@ -390,13 +389,16 @@ def test_v20_columns_staged_not_published(cursor):
                                     WHERE s.key = 'branch_classifier'""")[0]),
               BRANCH_CLASSIFIER_MIN_CONFIDENCE)
 
-        # NOT PUBLISHED. Flip these two to 403 and 4,705 after a coordinator run.
+        # PUBLISHED. What the application and Hasura actually serve, which is the number a consumer
+        # sees — and it must equal the `assigned` totals the two classification files hold, because
+        # `branch_classifier` is the only source writing either name, so there is no priority contest
+        # and no agreement bonus for the resolver to apply.
         filled = _one(cursor, """
             SELECT count(technologiefeld), count(purpose_field)
             FROM public.v_companies_enriched
         """)
-        check("technologiefeld staged, not published", filled[0], 0)
-        check("purpose_field staged, not published", filled[1], 0)
+        check("technologiefeld published", filled[0], CANONICAL_OTHER_FIELDS["technologiefeld"])
+        check("purpose_field published", filled[1], CANONICAL_OTHER_FIELDS["purpose_field"])
         # The reason a CREATE OR REPLACE was safe: both dependents name their columns explicitly.
         # If a future edit drops or reorders a column they read, this is what fails.
         for view in DEPENDENT_VIEWS:
@@ -423,7 +425,7 @@ _TESTS = (
     test_resolver_invariants,
     test_observations_never_deleted,
     test_company_managers_no_duplicates,
-    test_v20_columns_staged_not_published,
+    test_v20_columns_populated,
     test_spend_guard,
 )
 
