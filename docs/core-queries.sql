@@ -1,3 +1,43 @@
+-- ############################################################################################
+-- ##  WARNING: THIS FILE IS LARGELY OUTDATED. DO NOT RUN QUERIES FROM IT.                   ##
+-- ##  Working versions of the useful ones live in docs/core-queries-current.sql.             ##
+-- ############################################################################################
+--
+-- It was written against the V1-V8 schema. `V9__drop_unused_company_columns.sql` deleted twelve
+-- columns from `public.companies`, and this file still writes to ten of them:
+--
+--     website_url  cluster  revenue  revenue_yoy  revenue_current_year  employee_count
+--     tags  extra_data  share_capital  funding
+--
+-- `companies` has 20 columns today: identity, address, wz_code, metadata, register_status,
+-- data_quality_score and the timestamps. Nothing enriched. Enriched values are resolved from
+-- `company_field_observations` and read through `public.v_companies_enriched`, where `website_url`
+-- is a VIEW column. So queries 1, 2, 21, 25, 30 and 31 fail with `column ... does not exist`.
+--
+-- It also uses `field_name = 'website_url'` in queries 8, 18, 25 and 33. That observation name has
+-- never existed. The real name is `website`, aliased with `candidate_url`, and a query for
+-- `website_url` returns zero rows rather than an error -- which is worse than failing.
+--
+-- ------------------------------------------------------------------------------------------------
+-- QUERY 3 IS DANGEROUS AND MUST NEVER BE RUN.
+-- ------------------------------------------------------------------------------------------------
+-- It inserts a source `handelsregister` at **priority 10**. Every other query here is dead and
+-- fails loudly; this one succeeds. `sources.priority` is the resolver's FIRST sort key and lower
+-- wins, so a row at 10 would outrank `northdata_export` at 50 and all six discovery sources at 100
+-- -- for every field, not only websites. The next `pipeline_coordinator` run would then hand every
+-- field it touches to a source holding no observations, or to whatever was later written under that
+-- key. `handelsregister` is not a real source in this project and never has been.
+--
+-- If it has already been run: `DELETE FROM public.sources WHERE key = 'handelsregister';` then one
+-- `pipeline_coordinator` run. Observations are never deleted, only un-canonicalised, so the correct
+-- winners come back.
+--
+-- ------------------------------------------------------------------------------------------------
+-- Kept, not deleted, because queries 4-7, 8-11, 16-20, 22-24, 26-29 and 33-35 still describe the
+-- real observation/canonical/sync-run lifecycle correctly, and query 35's six-step summary is still
+-- the shape of the pipeline. Read them as documentation of the pattern. Run nothing.
+-- ------------------------------------------------------------------------------------------------
+
 -- Core query catalog for the Unternehmensdatenbank model.
 -- Parameter placeholders use PostgreSQL-style $1, $2, ... notation.
 
@@ -83,6 +123,12 @@ DO UPDATE SET
 RETURNING *;
 
 -- 3. Insert source
+--
+-- !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+-- !! DO NOT RUN. priority 10 would outrank every real source (export 50, discovery 100) and    !!
+-- !! re-order the resolver for every field. See the warning at the top of this file. To add a   !!
+-- !! source, write a migration -- V4 and V20 are the precedents.                               !!
+-- !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 INSERT INTO public.sources (
   key,
   name,

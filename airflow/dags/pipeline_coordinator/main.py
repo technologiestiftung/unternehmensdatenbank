@@ -13,8 +13,10 @@ from resolver import (
     resolve_ceo_contact,
     resolve_cluster,
     resolve_employee_count,
+    resolve_purpose_field,
     resolve_revenue,
     resolve_tech_field,
+    resolve_technologiefeld,
     resolve_website,
 )
 from source_enrichment_common import get_connection
@@ -35,7 +37,7 @@ def run_pipeline_coordinator() -> None:
         log.info(
             "Pipeline status BEFORE resolution — %d companies | "
             "website=%s cluster=%s tech_field=%s ceo=%s revenue=%s employees=%s | "
-            "avg_score=%.3f",
+            "technologiefeld=%s purpose_field=%s | avg_score=%.3f",
             before["total_companies"],
             before["fields"]["website"]["pct"],
             before["fields"]["cluster"]["pct"],
@@ -43,6 +45,8 @@ def run_pipeline_coordinator() -> None:
             before["fields"]["ceo_contact"]["pct"],
             before["fields"]["revenue"]["pct"],
             before["fields"]["employee_count"]["pct"],
+            before["fields"]["technologiefeld"]["pct"],
+            before["fields"]["purpose_field"]["pct"],
             before["avg_quality_score"],
         )
         log.info(
@@ -61,11 +65,16 @@ def run_pipeline_coordinator() -> None:
                 n_revenue   = resolve_revenue(cur)
                 n_employees = resolve_employee_count(cur)
                 n_ceo       = resolve_ceo_contact(cur)
+                # V20's two industry columns. Neither has an alias list, and the two `_withheld`
+                # field names are deliberately resolved by nothing at all — see resolver.py.
+                n_tfeld     = resolve_technologiefeld(cur)
+                n_purpose   = resolve_purpose_field(cur)
 
         log.info(
             "Resolution complete — website=%d cluster=%d tech_field=%d "
-            "revenue=%d employee_count=%d ceo_contact=%d canonical records upserted",
-            n_website, n_cluster, n_tech, n_revenue, n_employees, n_ceo,
+            "revenue=%d employee_count=%d ceo_contact=%d "
+            "technologiefeld=%d purpose_field=%d canonical records upserted",
+            n_website, n_cluster, n_tech, n_revenue, n_employees, n_ceo, n_tfeld, n_purpose,
         )
 
         # Recompute quality scores
@@ -83,7 +92,7 @@ def run_pipeline_coordinator() -> None:
         log.info(
             "Pipeline status AFTER resolution — %d companies | "
             "website=%s cluster=%s tech_field=%s ceo=%s revenue=%s employees=%s | "
-            "avg_score=%.3f",
+            "technologiefeld=%s purpose_field=%s | avg_score=%.3f",
             after["total_companies"],
             after["fields"]["website"]["pct"],
             after["fields"]["cluster"]["pct"],
@@ -91,6 +100,8 @@ def run_pipeline_coordinator() -> None:
             after["fields"]["ceo_contact"]["pct"],
             after["fields"]["revenue"]["pct"],
             after["fields"]["employee_count"]["pct"],
+            after["fields"]["technologiefeld"]["pct"],
+            after["fields"]["purpose_field"]["pct"],
             after["avg_quality_score"],
         )
         log.info(

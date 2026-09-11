@@ -326,20 +326,6 @@ def ensure_source(cur: Any, *, key: str, name: str, source_type: str, metadata: 
     return cur.fetchone()[0]
 
 
-def delete_planned_source_records(cur: Any, *, company_id: str, source_key: str) -> None:
-    cur.execute(
-        """
-        DELETE FROM public.company_source_records csr
-        USING public.sources s
-        WHERE csr.source_id = s.id
-          AND csr.company_id = %s
-          AND s.key = %s
-          AND COALESCE(csr.source_payload ->> 'status', '') = 'planned'
-        """,
-        (company_id, source_key),
-    )
-
-
 def start_sync_run(cur: Any, *, source_id: str, sync_type: str = "manual") -> str:
     cur.execute(
         """
@@ -460,6 +446,36 @@ def insert_text_observation(
     metadata: dict[str, Any] | None = None,
     confidence: float | None = None,
 ) -> str:
+    """Write one claim by one source about one text field of one company. Returns the row's id.
+
+    An append for most fields. Ten of them — the six discovery ones (`website`, `candidate_url`,
+    `directory_url`, `discovery_tier`, `search_query`, `osm_id`) and the four classification ones
+    (`technologiefeld`, `purpose_field` and their `_withheld` variants) — have a unique key (V17,
+    widened by V18 and again by V20) so a re-run updates rather than writing a second copy. Without
+    that, a source re-writing what it already wrote had to DELETE first, and
+    `company_canonical_field_sources` cascades off these rows — which un-published 558 websites for
+    four days on 2026-09-03.
+
+    The predicate below must stay identical to the index predicate in V20. Widen one and you widen
+    the other, in the same commit — Postgres infers the partial index from this predicate, so a
+    field name present in one and absent from the other cannot be upserted at all.
+
+    The last four names have no writer yet: V20 is schema only and the classification write path
+    lands after the Berlin import. They are listed now so that path cannot arrive without its key.
+
+    **Newest write wins**, unconditionally. Not highest-confidence-wins: a re-score has to be able to
+    DEMOTE, and this repo has already been bitten by a change that could only ever promote
+    (`scripts/replay_judge_gate.py` exists because of it). A conditional `DO UPDATE ... WHERE` would
+    also return no row when it declined to fire, and the `RETURNING id` below would then raise.
+
+    Two things it deliberately does not refresh on conflict: `observed_at` and `source_sync_run_id`
+    keep the values from the first write, so a row updated by a later run still points at the run that
+    created it. Add them to the SET list if run attribution ever matters more than the original
+    timestamp.
+
+    The `WHERE` in the conflict target is not optional — it is how Postgres infers a *partial* index.
+    A row in any other field satisfies no predicate, finds no arbiter index, and inserts as before.
+    """
     cur.execute(
         """
         INSERT INTO public.company_field_observations (
@@ -476,6 +492,17 @@ def insert_text_observation(
           updated_at
         )
         VALUES (%s, %s, %s, %s, %s, %s, now(), %s, %s, now(), now())
+        ON CONFLICT (company_id, field_name, source_id, value_text)
+          WHERE field_name IN (
+            'website', 'candidate_url', 'directory_url',
+            'discovery_tier', 'search_query', 'osm_id',
+            'technologiefeld', 'purpose_field',
+            'technologiefeld_withheld', 'purpose_field_withheld'
+          )
+        DO UPDATE SET
+          confidence = EXCLUDED.confidence,
+          metadata   = EXCLUDED.metadata,
+          updated_at = now()
         RETURNING id
         """,
         (

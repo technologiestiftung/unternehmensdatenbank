@@ -16,6 +16,7 @@ from candidate_generator import generate_candidates
 from http_client import fetch_impressum, verify_url
 from imprint_extractor import extract_from_html
 from scorer import AUTO_ACCEPT_SCORE, MIN_STORE_SCORE, name_uniqueness, score_candidate
+from search_common import is_own_site_candidate, own_site_verdict
 from source_enrichment_common import (
     build_search_queries,
     dump_preview_payload,
@@ -168,13 +169,36 @@ def run_url_discovery() -> None:
                     c["score"] = score_candidate(c.get("extracted") or {}, company)
 
                 enriched.sort(key=lambda c: c["score"], reverse=True)
-                best = enriched[0] if enriched else None
+                # Only a page that is the company's OWN site may become its website. This DAG went
+                # without the check for months and it cost 16 of its 53 canonical websites: domain
+                # parking marketplaces (`fruits.co/de/domain/wilfried.de`), a domain reseller's
+                # landing pages (`ts.domainname.de/...`), `grow.google/intl/de/`, and two pairs of
+                # different companies sharing one short domain — `wm.de` for "WM Immo GmbH die
+                # Zweite" and "die Dritte", `zum.de/portal` for two unrelated "Zum ..." companies.
+                # A high score does not make a page the company's: `is_own_site_candidate` ignores
+                # the score it is handed, deliberately, because a register number on a page proves
+                # the page is ABOUT a company and never that it IS that company's site.
+                #
+                # Same call, same order as `search_discovery_runner.py:308-315`. One predicate for
+                # this question, everywhere — a looser copy is the recurring bug in this repo.
+                own_site = [
+                    c for c in enriched
+                    if is_own_site_candidate(
+                        c["final_url"], company.company_name, c["score"], AUTO_ACCEPT_SCORE,
+                    )
+                ]
+                best = own_site[0] if own_site else None
+                rejected_as_third_party = len(enriched) - len(own_site)
 
                 with connection:
                     with connection.cursor() as cur:
                         payload = dump_preview_payload(company, SOURCE_KEY)
                         payload["candidates_generated"] = len(candidates)
                         payload["candidates_verified"] = len(verified)
+                        # How many crawled pages were refused as somebody else's site. Same key as
+                        # `search_discovery_runner.py:315`, and the only place this DAG records
+                        # that a candidate was dropped rather than simply not found.
+                        payload["best_rejected_as_third_party"] = rejected_as_third_party
                         payload["results"] = [
                             {
                                 "url": c["url"],
@@ -201,17 +225,25 @@ def run_url_discovery() -> None:
                         for c in enriched:
                             if c["score"] < MIN_STORE_SCORE:
                                 continue
+                            # `candidate_url` competes to become the website; `directory_url` is a
+                            # field the resolver never reads, so a page about the company is kept
+                            # as evidence and can never be promoted. Mirrors
+                            # `search_discovery_runner.py:415-426`.
+                            verdict = own_site_verdict(c["final_url"], company.company_name)
                             insert_text_observation(
                                 cur,
                                 company_id=company.id,
                                 source_record_id=source_record_id,
                                 source_id=source_id,
                                 sync_run_id=sync_run_id,
-                                field_name="candidate_url",
+                                field_name=(
+                                    "candidate_url" if verdict == "own_site" else "directory_url"
+                                ),
                                 value_text=c["final_url"],
                                 metadata={
                                     "original_url": c["url"],
                                     "score": c["score"],
+                                    "rejected_as": None if verdict == "own_site" else verdict,
                                     "imprint_url": c.get("imprint_url"),
                                     "register_number": (c.get("extracted") or {}).get("register_number"),
                                     "postcode": (c.get("extracted") or {}).get("postcode"),

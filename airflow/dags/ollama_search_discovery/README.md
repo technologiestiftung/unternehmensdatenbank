@@ -55,7 +55,7 @@ ENABLE_OLLAMA_SEARCH_DISCOVERY=true
 ## Running
 
 ```bash
-OLLAMA_BATCH_SIZE=10 ./scripts/run_ollama_discovery_until_done.sh
+OLLAMA_BATCH_SIZE=10 ./scripts/archive/run_ollama_discovery_until_done.sh
 ```
 
 The script loops until all companies are processed, with stall-retry logic if Ollama or SearXNG becomes temporarily unavailable.

@@ -246,7 +246,17 @@ def write_company_result(
                 "methods": answer.get("methods") or [],
                 "verified_by": answer.get("verified_by"),
                 "band": answer.get("band"),
-                "evidence": answer.get("evidence") or [],
+                # `sorted`, not passed through. `pipeline.UrlAnswer.evidence` is a `set`, and
+                # `psycopg2.extras.Json` cannot serialise one — so the contract this file's header
+                # claims, `dataclasses.asdict(pipeline.discover(...))`, would raise here. The
+                # normalised answers in `results.jsonl` already hold sorted lists
+                # (`pipeline.py:815`), which is why feeding it the file is the tested path. Sorting
+                # defensively costs nothing and makes both callers safe.
+                "evidence": sorted(answer.get("evidence") or []),
+                # Which methods actually ran for this company, so a reader can tell "OpenStreetMap
+                # had nothing" from "OpenStreetMap was never asked" without joining to the tier
+                # rows. Same reason those rows exist; this is the per-claim copy.
+                "stages_run": sorted(stages_run),
                 "why": answer.get("why"),
                 "pattern": answer.get("pattern"),
                 "matched_url": answer.get("imprint_url") or url,

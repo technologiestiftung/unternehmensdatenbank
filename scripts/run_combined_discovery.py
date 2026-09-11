@@ -280,6 +280,63 @@ WHERE id::text = ANY(%s)
 """
 
 
+#: Companies whose canonical website was actually FETCHED. Not every canonical website: 2,800 of
+#: the 3,532 came from the Northdata export and not one of them has ever been loaded.
+#:
+#: This is the gate for the Technologiefeld, and the gate's whole justification is that a live
+#: website is evidence a company trades, where a register purpose is only evidence of what it is
+#: permitted to do. A URL in a CSV is neither — it is evidence that somebody recorded a URL. Gating
+#: on all 3,532 would release 188 withheld fields, but 169 of them would be computed from the
+#: register purpose alone, because those companies have no downloaded page. Column 1 would then be
+#: a partial duplicate of column 3 for those 169, which is the one thing the three-column split
+#: exists to prevent.
+#:
+#: "Fetched" is recorded two ways, and both are needed: a `verified_by` that implies a download
+#: (`register_number_match`, `page_content_match`, `method_agreement`, `url_pattern` — but never
+#: `llm_snippet`, which is a model reading search snippets), or an `imprint_url`, which only exists
+#: because a page was fetched and its Impressum probed. Three Brave rows have the second and not
+#: the first.
+#:
+#: **Any observation, not the canonical one.** This asked the canonical row first, and that was
+#: wrong in a way worth recording: the canonical row is picked by `sources.priority`, the export
+#: sits at 50, and it wins every contest it enters. So for the ~370 companies where the export
+#: displaced a page combined discovery had actually downloaded — same URL, 438 of them agree
+#: exactly — the surviving row is the unfetched one, and the company failed a gate it used to pass.
+#: `assigned` fell 382 → 270 and `no_website` rose 556 → 668 before this was fixed. The question is
+#: "did anybody fetch a page for this company", which is a question about the evidence, not about
+#: which row won a priority contest. Above the resolver's own 0.35 bar, so a rejected candidate
+#: cannot answer it. 1,150 companies of 14,443.
+VERIFIED_WEBSITE_SQL = """
+SELECT DISTINCT o.company_id::text
+FROM public.company_field_observations o
+WHERE o.field_name IN ('website', 'candidate_url')
+  AND COALESCE(o.confidence, 0) >= 0.35
+  AND (
+        (o.metadata->>'verified_by' IS NOT NULL AND o.metadata->>'verified_by' <> 'llm_snippet')
+     OR o.metadata ? 'imprint_url'
+  )
+"""
+
+
+def load_verified_websites() -> set[str]:
+    """Company ids with a canonical website somebody actually downloaded.
+
+    Read from the database rather than from `results.jsonl`, which is the point of this function:
+    the file only knows what combined discovery found itself, so it saw 940 websites while the
+    resolver had settled 3,532. Every source that fetched and checked a page now counts, whoever
+    fetched it.
+    """
+    from source_enrichment_common import get_connection
+
+    connection = get_connection()
+    try:
+        with connection, connection.cursor() as cur:
+            cur.execute(VERIFIED_WEBSITE_SQL)
+            return {row[0] for row in cur.fetchall()}
+    finally:
+        connection.close()
+
+
 def load_db_websites(company_ids: list[str]) -> dict[str, dict[str, Any]]:
     """Company id -> the website already stored, its source and its confidence.
 
@@ -480,6 +537,7 @@ def run(
     limit: int,
     stages: set[str],
     workers: int,
+    skip_coordinator: bool = False,
     refresh_osm: bool = False,
     force: bool = False,
 ) -> None:
@@ -681,6 +739,152 @@ def run(
         list(pool.map(one, pending))
 
     log.info("Done. %d companies written to %s", counter["n"], RESULTS_PATH)
+
+    written = write_observations_for([c.id for c in pending])
+    if written is None:
+        return
+    log.info("%d observations in the database for these %d companies.", written, len(pending))
+    if skip_coordinator:
+        log.info(
+            "--skip-coordinator: the observations are written and unresolved. Nothing is canonical "
+            "until pipeline_coordinator runs."
+        )
+        return
+    trigger_coordinator()
+
+
+def write_observations_for(company_ids: list[str]) -> int | None:
+    """Land this run's results in Postgres. Returns the row count, or None if it could not.
+
+    Postgres is the store the application reads; `results.jsonl` is the cache that makes this
+    resumable and lets the judge gate be replayed offline. Both are written, in that order, and the
+    file is written first on purpose: if this function fails, the run's work is still on disk and
+    `scripts/import_combined_discovery.py` can land it later. A run that has already cost an hour
+    must not be lost to a database that happens to be down.
+
+    One transaction at the end rather than a write per company, because `run` fans out over eight
+    threads and a psycopg2 connection is not thread-safe. It reads the rows back through
+    `latest_rows`, so what lands is exactly what the file says — the same path the importer takes,
+    and the reason a live run and a file replay produce identical rows.
+    """
+    if not company_ids:
+        return None
+    try:
+        from combined_discovery import observations
+        from source_enrichment_common import (
+            ensure_source,
+            finish_sync_run,
+            get_connection,
+            start_sync_run,
+        )
+    except Exception as exc:  # noqa: BLE001
+        log.warning("no database write: %s. The file is intact; use import_combined_discovery.py", exc)
+        return None
+
+    wanted = set(company_ids)
+    rows = [r for r in latest_rows(RESULTS_PATH) if r.get("company_id") in wanted]
+    try:
+        connection = get_connection()
+    except Exception as exc:  # noqa: BLE001
+        log.warning("no database write: %s. The file is intact; use import_combined_discovery.py", exc)
+        return None
+    try:
+        with connection, connection.cursor() as cur:
+            source_id = ensure_source(
+                cur,
+                key=observations.SOURCE_KEY,
+                name="Combined Discovery (URL patterns + OpenStreetMap + local judge)",
+                source_type="combined",
+                metadata={"script": "scripts/run_combined_discovery.py"},
+            )
+            sync_run_id = start_sync_run(cur, source_id=source_id)
+            created = 0
+            for row in rows:
+                created += int(
+                    observations.write_company_result(
+                        cur,
+                        company=_company_for_observations(row),
+                        result=row,
+                        source_id=source_id,
+                        sync_run_id=sync_run_id,
+                        stages_run=set(row.get("stages_run") or ()),
+                    )
+                )
+            cur.execute(
+                """
+                SELECT count(*) FROM public.company_field_observations
+                WHERE source_id = %s AND company_id = ANY(%s::uuid[])
+                """,
+                (source_id, list(wanted)),
+            )
+            total = cur.fetchone()[0]
+            finish_sync_run(
+                cur,
+                sync_run_id=sync_run_id,
+                records_seen=len(rows),
+                records_created=created,
+                records_updated=len(rows) - created,
+                records_failed=0,
+            )
+        return total
+    finally:
+        connection.close()
+
+
+def trigger_coordinator() -> bool:
+    """Resolve the observations just written into canonical fields. Returns True if it ran.
+
+    **A direct call, not an Airflow trigger.** `pipeline_coordinator/main.py` keeps its Airflow
+    imports inside `_make_dag()` behind a `try/except ImportError`, so `run_pipeline_coordinator`
+    is importable from the host and opens its own psycopg2 connection. It is the same function the
+    DAG's `PythonOperator` calls, so there is one implementation and two callers rather than a copy
+    that can drift.
+
+    What that costs: no `dag_run` row, so this does not appear in the Airflow UI or in
+    `airflow.dag_run`. What it buys: no scheduler, no container spin-up, no REST auth, and it works
+    when Airflow is not running at all — which is the normal state for a script that is
+    deliberately not a DAG. A caller who wants the Airflow bookkeeping can pass
+    `--skip-coordinator` and trigger the DAG itself.
+
+    Never fatal. A run of this script can cost an hour and its results are already safe in
+    `results.jsonl` and in `company_field_observations`; failing the whole thing because the
+    resolver could not be reached would throw that away. The observations simply stay unresolved,
+    which is exactly the state every previous version of this script left them in.
+
+    Safe to call repeatedly since V19: `resolve_ceo_contact` used to append a duplicate
+    `company_managers` row for every company on every run — 9,195 rows for 1,047 distinct names —
+    and `uq_company_managers_company_name` now makes a repeat run a no-op.
+    """
+    log.info("triggering pipeline_coordinator")
+    try:
+        coordinator = REPO_ROOT / "airflow" / "dags" / "pipeline_coordinator"
+        if str(coordinator) not in sys.path:
+            sys.path.insert(0, str(coordinator))
+        from pipeline_coordinator.main import run_pipeline_coordinator
+
+        run_pipeline_coordinator()
+    except Exception as exc:  # noqa: BLE001
+        log.warning(
+            "pipeline_coordinator did not run: %s. The observations are written and unresolved; "
+            "trigger the DAG in Airflow, or re-run this script with the same arguments.", exc,
+        )
+        return False
+    log.info("pipeline_coordinator finished. Canonical fields are up to date.")
+    return True
+
+
+def _company_for_observations(row: dict[str, Any]) -> Any:
+    """A `CompanyCandidate` from a result row. Every field it needs is a key in the file."""
+    from source_enrichment_common import CompanyCandidate
+
+    return CompanyCandidate(
+        id=row["company_id"],
+        company_name=row["company_name"],
+        address=row.get("address"),
+        postcode=row.get("postcode"),
+        city=row.get("city"),
+        registration_number=row.get("registration_number"),
+    )
 
 
 # ---------------------------------------------------------------------------------------
@@ -1669,6 +1873,25 @@ def classify(
     scope = [cid for cid in facts if cid in rows] if rows else list(facts)
     log.info("%d companies in scope", len(scope))
 
+    # The website GATE comes from the database; the website TEXT still comes from the file. That
+    # asymmetry is deliberate and worth stating, because it looks like an oversight.
+    #
+    # The gate asks "did anyone prove this company trades", and the answer belongs to the resolver:
+    # any source that fetched and checked a page counts, not only this script's own guesses. The
+    # text asks "what words are on that page", and only the file can answer, because the page cache
+    # is keyed by the URL as it was requested and the canonical string often differs by scheme,
+    # `www` or a trailing slash — 300 of the 3,532 canonical URLs hit the cache, against 940 of the
+    # file's own. So a company can now pass the gate and still have nothing to read, which lands it
+    # in `no_keyword` or `no_text` rather than `no_website`. That is the honest outcome: we know it
+    # trades and we have not read its words.
+    verified = load_verified_websites()
+    in_scope = sum(1 for cid in scope if cid in verified)
+    log.info(
+        "%d companies have a website somebody downloaded; %d of them are in scope. The file knows "
+        "of %d — the difference is what this gate exists to recover.",
+        len(verified), in_scope, sum(1 for r in rows.values() if r.get("website")),
+    )
+
     # ---- pass 1: read every text once ---------------------------------------------------
     per_company: dict[str, dict[str, Any]] = {}
     for company_id in scope:
@@ -1730,7 +1953,9 @@ def classify(
         # A Technologiefeld requires a website. The register purpose may still be what DECIDES the
         # field — it does for 15 companies — but a company we never found a website for gets NONE
         # with the reason `no_website`, and what it would have been is kept beside it.
-        has_website = bool(rows.get(company_id, {}).get("website"))
+        # From the resolver, not from this script's own file. See the note where `verified` is
+        # loaded for why the gate and the text now come from different places.
+        has_website = company_id in verified
         result = bc.classify(
             taxonomy=taxonomy,
             df=df,
@@ -3922,6 +4147,14 @@ def main() -> None:
         "--force", action="store_true",
         help="re-run every company in the sample, including ones that already have every method",
     )
+    p_run.add_argument(
+        "--skip-coordinator", action="store_true",
+        help=(
+            "write the observations but do not resolve them. Nothing becomes a canonical website "
+            "until pipeline_coordinator runs, so use this only when you intend to trigger it "
+            "yourself -- in Airflow, for the dag_run record this direct call does not create."
+        ),
+    )
 
     p_report = sub.add_parser("report", help="print the scorecard")
     p_report.add_argument(
@@ -4050,6 +4283,7 @@ def main() -> None:
             raise SystemExit(f"unknown stage(s): {sorted(unknown)}")
         run(
             args.limit, stages, args.workers,
+            skip_coordinator=args.skip_coordinator,
             refresh_osm=args.refresh_osm, force=args.force,
         )
     elif args.command == "report":

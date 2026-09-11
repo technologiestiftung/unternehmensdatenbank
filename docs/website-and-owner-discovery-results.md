@@ -304,7 +304,7 @@ checked.
 
 ## Reproducing this
 
-The harness is `scripts/ac_measurement.py`. It writes nothing to the database on purpose — it
+The harness is `scripts/archive/ac_measurement.py`. It writes nothing to the database on purpose — it
 needs to re-run and compare, and a script that also changed state could not do that. It reuses
 the pipeline's own filtering, scoring and prompt rather than reimplementing them, so the numbers
 describe the real system.
@@ -313,7 +313,7 @@ It runs in three stages. Stage 1 is expensive and cached; stages 2 and 3 are che
 
 ```bash
 R="docker compose exec -T -e PYTHONPATH=/opt/airflow/dags airflow-scheduler \
-   python /opt/airflow/scripts/ac_measurement.py"
+   python /opt/airflow/scripts/archive/ac_measurement.py"
 
 # 1. search + download + check Impressum. Costs Exa money. Cached, so safe to re-run.
 $R stage1 --reg-mode name_address --limit 100
@@ -325,7 +325,7 @@ $R stage2 --reg-mode name_address --model mistral:ministral-8b-latest
 $R stage2 --reg-mode name_address --model mistral:mistral-small-latest
 
 # 3. print the tables above. Runs on the host too, no container needed.
-python scripts/ac_measurement.py report
+python scripts/archive/ac_measurement.py report
 ```
 
 If you are on Git Bash, run these through PowerShell instead. Git Bash rewrites
@@ -336,11 +336,11 @@ For owner-extraction work there is a second, free harness:
 
 ```bash
 # save the Impressum pages of every company with a verified website (no API cost)
-$R:collect_imprint_fixtures.py collect
+$R:archive/collect_imprint_fixtures.py collect
 # study the layouts with every letter and digit masked, so no names are exposed
-python scripts/collect_imprint_fixtures.py shapes
+python scripts/archive/collect_imprint_fixtures.py shapes
 # count how many saved pages currently yield a name
-python scripts/collect_imprint_fixtures.py score
+python scripts/archive/collect_imprint_fixtures.py score
 # the regression gate
 python scripts/check_imprint_owner_extraction.py
 ```
