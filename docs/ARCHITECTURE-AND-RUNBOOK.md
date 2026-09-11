@@ -209,7 +209,7 @@ get wrong.
  P4  url_discovery          prio 100 ──┤                                │
      name → domain · free              │                                ▼
  P5  branch_classifier      prio 100 ──┘                          company_canonical_
-     77-field taxonomy       ✗ NO WRITER YET                      field_sources
+     77-field taxonomy · free                                     field_sources
                                                                         │
                                                                         ▼
  FILES  [ all gitignored — they carry managers' names ]            v_companies_enriched
@@ -225,9 +225,11 @@ get wrong.
    <source_key>_checkpoint.json  ← every P2 / P4 run
 
  Both classification files reach Postgres through
- scripts/import_branch_classification.py -> branch_observations.py. STAGED, NOT
- PUBLISHED: 5,660 observations are written and NOTHING is canonical until one
- pipeline_coordinator run, so both view columns still read NULL. See §5.1.
+ scripts/import_branch_classification.py -> branch_observations.py, and both
+ columns are PUBLISHED: the emitter's row counts are pinned as
+ BRANCH_CLASSIFIER_OBSERVATIONS and what the view serves as
+ CANONICAL_OTHER_FIELDS, both in test_ground_truth_discovery.py. The two
+ _withheld field names are written and deliberately never resolved. See §5.1.
 ```
 
 `airflow/data/**` is gitignored **on purpose**: the register data carries managing-director names,
@@ -524,10 +526,11 @@ have a website*, not the first 100 of the table.
 increment, because every keyword weight may have moved. That is also why **`--limit` is not a
 subset** — see §6.14.
 
-⚠️ **Both columns stop at the file.** Nothing here writes to Postgres, so
-`v_companies_enriched.technologiefeld` and `.purpose_field` are NULL on every row. If you need those
-values today, read `airflow/data/combined_discovery/branches.jsonl` and `purpose_branches.jsonl`, or
-the handover CSV, or the staged observations. Publishing is §5.1.
+⚠️ **These two commands stop at the file, and that is the whole design.** Neither writes to Postgres.
+Getting the answers into `v_companies_enriched.technologiefeld` and `.purpose_field` is a separate
+step, `scripts/import_branch_classification.py` — §3's task index and §5.1. Both columns are
+published today, so a reader wanting the values should query the view; the JSONL files are where you
+go to ask *why* a company got the field it did.
 
 Depth: vault `Branch Classification` · [running-branch-classification.md](running-branch-classification.md)
 (**stale numbers, correct command order**).
@@ -735,55 +738,37 @@ Per-source SQL and the four resolver invariants: [core-queries-current.sql](core
 
 Decided, not forgotten. Each for a stated reason.
 
-### 5.1 The tech-field write path — built, staged, not yet published
+### 5.1 ✅ The tech-field write path — landed and published
 
-**The write path exists and has run. 5,660 observations are in the database and neither column is
-published yet** — the import was deliberately staged with `--skip-coordinator`, so
-`v_companies_enriched` still reads NULL for both and no consumer sees a number nobody has
-hand-checked. **One `pipeline_coordinator` run publishes them**, and that decision is the only thing
-left.
+**Done, and kept here because §5 is where a reader looks for it.** Both industry columns are served
+by `v_companies_enriched`; the counts are `CANONICAL_OTHER_FIELDS` and the emitter's row counts are
+`BRANCH_CLASSIFIER_OBSERVATIONS`, both in `tests/integration/test_ground_truth_discovery.py`. Do not
+copy either figure into prose — §0.2 clause 1.
 
-What is written, measured 2026-09-11 and pinned as `BRANCH_CLASSIFIER_OBSERVATIONS` in
-`tests/integration/test_ground_truth_discovery.py`: `technologiefeld` and `purpose_field` plus the
-two `_withheld` names that **nothing resolves**, at confidences 0.60 / 0.55 / 0.52 by `decided_by`.
-Publishing turns the two zeros in `test_v20_columns_staged_not_published` into the assigned counts
-and adds both to `CANONICAL_OTHER_FIELDS`; the file carries the exact diff under
-`FLIP AFTER PUBLISHING`.
+The shape, for anyone tracing it: `classify` / `classify-purpose` write the two JSONL files and stop,
+`scripts/import_branch_classification.py` reads them and writes observations through
+`airflow/dags/combined_discovery/branch_observations.py`, and `pipeline_coordinator` promotes the
+winners. `classify` staying compute-only is deliberate — its `--limit` is not a subset (§6.14), so a
+write reachable only through the finished file cannot land a partially-scored population.
 
-What already existed, verified against the live database on 2026-09-10:
+Three decisions worth knowing before changing any of it, each guarded by
+`scripts/check_branch_observations.py`:
 
-- V20 reserved both columns in the view, plus `technologiefeld_withheld` and `purpose_field_withheld`
-  as field names **nothing resolves** — the `directory_url` trick, so no threshold change can
-  publish a withheld row by accident.
-- The `branch_classifier` source is in `sources` at priority 100, with its confidence policy in
-  `metadata`.
-- The observation upsert key covers all ten field names, and `insert_text_observation`'s
-  `ON CONFLICT … WHERE` predicate matches it exactly.
+- **The emitter gates on the OUTCOME, never on the value.** Every unassigned row in both files
+  carries the literal string `"NONE"`, tens of thousands of them, and a filter written against the
+  value would make `'NONE'` a canonical industry field for thousands of companies. `ASSIGNED_OUTCOMES`
+  is imported from `purpose_branch`, never restated, so a new outcome cannot silently slip in.
+- **`technologiefeld_withheld` and `purpose_field_withheld` are written and resolved by nothing.**
+  The `directory_url` trick: a field name no `resolve_*` function reads cannot be published by any
+  threshold change. `test_resolver_invariants` asserts no withheld row ever reaches a canonical
+  pointer.
+- **The quality-score weights were left alone**, so no stored `data_quality_score` moved and the
+  ceiling `test_spend_guard` pins is unchanged. Giving the two columns weight is a separate, measured
+  decision — `resolver.compute_quality_scores` says so in place.
 
-**No migration was needed.** What was built:
-
-1. **An emitter** — the decided approach is a separate importer, `scripts/import_branch_classification.py`,
-   mirroring `import_combined_discovery.py`: `classify` stays compute-only, the importer reads the
-   JSONL and writes observations. Replayable, `--dry-run` trivial, and it cannot misfire during a
-   taxonomy loop. The write shape belongs in a new `combined_discovery/branch_observations.py`, the
-   way `observations.py` owns P3's.
-2. **Two `resolve_*` wrappers** in `pipeline_coordinator/resolver.py` — there are 6 of the 8 the
-   platform needs. Both are thin `_apply_canonical` calls and need no new SQL. **The two `_withheld`
-   names get no resolver, ever.**
-3. **Five hardcoded field lists** to widen with them, not two. `resolver.py`'s
-   `compute_quality_scores` (a policy decision: adding weight invalidates every stored
-   `data_quality_score`, so the safe landing gives them none), `report_field_coverage`'s SQL array
-   **and** its Python tuple (miss one and coverage under-reports with no error), and `main.py`'s
-   import list plus its two log format strings (miss those and the resolvers never run at all).
-
-One live hazard to fix in the same commit: the resolver's field minimum and the policy's lowest
-confidence are **the same number**, so the rows at that value promote only because the comparison is
-inclusive. Three ordinary edits turn that into silently missing fields. Detail: vault
-`Confidence and Resolution`, "The 0.50 bar has zero margin".
-
-**The tradeoff, stated so it stays a decision:** this lands the *code* once, but the *data* is
-Osnabrück and Berlin replaces it wholesale. Landing now means pinning five baselines you know will
-move. Landing later means the columns stay NULL and the latent confidence-floor bug stays latent.
+**What is still open is the data, not the code.** The values are Osnabrück figures that Berlin
+replaces wholesale, and not one row of either column has been hand-checked — see §5.6, which is the
+cheapest unstarted task in the project.
 
 ### 5.2 Full scoring unification — after Berlin
 
@@ -797,7 +782,7 @@ Nothing is wired yet. **Recommendation: a plain view over `v_companies_enriched`
 resolution layer — the resolver is already the single place that decides a winner, and a second one
 would be the "one predicate per decision" rule broken at the API boundary.
 
-Hasura serves NULL for both industry columns until the coordinator runs once. §5.1.
+Both industry columns are published and ready to serve — §5.1. What is not settled is whether they SHOULD be exposed yet: not one row of either is hand-checked (§5.6).
 
 ### 5.4 `fetch-content` over the canonical URLs with no cached page
 

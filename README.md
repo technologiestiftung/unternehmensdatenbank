@@ -38,7 +38,7 @@ companies                             ← identity + pipeline metadata only
 
 **`v_companies_enriched`** — the view applications should query. Joins through the canonical table to expose `website_url`, `cluster`, `tech_field`, `revenue`, `employee_count` alongside identity fields, confidence scores, and winning source key.
 
-⚠️ **Four columns in that view look like the same question and are not.** `cluster` and `tech_field` are free text an LLM typed, with no controlled vocabulary. `technologiefeld` is one of Berlin's 77 taxonomy fields and requires a website somebody actually fetched. `purpose_field` is one of the same 77 taken from the register purpose, with no website requirement at all. **They must never be merged or coalesced**, and a WZ code may never fill `technologiefeld`. `technologiefeld` and `purpose_field` were reserved by V20 and read NULL on every row until the write path lands after the Berlin import.
+⚠️ **Four columns in that view look like the same question and are not.** `cluster` and `tech_field` are free text an LLM typed, with no controlled vocabulary. `technologiefeld` is one of Berlin's 77 taxonomy fields and requires a website somebody actually fetched. `purpose_field` is one of the same 77 taken from the register purpose, with no website requirement at all. **They must never be merged or coalesced**, and a WZ code may never fill `technologiefeld`. `technologiefeld` and `purpose_field` were reserved by V20 and are now filled — written by `scripts/import_branch_classification.py` and published by `pipeline_coordinator`. Their counts are pinned as `CANONICAL_OTHER_FIELDS` in `tests/integration/test_ground_truth_discovery.py`; no row of either has been hand-checked.
 
 ### Source priority (lower = more trusted)
 
@@ -52,7 +52,7 @@ Measured from the `sources` table, 2026-09-09. Pinned in `tests/integration/test
 | 100 | `exa_search_discovery` | 39 |
 | 100 | `url_discovery` | 37 |
 | 100 | `parallel_search_discovery` | 1 |
-| 100 | `branch_classifier` | 0 — reserved by V20, writes nothing yet |
+| 100 | `branch_classifier` | 0 — it writes no URL; it fills the two industry columns |
 | | | **3,529** |
 
 Those seven keys are the whole table. **Priority is sorted before confidence, so it is absolute**: nothing at 100 beats anything at 50, at any confidence. That is why 2,815 export URLs nobody has ever fetched outrank pages that were downloaded and register-checked — intended, because a URL filed with the register is better evidence than a domain guessed from a company name. Among the six sources at 100, confidence alone decides.
@@ -213,7 +213,7 @@ The four most recent, because they changed behaviour and not just shape:
 | **V17** | deduped observations and added the upsert key, so a re-run updates in place instead of appending |
 | **V18** | widened that key from two field names to six |
 | **V19** | deduped `company_managers` 9,195 → 1,047 and added the unique constraint its `ON CONFLICT` had always needed |
-| **V20** | added the `branch_classifier` source and reserved `technologiefeld` / `purpose_field` in `v_companies_enriched`. Schema only — both columns read NULL |
+| **V20** | added the `branch_classifier` source and reserved `technologiefeld` / `purpose_field` in `v_companies_enriched`. Schema only at the time; the write path landed later and both columns are now served |
 
 ## Tests and guards
 

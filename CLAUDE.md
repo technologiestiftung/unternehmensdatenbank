@@ -101,7 +101,7 @@ pinned in `tests/integration/test_ground_truth_discovery.py`.
 | P2 | `brave_` / `exa_` / `parallel_search_discovery` | 100 | 85 / 39 / 1 | **paid** |
 | P3 | `combined_discovery` — a script, not a DAG | 100 | 552 | free |
 | P4 | `url_discovery` | 100 | 37 | free |
-| P5 | `branch_classifier` — the 77-field taxonomy | 100 | 0 websites; 5,660 classification rows, staged | free |
+| P5 | `branch_classifier` — the 77-field taxonomy | 100 | 0 websites; both industry columns published | free |
 | | | | **3,529** | |
 
 **Priority is sorted before confidence, so it is absolute** — nothing at 100 beats anything at 50 at
@@ -308,7 +308,7 @@ The four most recent fixed live bugs. Each migration's own header has the full r
 | **V17** | deduped 49 observation groups, added the upsert key so a re-run updates instead of appending. **Partial** — 71 groups remain in `ceo_name_or_contact`, `email`, `phone`, `website_search_query`, `cluster` |
 | **V18** | widened that key from two field names to six |
 | **V19** | `company_managers` **9,195 → 1,047** + `uq_company_managers_company_name`. `ON CONFLICT DO NOTHING` with no target can only catch a constraint that exists, and the only one was a PK on a `gen_random_uuid()` column, so every coordinator run appended a full copy of every name |
-| **V20** | the `branch_classifier` source; `technologiefeld`/`purpose_field` reserved in the view; `technologiefeld_withheld`/`purpose_field_withheld` as names **nothing resolves** (the `directory_url` trick, so no threshold change publishes them). Schema only — both read NULL |
+| **V20** | the `branch_classifier` source; `technologiefeld`/`purpose_field` reserved in the view; `technologiefeld_withheld`/`purpose_field_withheld` as names **nothing resolves** (the `directory_url` trick, so no threshold change publishes them). Schema only at the time; the write path landed later and both columns are now served |
 
 **V20 widened the upsert key to ten field names, and `insert_text_observation` in
 `source_enrichment_common.py` repeats that predicate verbatim in its `ON CONFLICT (...) WHERE`
@@ -346,14 +346,15 @@ them one level deeper broke it. See `scripts/archive/README.md`.
 
 Decided, not forgotten; each for a stated reason.
 
-1. ✅ **Write path for `technologiefeld`/`purpose_field` — BUILT, and staged rather than published.**
+1. ✅ **Write path for `technologiefeld`/`purpose_field` — DONE, and both columns are published.**
    `scripts/import_branch_classification.py` reads both JSONL files and writes through
    `combined_discovery/branch_observations.py`; `classify` stays compute-only. Both `resolve_*`
    wrappers exist and all five hardcoded field sites are widened — the quality-score weights
-   deliberately are **not**, so no stored score moved. 5,660 observations are in the database and
-   **both columns still read NULL**: the import ran with `--skip-coordinator`, so publishing is one
-   deliberate `pipeline_coordinator` run. What remains: taking that decision, knowing the values are
-   Osnabrück figures Berlin replaces wholesale and that not one row is hand-checked.
+   deliberately are **not**, so no stored score moved. Counts: `CANONICAL_OTHER_FIELDS` and
+   `BRANCH_CLASSIFIER_OBSERVATIONS` in `tests/integration/test_ground_truth_discovery.py`; the
+   emitter gates on the **outcome**, never the value, or `'NONE'` becomes a canonical field.
+   What remains is the data, not the code: the values are Osnabrück figures Berlin replaces
+   wholesale, and not one row of either column is hand-checked (item 5).
 2. **Full `search_discovery_runner.py` scoring unification** — P2 has a 2-signal scorer, P3 has 25
    evidence constants. *After Berlin*: Brave costs money to re-run, and **P2 stored no page evidence,
    so its rows cannot be re-scored offline** the way P3's can from `results.jsonl`.
