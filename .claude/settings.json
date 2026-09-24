@@ -44,6 +44,11 @@
             "command": "python \"$CLAUDE_PROJECT_DIR/.claude/hooks/run_checks_before_commit.py\"",
             "timeout": 180,
             "statusMessage": "Running ruff, the guards and all 17 tests before the commit…"
+          },
+          {
+            "type": "command",
+            "command": "python \"$CLAUDE_PROJECT_DIR/.claude/hooks/ask_before_push.py\"",
+            "timeout": 15
           }
         ]
       }
