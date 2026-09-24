@@ -73,12 +73,17 @@ Then, in order, blocking on the first failure:
    to be: an edit is provisional, a commit is history, and Tu decided on 2026-09-24 that every commit
    needs all 17 tests, a docs-only commit included. Start the stack with `./scripts/dev-up.sh`.
 
-### `ask_before_push.py` — `PreToolUse` on Bash|PowerShell
+### `ask_before_push.py` and `confirm_before_commit.py` — `PreToolUse` on Bash|PowerShell
 
-Turns every `git push` from Claude into a permission prompt, whatever the permission mode, by
-answering `permissionDecision: "ask"`. It never blocks and never runs anything. The distinction that
-matters for all hooks here: **exit 0 with no output = allow silently; exit 2 = block outright; the
-JSON `ask` decision = stop and let Tu decide.** A push is the one action that leaves the machine.
+Two prompts, no checks. `ask_before_push.py` turns every `git push` from Claude into a permission
+prompt naming the branch, its upstream and the remote URL, whatever the permission mode.
+`confirm_before_commit.py` does the same for `git commit` and puts `git diff --cached --stat` plus the
+first **120** lines of `git diff --cached` into the dialog itself (the working-tree stat too when `-a`
+is given), so the change is visible without running anything. Both answer `permissionDecision:
+"ask"`. The distinction that matters for all hooks here: **exit 0 with no output = allow silently;
+exit 2 = block outright; the JSON `ask` decision = stop and let Tu decide.** Hooks under one matcher
+run in parallel and a block wins over an ask, so a commit that fails the checks never reaches the
+dialog.
 
 Timeout 180 s. Measured 2026-09-24 with the stack up and everything green: **5 s** end to end, of
 which the 17 tests take 2.2 s. With Postgres unreachable it blocks after the guards, 8 s (measured

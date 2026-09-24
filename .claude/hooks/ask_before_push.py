@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import json
 import re
+import subprocess
 import sys
 
 #: `git`, any tokens (global options and their values, e.g. `-C repo`), then `push` as a whole word
@@ -45,12 +46,40 @@ def main() -> int:
             "permissionDecisionReason": (
                 ("FORCE PUSH: " if forced else "PUSH: ")
                 + "this leaves the machine and the team sees it.\n"
-                f"  {command.strip()[:200]}\n\n"
+                f"  {command.strip()[:200]}\n"
+                f"  {_where()}\n\n"
                 "Approve to push now; deny to keep the commits local."
             ),
         }
     }))
     return 0
+
+
+def _git(*args: str) -> str:
+    try:
+        result = subprocess.run(["git", *args], capture_output=True, text=True, timeout=5)
+    except (OSError, subprocess.TimeoutExpired):
+        return ""
+    return result.stdout.strip() if result.returncode == 0 else ""
+
+
+def _where() -> str:
+    """`branch <name> -> <remote>/<upstream>` from the working directory the command runs in.
+
+    The hook runs in the same cwd as the tool call, so this is the repo the push would touch. A branch
+    with no upstream yet says so, because `git push` alone then fails or, with push.autoSetupRemote,
+    creates the remote branch — worth seeing before saying yes.
+    """
+    branch = _git("rev-parse", "--abbrev-ref", "HEAD") or "(no branch)"
+    upstream = _git("rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}")
+    remotes = _git("remote")
+    if upstream:
+        remote_name = upstream.split("/", 1)[0]
+        url = _git("remote", "get-url", remote_name)
+        return f"branch {branch} -> {upstream}  ({url})"
+    if remotes:
+        return f"branch {branch} has NO upstream yet; remotes: {', '.join(remotes.split())}"
+    return f"branch {branch}; no remote configured"
 
 
 if __name__ == "__main__":

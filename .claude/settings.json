@@ -49,6 +49,11 @@
             "type": "command",
             "command": "python \"$CLAUDE_PROJECT_DIR/.claude/hooks/ask_before_push.py\"",
             "timeout": 15
+          },
+          {
+            "type": "command",
+            "command": "python \"$CLAUDE_PROJECT_DIR/.claude/hooks/confirm_before_commit.py\"",
+            "timeout": 30
           }
         ]
       }
