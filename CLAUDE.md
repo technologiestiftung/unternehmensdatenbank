@@ -269,9 +269,12 @@ name in one and not the other cannot be upserted at all. Widen one, widen the ot
 ## Guards and tests
 
 **Eight guards** in `scripts/` check the *rules*; **17 pytest tests** in `tests/` check the *numbers
-those rules last produced*. All the guards are free — no API, no model, no database, no network. The
-`PostToolUse` hook `.claude/hooks/guard_after_edit.py` runs six things after an edit under
-`combined_discovery/`, `scripts/` or `tests/` and blocks the edit if one fails.
+those rules last produced*. All the guards are free — no API, no model, no database, no network.
+Two hooks, tracked in `.claude/` since 2026-09-24 and wired from `.claude/settings.json`: after an
+edit, `guard_after_edit.py` runs **ruff** on any `.py` and the six guards under `combined_discovery/`,
+`scripts/` or `tests/`; before a `git commit`, `run_checks_before_commit.py` runs ruff on the staged
+files, the six guards and the ten Postgres tests — **Docker down blocks the commit**. `ruff.toml`
+holds the default rule set only; E501 is off on purpose.
 
 Neither kind checks whether the answers are **correct** — nothing here does, because not one row of
 the three industry columns has ever been hand-labelled. A failure means "these numbers moved, find

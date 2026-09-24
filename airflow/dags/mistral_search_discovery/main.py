@@ -10,7 +10,8 @@ from concurrent.futures import Future, ThreadPoolExecutor
 import time
 from urllib.parse import urlparse
 
-import sys as _sys, os as _os
+import sys as _sys
+import os as _os
 _sys.path.insert(0, _os.path.dirname(_os.path.abspath(__file__)))
 
 from mistral_http import MistralRateLimitError, require_mistral_api_key, run_websearch_prompt

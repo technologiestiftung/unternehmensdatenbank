@@ -1,0 +1,20 @@
+# Ruff — the linter the Claude Code hooks run on every edited .py and on every staged .py before a
+# commit (see docs/guards-and-tests.md, "The pre-commit hook"). Host-only tooling like pytest:
+# `pip install ruff`, deliberately absent from airflow/requirements.txt.
+#
+# The rule set is ruff's default: syntax errors, undefined names, unused imports and variables. E501
+# (line length) is OFF on purpose — 490 tracked lines were over 100 characters when this file was
+# written (2026-09-24), and a first run must start green or it blocks the first commit. Widen the
+# selection deliberately, one rule family at a time, with the count in the commit message.
+
+line-length = 120
+target-version = "py312"
+
+# scripts/archive holds eight trial scripts kept for their numbers, not for running; each has a known
+# broken parents[2] path (scripts/archive/README.md). airflow/data and output hold artifacts, not code.
+extend-exclude = ["scripts/archive", "airflow/logs", "airflow/data", "output", ".claude/worktrees"]
+# The hooks pass file paths explicitly; without this, an explicit path overrides the exclusion above.
+force-exclude = true
+
+[lint]
+select = ["E4", "E7", "E9", "F"]

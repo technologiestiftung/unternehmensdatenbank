@@ -2674,7 +2674,7 @@ def classify_purpose(
             text = row.get("purpose_text") or ""
             print(f"    register   : {text[:400]}{'...' if len(text) > 400 else ''}")
             if row["outcome"] == "no_keyword":
-                print(f"    ^^ no model has answered this row yet. Add --llm with the semantic tier.")
+                print("    ^^ no model has answered this row yet. Add --llm with the semantic tier.")
 
     log.info("wrote %d rows to %s", len(scope), PURPOSE_BRANCHES_PATH)
     for outcome, count in sorted(counts.items(), key=lambda kv: -kv[1]):
@@ -2867,10 +2867,10 @@ def classify_purpose_report() -> None:
     print(f"{'…askable (a shortlist was built)':<40}{len(askable):>7}")
     print(f"{'…NOT askable, so no model will see them':<40}{len(torn) - len(askable):>7}")
     print(
-        f"\n  `worth_asking` needs at least BRANCH_MIN_KEYWORDS_FOR_MODEL keywords and a score at the\n"
-        f"  floor. Most rows here fire exactly one keyword, so that constant — not the prompt — is\n"
-        f"  what governs how far the tie-break can reach. Raising it is a measured decision; the\n"
-        f"  askable count above is the measurement."
+        "\n  `worth_asking` needs at least BRANCH_MIN_KEYWORDS_FOR_MODEL keywords and a score at the\n"
+        "  floor. Most rows here fire exactly one keyword, so that constant — not the prompt — is\n"
+        "  what governs how far the tie-break can reach. Raising it is a measured decision; the\n"
+        "  askable count above is the measurement."
     )
 
     # ---- the model, split by the question it was asked -----------------------------------
@@ -3176,7 +3176,7 @@ def classify_report() -> None:
         "\n  They are reported apart because they ARE apart. Neither is a check on the other."
     )
 
-    print(f"\n\n########## COLUMN 1: Technologiefeld ##########\n")
+    print("\n\n########## COLUMN 1: Technologiefeld ##########\n")
     outcomes: dict[str, int] = {}
     for row in rows:
         outcomes[row.get("outcome") or "?"] = outcomes.get(row.get("outcome") or "?", 0) + 1
@@ -3374,7 +3374,7 @@ def classify_report() -> None:
     print(f"\n{'flagged for a human to look at':<34}{review:>7}")
 
     # -----------------------------------------------------------------------------------------
-    print(f"\n\n########## COLUMN 2: WZ cluster ##########\n")
+    print("\n\n########## COLUMN 2: WZ cluster ##########\n")
     # -----------------------------------------------------------------------------------------
     # A lookup in the official classification, not a decision. Nothing here was judged by anybody,
     # so there is nothing to label and nothing to be right or wrong about — only present or absent.
@@ -3407,7 +3407,7 @@ def classify_report() -> None:
         print(f"  {letter:<4}{title[:44]:<46}{count:>6}  {_pct(count, n)}")
 
     # -----------------------------------------------------------------------------------------
-    print(f"\n\n########## BOTH COLUMNS ##########\n")
+    print("\n\n########## BOTH COLUMNS ##########\n")
     # -----------------------------------------------------------------------------------------
     both = sum(1 for r in rows if r.get("outcome") == "assigned" and r.get("wz_division"))
     field_only = sum(1 for r in rows if r.get("outcome") == "assigned" and not r.get("wz_division"))

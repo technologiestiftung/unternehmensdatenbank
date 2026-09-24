@@ -43,27 +43,55 @@ Both were learned by writing a guard that did not.
    trap caught a check for "no Berlin field name in the prompt": a plain `in` test found **`Handel`
    inside `Handelsregister`**. Use `_pattern_for`, which is the project's own compound rule.
 
-## The `PostToolUse` hook
+## The hooks
 
-`.claude/hooks/guard_after_edit.py`, wired from `.claude/settings.local.json`. After an edit under
-`combined_discovery/`, `scripts/` or `tests/` it runs **six** things — five guards plus
-`tests/integration/test_ground_truth_columns.py` — and blocks the edit if one fails, so a breakage
-reports in the same turn it happened rather than three edits later. About four seconds total.
+Both live in `.claude/hooks/` and are wired from `.claude/settings.json`. **Tracked in git since
+2026-09-24** — before that `.claude/` was gitignored, so a fresh checkout had no hooks and nothing
+said so. `settings.local.json` (personal permissions) and `worktrees/` stay ignored.
 
-Two things about it that have bitten:
+### `guard_after_edit.py` — `PostToolUse` on Write|Edit
+
+Two steps. First, **ruff** on the edited file, for any `.py` in the repo (about 0.1 s; `ruff.toml` at
+the root, default rule set, E501 off — 490 lines were over 100 characters on 2026-09-24, and the gate
+had to start green). A missing ruff blocks with "pip install ruff" rather than passing silently.
+Second, after an edit under `combined_discovery/`, `scripts/` or `tests/` it runs **six** things —
+five guards plus `tests/integration/test_ground_truth_columns.py` — and blocks the edit if one fails,
+so a breakage reports in the same turn it happened rather than three edits later. About four seconds.
+
+### `run_checks_before_commit.py` — `PreToolUse` on Bash|PowerShell
+
+Fires only on a `git commit` (it imports `_GIT_COMMIT` from `check_commit_message.py`, the one
+definition of what a commit command looks like) and only when something is staged or `-a` is given.
+Then, in order, blocking on the first failure:
+
+1. **ruff** on the `.py` files the commit would contain — staged, plus modified tracked files when
+   `-a`/`--all` is present, because those are staged only when git runs.
+2. **The six guards**, imported as `guard_after_edit.GUARDS` and run through its `run_guard`.
+3. **`test_ground_truth_discovery.py`** — the ten Postgres tests, via `pytest -q`. It probes the
+   database first through `tests.loaders.db_cursor()` with `PGCONNECT_TIMEOUT=3`. **Postgres
+   unreachable blocks the commit.** That is the opposite of the edit-time rule below and is meant
+   to be: an edit is provisional, a commit is history, and Tu decided on 2026-09-24 that every commit
+   needs all 17 tests, a docs-only commit included. Start the stack with `./scripts/dev-up.sh`.
+
+Timeout 180 s. Measured 2026-09-24 with the stack up and everything green: **5 s** end to end, of
+which the 17 tests take 2.2 s. With Postgres unreachable it blocks after the guards, 8 s (measured
+by pointing `PG_DSN` at a closed port).
+
+Two things about the edit-time hook that have bitten:
 
 - **`GUARDS` entries are repo-relative paths.** They used to resolve as `REPO/"scripts"/<name>`,
   which meant a guard that moved out of `scripts/` was silently skipped by a `not exists` branch —
   exactly the failure the guards exist to catch, and it happened when the ground-truth tests moved to
   `tests/integration/`. A listed guard that does not exist now blocks the edit with a message.
 - **The hook timeout is 60 s**, and a guard that overruns it blocks the edit rather than reporting a
-  failure. `test_ground_truth_discovery.py` is deliberately **not** in the hook: it needs a running
-  Postgres, and a guard that fails because Docker is down would block editing for a reason unrelated
-  to the edit.
+  failure. `test_ground_truth_discovery.py` is deliberately **not** in the edit-time hook: it needs a
+  running Postgres, and a guard that fails because Docker is down would block editing for a reason
+  unrelated to the edit. The commit-time hook runs it, and there Docker down does block.
 
 ## The tests
 
 ```bash
+ruff check .                                               # the linter, same config as the hooks
 pytest -q                                                  # 17 tests
 pytest -m "not integration"                                # the subset needing neither disk nor Docker
 python tests/integration/test_ground_truth_columns.py      # standalone, no pytest needed

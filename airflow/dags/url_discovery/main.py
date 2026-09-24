@@ -9,7 +9,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-import sys as _sys, os as _os
+import sys as _sys
+import os as _os
 _sys.path.insert(0, _os.path.dirname(_os.path.abspath(__file__)))
 
 from candidate_generator import generate_candidates
@@ -18,7 +19,6 @@ from imprint_extractor import extract_from_html
 from scorer import AUTO_ACCEPT_SCORE, MIN_STORE_SCORE, name_uniqueness, score_candidate
 from search_common import is_own_site_candidate, own_site_verdict
 from source_enrichment_common import (
-    build_search_queries,
     dump_preview_payload,
     ensure_source,
     fetch_companies_without_source_after_id,
