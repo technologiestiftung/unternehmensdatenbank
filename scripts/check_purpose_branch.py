@@ -280,7 +280,7 @@ def main() -> int:
     for decider in sorted(pb.MODEL_DECIDED_BY):
         abstain = pb.PurposeAssignment(outcome=pb.NONE_APPLY, decided_by=decider)
         check(f"an abstention from {decider} keeps its tier", abstain.decided_by, decider)
-        check(f"…and still carries no field", abstain.value, pb.NONE)
+        check("…and still carries no field", abstain.value, pb.NONE)
 
     # -----------------------------------------------------------------------------------
     section("a model verdict changes the outcome, and a FAILED call does not")

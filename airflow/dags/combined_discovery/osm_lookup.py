@@ -28,7 +28,6 @@ from pathlib import Path
 from typing import Any
 
 from osm_discovery.overpass_client import (
-    OverpassError,
     OverpassRateLimitError,
     search_company,
 )

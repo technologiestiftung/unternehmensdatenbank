@@ -321,3 +321,48 @@ title.
 Nothing is written to Postgres. Making either column a real field means an observation, a Flyway
 migration, and a rule for the coordinator — and for the Technologiefeld that should wait until the
 labels exist.
+
+## State on 2026-09-24 — what moved since the counts above
+
+The counts higher up are from the August runs. This section carries the facts that lived only in
+`CLAUDE.md` until 2026-09-24 and were moved here so the root file could stay short. Where a number
+here disagrees with one above, this one is current.
+
+| | | |
+|---|---|---|
+| a Berlin field | **403** — 36.2% of the 1,113 companies with a fetched website | keywords 403, model 0 |
+| `NONE` | **535** | `no_website` |
+| `NONE` | **282** | `torn` |
+| `NONE` | **6,532** | `no_keyword` |
+| `NONE` | **6,691** | `no_text` |
+
+- **The website gate is Postgres now, not `results.jsonl`.** `load_verified_websites()` asks the
+  database *"did anybody fetch and check a page for this company"*, so a page Brave or Exa downloaded
+  counts even though combined discovery never saw it: **1,113 qualify** against the file's 943,
+  releasing **26** fields. `has_website` defaults to `False`. Price of the rule: **938 → 403**, 535
+  withheld and kept in `withheld_branch`.
+- **The gate is deliberately not all 3,529 canonical websites.** 2,815 came from the Northdata export
+  and none has been fetched; gating on those would release 188 fields, **169 of them from the register
+  purpose alone** — which is column 3's job, not this column's.
+- `assigned` does not mean the model assigned it. `outcome` says whether there is a field,
+  `decided_by` says who.
+- **The model run of 2026-08-25**: 172 rows, 29 min, **143 answered, 26 refused, 3 invented a field
+  name** and were discarded by the off-list check. None of it is in the current file — `classify` was
+  re-run without `--llm` on 2026-09-08, so `llm_branch` is empty on all 14,443 rows and `decided_by` is
+  `keywords` for all 403. The model can only convert `torn` → `assigned`; it never reaches a
+  `no_keyword` row. With `think` on it spent the whole 120-token budget reasoning and returned
+  nothing, so `think` stays off. The 26 refusals are the best list of bad keywords we have.
+- **27 keywords have been deleted so far**, each removed from the YAML with its count in a comment,
+  never a stop-list in the code. The test is whether a word is generic in German or only in
+  Osnabrück: `clubs` scored as badly as the deleted ones and was **kept**, because in Berlin a Club is
+  a venue.
+- `classify` still makes zero web requests — two minutes over 14,443 companies — but it now opens
+  **one database connection** for the gate, so Docker must be up. `fetch-content` is the only part
+  that downloads.
+- **Labelling**: `classify-labels` now writes **50 rows in six buckets** (the 40-in-five above is
+  older); only `classify-labels-report` reports precision. Excel on a German locale saves that
+  worksheet with semicolons; the reader sniffs the delimiter, so a round trip is safe. Still not one
+  row is hand-checked; the model's `llm_reason` per row is the cheap proxy and reads well.
+- **Both columns are written to Postgres** since 2026-09 via `scripts/import_branch_classification.py`
+  and `combined_discovery/branch_observations.py`, so the "Nothing is written to Postgres" paragraph
+  above describes the state before that.

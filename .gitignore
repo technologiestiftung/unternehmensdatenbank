@@ -288,6 +288,10 @@ cython_debug/
 # names (personal data) — never commit them.
 output/
 
-# Claude Code's local state: machine-specific settings, and `worktrees/` which holds whole
-# checkouts of this repo. Committing it would nest a second copy of the project inside itself.
-.claude/
+# Claude Code. The hooks (`.claude/hooks/`) and their wiring (`.claude/settings.json`) ARE tracked
+# since 2026-09-24, so a fresh checkout gets the same guards. What stays local: machine-specific
+# permissions in `settings.local.json`, and `worktrees/`, which holds whole checkouts of this repo —
+# committing it would nest a second copy of the project inside itself.
+.claude/settings.local.json
+.claude/worktrees/
+.claude/hooks/__pycache__/

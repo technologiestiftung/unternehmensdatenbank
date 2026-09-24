@@ -1,0 +1,62 @@
+{
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Write|Edit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python \"$CLAUDE_PROJECT_DIR/.claude/hooks/guard_after_edit.py\"",
+            "timeout": 60,
+            "statusMessage": "Running ruff and the free guards…"
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python \"$CLAUDE_PROJECT_DIR/.claude/hooks/ask_before_new_file.py\"",
+            "timeout": 15
+          }
+        ]
+      },
+      {
+        "matcher": "Bash|PowerShell",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python \"$CLAUDE_PROJECT_DIR/.claude/hooks/block_long_python.py\"",
+            "timeout": 15,
+            "statusMessage": "Checking whether this is Tu's to run…"
+          },
+          {
+            "type": "command",
+            "command": "python \"$CLAUDE_PROJECT_DIR/.claude/hooks/check_commit_message.py\"",
+            "timeout": 15,
+            "statusMessage": "Checking the commit message length…"
+          },
+          {
+            "type": "command",
+            "command": "python \"$CLAUDE_PROJECT_DIR/.claude/hooks/run_checks_before_commit.py\"",
+            "timeout": 180,
+            "statusMessage": "Running ruff, the guards and all 17 tests before the commit…"
+          },
+          {
+            "type": "command",
+            "command": "python \"$CLAUDE_PROJECT_DIR/.claude/hooks/ask_before_push.py\"",
+            "timeout": 15
+          },
+          {
+            "type": "command",
+            "command": "python \"$CLAUDE_PROJECT_DIR/.claude/hooks/confirm_before_commit.py\"",
+            "timeout": 30
+          }
+        ]
+      }
+    ]
+  }
+}
