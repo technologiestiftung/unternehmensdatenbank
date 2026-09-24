@@ -299,3 +299,28 @@ The pattern in those five is worth noticing: the register tends toward the gener
 the website is specific, and the website tends toward the generic (`Dienstleistung`) where the
 register is specific. Neither column is right; they are answering different questions. 48 is a small
 sample and this observation is not a finding.
+
+## State on 2026-09-24 — after the full Tier B run of 2026-09-10
+
+The outcome table under "What it produces" is from before Tier B ran over the whole table. These are
+the current counts, moved here from `CLAUDE.md` on 2026-09-24. **Eight** outcomes, still summing to
+14,443 exactly:
+
+| outcome | count |
+|---|---|
+| `assigned_keywords` | 596 |
+| `assigned_model_77` | **4,095** |
+| `assigned_model_3way` | 14 |
+| `none_apply` | **2,225** |
+| `torn` | 47 |
+| `unsure` | **5** |
+| `no_keyword` | **159** |
+| `no_purpose` | 7,302 |
+
+**4,705 fields** in total. `unsure` is now non-zero: a model read the text and could not tell, which
+is not the same claim as `none_apply`. A **failed** model call is never `none_apply`. The 40-character
+floor still costs 17 real fields, kept in `withheld_by_floor`; `PURPOSE_MIN_CHARS` is the knob.
+
+**Labelling has started**: a worksheet with 50 labels exists — 41 yes, 8 no, 1 fixed `nein` → `no` —
+so the "no labelling worksheet yet" line under "Not known" is older than this section. No row has
+been verified as a ground-truth baseline, so there is still no precision figure.

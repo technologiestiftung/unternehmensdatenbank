@@ -4,12 +4,12 @@ Guidance for Claude Code (claude.ai/code) working in this repository.
 
 ## Where the detail lives
 
-**This file is a map, and it is 368 lines against a 300-line target.** It holds only what has cost
+**This file is a map, and it is 326 lines against a 300-line target.** It holds only what has cost
 somebody real time when they got it wrong. When a section wants to grow, the material goes to the
 repo docs or the vault and this file keeps the one-line rule plus the link — that is how the guard
-and test detail left for [guards-and-tests](docs/guards-and-tests.md). **The standing debt is the
-industry-classification section, at 79 lines the largest here**; most of it duplicates
-`docs/branch-classification.md` and is the next thing to move.
+and test detail left for [guards-and-tests](docs/guards-and-tests.md), and how the industry
+classification detail left for `docs/branch-classification.md` and `docs/purpose-classification.md`
+on 2026-09-24 (each has a dated "State on 2026-09-24" section carrying what moved).
 
 - **Repo docs:** [branch-classification](docs/branch-classification.md) ·
   [purpose-classification](docs/purpose-classification.md) ·
@@ -79,15 +79,6 @@ A DAG needs **two** switches: its `ENABLE_*` flag *and* unpausing in Airflow. On
 ## Architecture: data model
 
 Multi-source canonical resolution — full detail in `docs/data-model.md`.
-
-1. `public.companies` — the current best row the application consumes
-2. `public.company_source_records` — one raw row per `(source_id, external_id)`
-3. `public.company_field_observations` — individual field-level claims from sources
-4. `public.company_canonical_field_sources` — which observation won each field
-
-Supporting: `public.sources` (lower `priority` wins), `public.source_sync_runs`,
-`public.company_managers`. Per record: source → sync run → identity → raw row → observations →
-promote the winner (`is_canonical = true`) → canonical field source.
 
 ## Architecture: five pipelines, seven sources
 
@@ -181,71 +172,31 @@ Ollama runs native on Windows with `OLLAMA_IGPU_ENABLE=1`, **74× faster** than 
 Every number, every deleted keyword and the reasoning:
 [branch-classification](docs/branch-classification.md) ·
 [purpose-classification](docs/purpose-classification.md) · vault `Branch Classification`.
-Commands: [running-branch-classification](docs/running-branch-classification.md).
+Commands, in order: [running-branch-classification](docs/running-branch-classification.md) —
+`check_branch_classifier.py` and `check_purpose_branch.py` are free and run first.
 
-```powershell
-python scripts/check_branch_classifier.py                                # free, first
-python scripts/check_purpose_branch.py                                   # free, column 3
-python scripts/run_combined_discovery.py fetch-content                  # once, downloads
-python scripts/run_combined_discovery.py classify --source page,purpose  # 2 min, no network
-python scripts/run_combined_discovery.py classify-report
-python scripts/run_combined_discovery.py classify-purpose                # 13 s, no network
-python scripts/run_combined_discovery.py classify-purpose-report
-```
+1. **A WZ code may never fill the Technologiefeld.** `classify()` has no WZ parameter at all, and the
+   guard fails if one reappears.
+2. **A Technologiefeld requires a website, and the gate is Postgres** (`load_verified_websites()`), not
+   the result file — and deliberately not the 3,529 canonical URLs, 2,815 of which were never fetched.
+3. **`NONE` is normal, with four reasons kept apart**: `no_website`, `torn`, `no_keyword`, `no_text`.
+   **Never add two together.** `outcome` says whether there is a field, `decided_by` says who.
+4. **Division = `wz_code[:2]`**, section = the letter above it, from `wz_titles.yaml` — **WZ 2025**; a
+   WZ 2008 table mismatches silently.
+5. **Never match a keyword inside a German compound.** `BRANCH_HYPHEN_IS_BOUNDARY` is **off**, measured.
+6. **A keyword wrong for its field is deleted from the YAML with the count in a comment**, never a
+   stop-list in the code. Ask whether it is generic in **German** or only in Osnabrück.
+7. **Keywords decide; the model only breaks ties, from three options**, and `think` stays off. The
+   current file has `llm_branch` empty on all 14,443 rows: `decided_by` is `keywords` for all 403.
+8. **`classify` makes zero web requests** but opens **one database connection** for the gate, so Docker
+   must be up. `fetch-content` is the only part that downloads.
+9. **Column 3 has no website gate — that is its point**, and `purpose_branch` never calls `classify()`.
+   Own vocabulary (`assigned_keywords`, not `assigned`), **eight** outcomes summing to 14,443,
+   **4,705 fields** after the Tier B run of 2026-09-10. A **failed** model call is never `none_apply`,
+   and `unsure` is not `none_apply` either.
 
-1. **A WZ code may never fill the Technologiefeld.** Mapping one onto the other gave 2,632 companies
-   a field nothing they published supported, and flattened 22 sections and 87 divisions to do it.
-   `classify()` has **no WZ parameter at all**, and the guard fails if one reappears.
-2. **A Technologiefeld requires a website, and the gate is now Postgres, not the result file.** A
-   register purpose says what a company is *permitted* to do and much of it is boilerplate; a live
-   website is evidence it trades. `has_website` defaults to `False`. `load_verified_websites()` asks
-   the database *"did anybody fetch and check a page for this company"*, so a page Brave or Exa
-   downloaded counts even though combined discovery never saw it: **1,113 qualify** against the
-   file's 943, releasing **26** fields. Price of the rule: **938 → 403**, **535** withheld and
-   **kept** in `withheld_branch`. **The gate is deliberately not all 3,529 canonical websites** —
-   2,815 came from the export and none has been fetched; gating on those releases 188 fields, **169
-   of them from the register purpose alone**, which is column 3's job.
-3. **`NONE` is normal, with four reasons kept apart**: `no_website` 535, `torn` 282, `no_keyword`
-   6,532, `no_text` 6,691. **Never add two together.** And `assigned` (403) does not mean the model
-   assigned it — `outcome` says whether there is a field, `decided_by` says who: keywords 403,
-   model 0.
-4. **Division = `wz_code[:2]`**, section = the letter above it, from `wz_titles.yaml` — 2,008 codes,
-   **WZ 2025**. `70.10.4` and `62.10.9` do not exist in WZ 2008, so a 2008 table mismatches silently.
-5. **Never match a keyword inside a German compound.** Allowing it made Defence Tech the biggest
-   field in Osnabrück while clear winners *fell* 338 → 316. Hyphenated compounds still get through;
-   `BRANCH_HYPHEN_IS_BOUNDARY` closes that and is **off**, measured.
-6. **A keyword wrong for its field is deleted from the YAML with the count in a comment** — 27 have
-   gone that way, never a stop-list in the code. Ask whether it is generic in **German** or only in
-   Osnabrück: `clubs` scored just as badly here and was kept, because in Berlin a Club is a venue.
-7. **Keywords decide; the model only breaks ties, from three options.** Run once, 2026-08-25: 172
-   rows, 29 min, **143 answered, 26 refused, 3 invented a field name** and were discarded by the
-   off-list check. **None of that is in the current file**: `classify` was re-run without `--llm` on
-   2026-09-08, so `llm_branch` is empty on all 14,443 rows and `decided_by` is `keywords` for all
-   403. It can never create a field from nothing — only convert `torn` → `assigned` — so it
-   reaches none of the 6,532 `no_keyword` ones. `think` stays off: with thinking on it spends the whole
-   120-token budget reasoning and returns nothing. The 26 refusals are the best list of bad keywords
-   we have.
-8. **`classify` makes zero web requests**, two minutes over 14,443 companies — which is what makes
-   arguing with the taxonomy cheap. `fetch-content` is the only part that downloads. It does now open
-   **one database connection** for the website gate, so Docker must be up; it is otherwise offline.
-
-9. **Column 3 has no website gate — that is its point**, and `purpose_branch` never calls
-   `classify()` (the guard asserts it on the *syntax tree*, since the docstring discusses both).
-   Own file, own vocabulary: `assigned_keywords` not `assigned`. **Eight** outcomes summing to
-   14,443, after the full Tier B run of 2026-09-10: `assigned_keywords` 596, `assigned_model_77`
-   **4,095**, `assigned_model_3way` 14, `none_apply` **2,225**, `torn` 47, **`unsure` 5**,
-   `no_keyword` **159**, `no_purpose` 7,302 — **4,705 fields** in total. `unsure` is new: a model
-   read the text and could not tell, which is not the same claim as `none_apply`.
-   A **failed** model call is never `none_apply`, and the 40-char floor costs 17 real fields — kept
-   in `withheld_by_floor`, `PURPOSE_MIN_CHARS` is the knob. Numbers:
-   [purpose-classification](docs/purpose-classification.md).
-
-Not known: **whether any of the 403 are right** — no row is hand-checked, though the model's
-`llm_reason` per row is a cheap proxy and reads well. `classify-labels` writes a
-50-row worksheet in six buckets; only `classify-labels-report` reports precision. **Excel saves that
-worksheet with semicolons** on a German locale; the reader sniffs the delimiter, so a round trip is
-safe. By contrast column 3 has a labelling worksheet with 50 labels (41 yes / 8 no / 1 fixed
-nein→no). No row has been verified as a ground-truth baseline.
+Not known: **whether any row of either column is right** — none is hand-checked. `classify-labels`
+writes the worksheet; only `classify-labels-report` reports precision.
 
 ## Facts that have misled people repeatedly
 
