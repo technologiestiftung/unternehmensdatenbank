@@ -17,9 +17,11 @@ Postgres. A commit is the moment the change becomes history, so this is where ev
 **Except on a machine without the reference copy of the example data** (decided 2026-10-27). The
 two ground-truth modules pin the numbers of one copy: the database and
 `airflow/data/combined_discovery/` on the machine where the pipelines ran. Anywhere else they fail on
-the data, not on the change. Their marker is that folder, found by `tests.paths.artifacts()`. It is
-NOT the company count, because a bug that deletes companies must still fail on the reference
-machine. Without the folder both modules are skipped, Postgres is not required, and the hook says
+the data, not on the change. Their marker is `branches.jsonl` in that folder (found by
+`tests.paths.artifacts()`): only `classify` writes it, so a machine that merely ran `run` or
+`fetch-content` for a page cache is not mistaken for the reference machine. It is NOT the company
+count, because a bug that deletes companies must still fail on the reference machine. Without the
+file both modules are skipped, Postgres is not required, and the hook says
 so in a message to the user; ruff and the five rule guards still run.
 
 What passes straight through, in well under a second: any Bash command that is not a `git commit`
@@ -46,14 +48,14 @@ sys.path.insert(0, str(HOOKS))
 sys.path.insert(0, str(REPO))
 
 from check_commit_message import _GIT_COMMIT  # noqa: E402  the one definition of "a git commit"
-from guard_after_edit import GUARDS, ruff_check, run_guard  # noqa: E402
-from tests.paths import artifacts  # noqa: E402  the tests' own lookup, so both agree on "present"
+from guard_after_edit import GUARDS, reference_data_missing, ruff_check, run_guard  # noqa: E402
 
 #: The tests that need Postgres. Run through pytest so the 10 results are counted, not just exit 0.
 DB_TESTS = "tests/integration/test_ground_truth_discovery.py"
 
 #: The two modules that pin numbers of the reference copy of the example data.
 PINNED_TESTS = (DB_TESTS, "tests/integration/test_ground_truth_columns.py")
+
 
 #: libpq reads this. Docker down is "connection refused" and returns at once; a firewalled host would
 #: otherwise hang for libpq's default of forever.
@@ -87,15 +89,6 @@ def anything_to_commit(argv: list[str]) -> bool:
     if _commits_all(argv):
         return True
     return _git("diff", "--cached", "--quiet").returncode == 1
-
-
-def reference_data_missing() -> str | None:
-    """None on the machine that holds the reference copy, else why it is absent."""
-    try:
-        artifacts()
-    except AssertionError as exc:
-        return str(exc)
-    return None
 
 
 def postgres_failure() -> str | None:
