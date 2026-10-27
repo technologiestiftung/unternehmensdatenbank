@@ -1,0 +1,37 @@
+{
+  "realm": "datahub",
+  "enabled": true,
+  "sslRequired": "none",
+  "roles": {
+    "realm": [
+      { "name": "user", "description": "Can read company profiles and write comments (Hasura role `user`)." }
+    ]
+  },
+  "clients": [
+    {
+      "clientId": "unternehmensdaten-app",
+      "name": "Unternehmensdaten App (local)",
+      "enabled": true,
+      "protocol": "openid-connect",
+      "publicClient": false,
+      "secret": "local-dev-secret",
+      "standardFlowEnabled": true,
+      "directAccessGrantsEnabled": true,
+      "redirectUris": ["http://localhost:3100/*"],
+      "webOrigins": ["http://localhost:3100"],
+      "attributes": { "post.logout.redirect.uris": "http://localhost:3100/*" }
+    }
+  ],
+  "users": [
+    {
+      "username": "dev",
+      "enabled": true,
+      "email": "dev@example.com",
+      "emailVerified": true,
+      "firstName": "Local",
+      "lastName": "Developer",
+      "credentials": [{ "type": "password", "value": "dev", "temporary": false }],
+      "realmRoles": ["user", "default-roles-datahub"]
+    }
+  ]
+}

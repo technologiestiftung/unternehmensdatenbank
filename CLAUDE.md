@@ -4,13 +4,16 @@ Guidance for Claude Code (claude.ai/code) working in this repository.
 
 ## Where the detail lives
 
-**This file is a map, and it is 326 lines against a 300-line target.** It holds only what has cost
+**This file is a map, and it is 346 lines against a 300-line target.** It holds only what has cost
 somebody real time when they got it wrong. When a section wants to grow, the material goes to the
 repo docs or the vault and this file keeps the one-line rule plus the link — that is how the guard
 and test detail left for [guards-and-tests](docs/guards-and-tests.md), and how the industry
 classification detail left for `docs/branch-classification.md` and `docs/purpose-classification.md`
 on 2026-09-24 (each has a dated "State on 2026-09-24" section carrying what moved).
 
+- **The app** lives in its own repo, `technologiestiftung/unternehmensdaten-app` (Next.js, reads through
+  Hasura with the user's Keycloak token). This repo owns what it reads: migrations, `hasura/metadata/`,
+  `keycloak/datahub-realm.json`. Hub hand-over: that repo's `docs/datahub-handover.md`.
 - **Repo docs:** [branch-classification](docs/branch-classification.md) ·
   [purpose-classification](docs/purpose-classification.md) ·
   [running-branch-classification](docs/running-branch-classification.md) ·
@@ -38,14 +41,15 @@ Conventions and Gotchas`.
 ## What this is
 
 Local scaffold for a Postgres-backed German company-data platform. Airflow orchestrates, Flyway owns
-all schema, Python DAGs write with psycopg2. Two databases on one server: `airflow` (metadata) and
-`unternehmensdatenbank` (application data). `public.companies` holds 14,443 companies from a
+all schema, Python DAGs write with psycopg2. One server: `airflow` (metadata), `unternehmensdatenbank`
+and `unternehmensdatenbank_staging` (application data), `keycloak` and `hasura` (profile `datahub`). `public.companies` holds 14,443 companies from a
 Northdata export of the Osnabrück region, mostly name + address; the work is filling the missing
-fields cheaply and traceably. **Osnabrück is a benchmark — the real data is Berlin, arriving as
-another Northdata CSV.**
+fields cheaply and traceably. **Osnabrück is a benchmark — the real data is Berlin, probably from the
+vendor Fusionbase (quarterly API, active companies only).** Which of the 20 target columns it
+covers and which stay ours: [target-columns](docs/target-columns.md).
 
-Postgres 16 (port 5433), Airflow 3.2.0 (Airflow 3 API — `airflow.providers.standard`, not
-`airflow.operators`), Flyway 12.
+Postgres 15 + PostGIS (port 5433), the Data Hub's version · Airflow 3.2.0 (Airflow 3 API —
+`airflow.providers.standard`, not `airflow.operators`) · Flyway 12.
 
 ## Commands and access
 
@@ -57,7 +61,12 @@ docker compose build                                # after Dockerfile/requireme
 docker compose down                                 # add -v to destroy volumes
 ```
 
-Optional profiles: `geo` (overpass), `geocoding` (nominatim), `llm` (searxng, ollama), `debug`.
+Optional profiles: `geo` (overpass), `geocoding` (nominatim), `llm` (searxng, ollama), `debug`,
+`datahub` (Keycloak, Hasura, S3 — [datahub-emulation](docs/datahub-emulation.md)).
+
+**Three DB roles, as on the hub:** `app` owns the schema (Flyway, host scripts), DAGs run as
+`writer` (rows only, no DDL), Hasura as `reader`. A DAG that needs DDL is wrong, not the grant.
+Two app databases: `unternehmensdatenbank` (prod) and `unternehmensdatenbank_staging`.
 
 - Airflow UI **http://localhost:8082** (`airflow`/`airflow`), from `AIRFLOW_PORT`. **Not 8080** — the
   container listens on 8080 internally, which is what `docker ps` shows, and another Airflow on this
@@ -116,6 +125,11 @@ runs by itself once its flag is true and it is unpaused. Per-DAG detail in `airf
   best" a fair question, so **do not fork the flow to fit a provider.** `mistral_/claude_` use the
   provider's own server-side search; `ollama_` pairs a local SearXNG with a local model.
 - `url_discovery` guesses URLs from the name; `osm_discovery` matches a local Overpass (Berlin only).
+- `foerderkatalog` (`@monthly`) loads federal grants into `company_fundings`. Not an observation source
+  and no coordinator trigger; `v_company_fundings` links grants to companies on read (V22).
+- DAG packages import their own modules **by package name** (`from url_discovery.scorer import …`).
+  A bare `from scorer import` after a `sys.path` insert broke `airflow dags test`: two packages
+  have a `scorer.py`, and whichever loaded first won.
 - **`pipeline_coordinator` is the only thing that decides which observation wins a field.** Source
   DAGs write observations and nothing else, then trigger it.
 
@@ -246,7 +260,7 @@ writes the worksheet; only `classify-labels-report` reports precision.
   technology field** (rule 1), and a **word naming a quality is not a word naming an industry**
   (rule 6).
 
-## Migrations — currently V1–V20
+## Migrations — currently V1–V22
 
 Schema changes go in `db/migrations/` as `V{N}__description.sql`, forward-only and immutable once
 applied. Flyway is a one-shot service under `--profile tools`; it does **not** run with
@@ -268,12 +282,14 @@ name in one and not the other cannot be upserted at all. Widen one, widen the ot
 
 ## Guards and tests
 
-**Eight guards** in `scripts/` check the *rules*; **17 pytest tests** in `tests/` check the *numbers
+**Eight guards** in `scripts/` check the *rules*; **21 pytest tests** in `tests/` check the *numbers
 those rules last produced*. All the guards are free — no API, no model, no database, no network.
 Two hooks, tracked in `.claude/` since 2026-09-24 and wired from `.claude/settings.json`: after an
 edit, `guard_after_edit.py` runs **ruff** on any `.py` and the six guards under `combined_discovery/`,
 `scripts/` or `tests/`; before a `git commit`, `run_checks_before_commit.py` runs ruff on the staged
-files, the six guards and the ten Postgres tests — **Docker down blocks the commit**. `ruff.toml`
+files, the six guards and the ten Postgres tests — **Docker down blocks the commit**, except on a
+machine without the reference example data (`airflow/data/combined_discovery/` absent): there the two
+pinned-number modules are skipped with a notice, and ruff plus the rule guards still run. `ruff.toml`
 holds the default rule set only; E501 is off on purpose.
 
 Neither kind checks whether the answers are **correct** — nothing here does, because not one row of
@@ -317,6 +333,9 @@ Decided, not forgotten; each for a stated reason.
    `docs/core-queries-current.sql`. And `import_northdata_websites.py` ~:303 is a stale log line.
 5. **No row of any of the three industry columns is hand-labelled**, so no precision figure exists
    for any of them. `classify-labels` / `classify-labels-report` is the cheapest way to start.
+6. **Half the [target columns](docs/target-columns.md) have no producer yet**: the Fusionbase import,
+   Land Berlin's own grants, and classifiers for Cluster (n=5), DeepTech and isAI. Waiting for the
+   final Berlin data; `deeptech_class`, `is_ai`, `amazon_effect` are reserved and NULL.
 
 `scripts/archive/ac_measurement.py` measures what a name and address alone yield — 29% verified websites, 15% owners
 — and adding the Handelsregister number makes it *worse* (21% vs 25%) by pulling results toward

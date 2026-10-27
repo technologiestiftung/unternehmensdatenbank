@@ -1,0 +1,11 @@
+table:
+  name: v_company_fundings
+  schema: public
+configuration:
+  custom_name: fundings
+select_permissions:
+  - role: user
+    permission:
+      columns: "*"
+      filter: {}
+      allow_aggregations: true
