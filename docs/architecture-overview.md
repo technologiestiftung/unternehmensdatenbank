@@ -21,14 +21,12 @@ configuration, and the hub team runs them.
 flowchart LR
   subgraph BASE["Base data"]
     FB["Fusionbase API<br/>every Berlin company, quarterly"]
-    ND["Northdata CSV<br/>example data until Fusionbase"]
   end
 
   subgraph ENRICH["Enrichment inputs"]
     WEB["Company websites<br/>and Impressum pages"]
     FK["Förderkatalog des Bundes"]
-    OSM["OpenStreetMap"]
-    PAID["Brave and Exa search<br/>paid, used once"]
+    LB["Land Berlin grants<br/>planned"]
   end
 
   subgraph HUB["Berlin Data Hub"]
@@ -43,11 +41,9 @@ flowchart LR
   USERS(["Users"])
 
   FB -->|"import DAG, to build"| AF
-  ND -.->|"replaced by Fusionbase"| AF
   WEB --> AF
   FK --> AF
-  OSM --> AF
-  PAID --> AF
+  LB -.-> AF
   AF -->|"writer login"| PG
   PG -->|"reader login"| HS
   HS --> APP
@@ -60,7 +56,9 @@ flowchart LR
 
 Two layers: Fusionbase answers "which companies exist and what is registered about them"; our DAGs
 add what Fusionbase does not deliver (grants, Technologiefeld, classifications) and check what it
-does deliver (websites, AI-written WZ codes and descriptions). Dashed lines are planned or temporary.
+does deliver (websites, AI-written WZ codes and descriptions). The fourth source is the app's users:
+votes, corrections and comments. Dashed lines are planned. Inputs used only on the Osnabrück example
+data are listed in section 8, not here.
 
 ## 3. Repositories and who runs what
 
@@ -201,8 +199,8 @@ flowchart TD
   M["company_managers"] --> V
 ```
 
-- Priority beats confidence. A source at priority 50 (the register export) beats every source at
-  priority 100, at any confidence. Among equal priorities, confidence decides.
+- Priority beats confidence. A source at priority 50 beats every source at priority 100, at any
+  confidence. Among equal priorities, confidence decides.
 - Observations are never deleted, only replaced as the winner. The old value stays as evidence.
 
 ### Database logins (as on the hub)
@@ -219,7 +217,7 @@ flowchart TD
 flowchart LR
   FB["Fusionbase API<br/>base record"]
   subgraph DAGS["Our Airflow DAGs"]
-    DISC["Website discovery<br/>P1 to P4"]
+    DISC["Website discovery<br/>url_discovery, combined_discovery"]
     BC["branch_classifier"]
     NER["manager_ner<br/>spaCy"]
     FKD["foerderkatalog"]
@@ -255,15 +253,15 @@ flowchart LR
 
 | # | Target column | View column | Base: Fusionbase API | Enrichment: our DAGs | State today (example data) |
 |---|---|---|---|---|---|
-| 1 | Name | `name` | register name | none | from Northdata |
+| 1 | Name | `name` | register name | none | from the example data |
 | 2 | Mitarbeiter | `employee_count` | if published in the Bundesanzeiger, with history | fill gaps later | empty |
 | 3 | Umsatz | `revenue` | if the company must publish, with history | fill gaps later | empty |
 | 4 | Förderungen | `funding_count`, `funding_total_eur` | not delivered | `foerderkatalog` DAG; Land Berlin grants to add | 19,533 federal grants for 3,003 recipients |
-| 5 | WZ-Nummer | `wz_code` | produced by Fusionbase's AI | check against the register purpose | from Northdata |
-| 6 | Gründungsdatum | `established_at` | yes | none | from Northdata |
-| 7 | Adresse | `address` | yes | none | from Northdata |
-| 8 | Rechtsform | `legal_form` | yes | none | from Northdata |
-| 9 | Cluster (n=5) | `cluster` | not delivered | classifier to build | free text from search providers, not the five clusters |
+| 5 | WZ-Nummer | `wz_code` | produced by Fusionbase's AI | check against the register purpose | from the example data |
+| 6 | Gründungsdatum | `established_at` | yes | none | from the example data |
+| 7 | Adresse | `address` | yes | none | from the example data |
+| 8 | Rechtsform | `legal_form` | yes | none | from the example data |
+| 9 | Cluster (n=5) | `cluster` | not delivered | classifier to build | empty in the target; the example values are free text from the search experiments (section 8) |
 | 10 | Technologiefeld | `technologiefeld` | not delivered | `branch_classifier` keywords; a text classifier fills rows without a keyword (opt-in) | 403 of 14,443 |
 | 11 | Website | `website` | yes | discovery DAGs verify it and fill gaps | 3,529 |
 | 12 | Geschäftsführung / Kontakt | `management` | contact optional | `manager_ner` (spaCy) on the Impressum, trained on app votes | names from register and Impressum |
@@ -274,7 +272,7 @@ flowchart LR
 | 17 | isAI | `is_ai` | not delivered | classifier to build | empty |
 | 18 | Timestamp | `updated_at` | delivery date | resolver timestamps | filled |
 | 19 | Amazon-Effekt (optional) | `amazon_effect` | not delivered | not defined yet | empty |
-| 20 | Schließung / Liquidation (optional) | `register_status` | only active companies are delivered | a company missing from the next quarterly delivery is a candidate | Northdata status |
+| 20 | Schließung / Liquidation (optional) | `register_status` | only active companies are delivered | a company missing from the next quarterly delivery is a candidate | register status in the example data |
 
 Proposal: import Fusionbase as a source with a high priority (like the register export today), so
 its values win unless a check of ours is configured to override them. Columns 5 and 13 are AI
@@ -282,19 +280,32 @@ output from the vendor and are checked like our own.
 
 ## 7. Pipelines
 
-| | Pipeline | Kind | Priority | Cost | Result on example data |
+| Pipeline | Source | Kind | Priority | Cost | Result on example data |
 |---|---|---|---|---|---|
-| P1 | `northdata_export`, the register CSV | import script | 50 | free | 2,815 websites |
-| P2 | `brave_`, `exa_`, `parallel_search_discovery` | DAGs | 100 | paid | 85, 39 and 1 websites |
-| P3 | `combined_discovery`: URL patterns, OSM, local model as judge | script | 100 | free | 552 websites |
-| P4 | `url_discovery`: guesses URLs from the name | DAG | 100 | free | 37 websites |
-| P5 | `branch_classifier`: 77 technology fields | script and import | 100 | free | Technologiefeld and purpose field |
-| | `foerderkatalog` | DAG, monthly | | free | grants table |
-| | `pipeline_coordinator` | DAG | | free | picks the winning values |
+| Fusionbase import | Fusionbase API | DAG, quarterly, to build | high, proposed | contract | none yet |
+| `url_discovery`: guesses URLs from the name | company websites | DAG | 100 | free | 37 websites |
+| `combined_discovery`: URL patterns, Impressum and register check | company websites | script | 100 | free | 552 websites |
+| `branch_classifier`: 77 technology fields | company websites, register purpose | script and import | 100 | free | Technologiefeld and purpose field |
+| `manager_ner`: names from the Impressum | Impressum pages, app votes | DAGs | 100 | free | measured on 222 Impressum pages (section 9) |
+| `foerderkatalog` | Förderkatalog des Bundes | DAG, monthly | | free | grants table |
+| `pipeline_coordinator` | all of the above | DAG | | free | picks the winning values |
 
 Every DAG is off by default. It needs its `ENABLE_*` flag and must be unpaused in Airflow.
 
-## 8. AI and models
+## 8. Experiments on the example data (not part of the target)
+
+These ran only on the Osnabrück example data, to learn what works. None of them is a source in the
+target setup.
+
+| Experiment | What it did | Measured result | What happens to it |
+|---|---|---|---|
+| Northdata export | example base data, 14,443 companies; its websites imported at priority 50 | 2,815 canonical websites | drop once Fusionbase is connected |
+| Brave, Exa and Parallel search | paid web search plus a model that picks the company's site | 85, 39 and 1 canonical websites | drop: paid, used once |
+| OpenStreetMap (local Overpass) | matches a company to a mapped business with a website | no separate count; part of the 552 combined discovery websites | keep as a local tool |
+| SearXNG | free local web search for the `llm` stage | found nothing: search engines answer with a CAPTCHA on this network | drop |
+| Ollama judge | a local model reads a downloaded page and says whether it is this company's site | 886 high, 56 medium, 1 low among 943 websites | decide after comparing `band` with `band_without_judge` |
+
+## 9. AI and models
 
 ### Where which technique is used
 
@@ -305,7 +316,7 @@ flowchart LR
   Q1 -->|no| Q2{"Are there<br/>hand-checked<br/>examples?"}
   Q2 -->|yes| SMALL["Small trained model on CPU<br/>planned: spaCy NER for names,<br/>text classifiers for Cluster, DeepTech, isAI"]
   Q2 -->|no| Q3{"Does it need judgement<br/>over a whole page?"}
-  Q3 -->|yes| LLM["Language model<br/>today: local Ollama as judge<br/>'is this page this company's site'"]
+  Q3 -->|yes| LLM["Language model<br/>off the cluster or a German-hosted API<br/>'is this page this company's site'"]
   Q3 -->|no| LABEL["Collect labels first<br/>app votes and corrections"]
   LLM -.->|"its answers, once checked,<br/>become training examples"| SMALL
   LABEL --> SMALL
@@ -314,7 +325,7 @@ flowchart LR
 | Task | Technique today | Measured | Next |
 |---|---|---|---|
 | Technologiefeld, purpose field | keyword weights; a local model only breaks ties; optionally a spaCy text classifier for rows no keyword reached | 403 Technologiefeld values; no precision figure yet | collect votes, train the classifier, compare on human labels |
-| Is a page the company's own site | rules first, then a local model (Ollama) as judge | 886 high, 56 medium, 1 low among 943 websites | keep |
+| Is a page the company's own site | rules: Impressum, register number, company name | 943 websites, with the Ollama judge experiment (section 8) | decide on the judge after comparing with and without it |
 | Manager names | regular expressions on the Impressum, plus spaCy (`manager_ner`) since 2026-10-27 | spaCy agreed on 77 of 222 pages and added names on 10; one-word names are now dropped | weekly training from app votes and corrections |
 | Pages that need a browser | plain HTTP download | 2 of 229 homepages came back nearly empty, none rendered by JavaScript | repeat on Berlin data |
 | Cluster, DeepTech, isAI | none | | labels first, then a text classifier |
@@ -348,7 +359,7 @@ evidence. The hub has no GPU: model runs happen off the cluster or through a Ger
 | Zero-shot entity recognition (e.g. GLiNER) | extracting fields before any labels exist | low, CPU |
 | Fuzzy and learned matching | linking grants and Fusionbase records to companies | low |
 
-## 9. Feedback loop and model training
+## 10. Feedback loop and model training
 
 ```mermaid
 flowchart LR
@@ -402,15 +413,17 @@ flowchart LR
 
 - Keyword rows are the seed. A correction replaces a label; a "wrong" without one removes it.
 - It is judged only on held-out gap companies: those no keyword decided, which are the only rows it
-  fills. On companies the keywords answered it mostly repeats its seed, so its accuracy there is
+  fills. On every other held-out company it mostly repeats its seed, so its accuracy there is
   stored for information and never decides.
+- On a gap company a confirmed value or a correction is the label; a "wrong" without a correction
+  counts as a miss when it rejects exactly the predicted field, and is ignored on any other value.
 - Keywords give nothing in a gap, so the bar is a fixed accuracy (`BRANCH_TEXTCAT_MIN_ACCURACY`,
   0.7) on at least 20 gap labels (`BRANCH_TEXTCAT_MIN_HUMAN_HOLDOUT`), not a tie with the keywords.
 - Gap labels come from votes on shown textcat suggestions, which exist only after a person promoted
   a model with `--promote`, or from corrections for `no_keyword` companies, for example taken from
   the `classify-labels` worksheet. Until then nothing is promoted automatically.
 
-## 10. The app
+## 11. The app
 
 | Feature | Detail |
 |---|---|
@@ -419,7 +432,7 @@ flowchart LR
 | Company page | all fields, grants with amounts and periods, comments, votes and corrections |
 | Login | Keycloak (OpenID Connect); every request to Hasura carries the user's token |
 
-## 11. Running it locally
+## 12. Running it locally
 
 ```mermaid
 flowchart LR
@@ -465,7 +478,7 @@ npm run dev                               # http://localhost:3100
 Locally, RustFS stands in for MinIO: MinIO no longer publishes container images, and RustFS speaks
 the same S3 API.
 
-## 12. From a commit to the Data Hub
+## 13. From a commit to the Data Hub
 
 ```mermaid
 flowchart LR
@@ -484,7 +497,7 @@ flowchart LR
 - Airflow: DAGs from the data repo as a DAG bundle. How Python packages get installed (shared image
   or one virtual environment per task, as the hub's own DAGs do) is still open.
 
-## 13. Quality gates
+## 14. Quality gates
 
 | Gate | What it does | Where |
 |---|---|---|
@@ -493,7 +506,7 @@ flowchart LR
 | CI | lint, typecheck, tests, build on every pull request | app repo |
 | no-mistakes (optional) | review, tests, docs, lint, push, pull request, CI in one run | both repos, only where it is installed |
 
-## 14. Data protection
+## 15. Data protection
 
 - Manager names and contact details are personal data, also when they come from a public Impressum.
 - `extraction_feedback` stores a name, an employee's vote and possibly a typed correction. This is a
@@ -501,7 +514,7 @@ flowchart LR
 - No names go into prompts for AI tools; measurements report counts only.
 - Keys and passwords come from environment variables or secrets, never from images or code.
 
-## 15. Open work
+## 16. Open work
 
 ```mermaid
 flowchart LR
@@ -543,7 +556,7 @@ flowchart LR
 - [ ] Align local Airflow 3.2 with the hub's version (the add-on defaults to 3.3; unconfirmed)
 - [ ] Repeat the crawler measurement on Berlin data
 
-## 16. Glossary
+## 17. Glossary
 
 | Term | Meaning |
 |---|---|

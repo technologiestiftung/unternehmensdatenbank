@@ -8,6 +8,7 @@ from combined_discovery.branch_textcat import (
     DECIDED_BY_TEXTCAT,
     accuracy,
     classifier_text,
+    gap_accuracy,
     gap_companies,
     human_label,
     predict,
@@ -72,6 +73,19 @@ def test_gap_companies_are_the_rows_the_keywords_did_not_decide() -> None:
         row("", None, outcome="no_keyword", decided_by=""),
     ]
     assert gap_companies(rows) == {"gap", "filled"}
+
+
+def test_gap_accuracy_counts_labels_and_rejections_of_the_prediction() -> None:
+    pairs = [
+        ("Software", [vote("Software", "correct")]),                           # confirmed: hit
+        ("Software", [vote("Software", "wrong", "Energietechnik")]),           # corrected: miss
+        ("Energietechnik", [vote("Software", "wrong", "Energietechnik")]),     # corrected to it: hit
+        ("Software", [vote("Software", "wrong")]),                             # rejected prediction: miss
+        ("Software", [vote("Energietechnik", "wrong")]),                       # other value rejected: ignored
+        (None, [vote("Software", "wrong")]),                                   # no prediction: ignored
+    ]
+    assert gap_accuracy(pairs, FIELDS) == (0.5, 4)
+    assert gap_accuracy([], FIELDS) == (0.0, 0)
 
 
 def test_companies_without_text_are_skipped() -> None:

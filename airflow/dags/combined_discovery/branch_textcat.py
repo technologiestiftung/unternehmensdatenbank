@@ -22,7 +22,13 @@ Only against people, and only on the companies it will be used on. A fixed fifth
 with a human label is held out. Of those, only the gap companies count: the ones the keywords left
 open (`no_keyword`, or filled by the classifier itself). On companies the keywords answered, the
 classifier mostly copies the seed it learned from, so agreeing there says nothing about the gaps.
-Its accuracy on the keyword companies is kept in `metrics.json` for information only.
+Its accuracy on the other held-out companies is kept in `metrics.json` for information only.
+
+On a gap company a person's label counts as usual (a confirmed value or a correction). A "wrong"
+vote without a correction counts as a miss when it rejects exactly the field the classifier
+predicts, and keeps the company in the evaluation; a "wrong" on some other value says nothing about
+the prediction and is ignored (`gap_accuracy`). Without that, the plain rejections people leave on
+shown suggestions would drop out and the accuracy would look better than it is.
 
 The keywords give nothing in a gap, so the bar is not a tie with them: the classifier is promoted
 automatically only with at least `BRANCH_TEXTCAT_MIN_HUMAN_HOLDOUT` held-out gap labels and an
@@ -158,6 +164,21 @@ def predict(nlp: Any, text: str) -> tuple[str | None, float]:
     cats = nlp(text[:MAX_CHARS]).cats
     label = max(cats, key=cats.get)
     return label, float(cats[label])
+
+
+def gap_accuracy(
+    pairs: Iterable[tuple[str | None, list[Mapping[str, Any]]]], fields: set[str]
+) -> tuple[float, int]:
+    """(share right, number judged) over (prediction, votes) for gap companies. A label decides as in
+    `accuracy`; without one, a rejection of exactly the prediction is a miss, anything else is skipped."""
+    judged = []
+    for prediction, votes in pairs:
+        label, rejected = human_label(votes, fields)
+        if label:
+            judged.append(prediction == label)
+        elif prediction is not None and prediction in rejected:
+            judged.append(False)
+    return (sum(judged) / len(judged) if judged else 0.0), len(judged)
 
 
 def accuracy(pairs: Iterable[tuple[str | None, str]]) -> tuple[float, int]:

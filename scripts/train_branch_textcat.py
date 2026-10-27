@@ -15,8 +15,9 @@ airflow/dags/combined_discovery/branch_textcat.py.
 PROMOTION
 
 Automatic only when at least MIN_HUMAN_HOLDOUT held-out gap companies (no keyword decided them) carry
-a human label and the classifier gets at least MIN_ACCURACY of them right. Accuracy on the companies
-the keywords answered is logged, never used. Without those labels nobody knows whether it helps, so
+a human judgement and the classifier gets at least MIN_ACCURACY of them right; a plain "wrong" on
+exactly its prediction counts as a miss. Accuracy on the other held-out companies is logged, never
+used. Without those labels nobody knows whether it helps, so
 `--promote` is a human decision, logged as such in metrics.json. Where gap labels come from:
 branch_textcat.py, "HOW IT IS JUDGED".
 """
@@ -108,13 +109,15 @@ def main() -> int:
 
     gaps = branch_textcat.gap_companies(branch_rows)
 
-    def clf_accuracy(companies: set[str]) -> tuple[float, int]:
-        return branch_textcat.accuracy(
-            (branch_textcat.predict(nlp, data.labelled[cid][0])[0], data.labelled[cid][1]) for cid in companies
-        )
-
-    gap_acc, n_gap = clf_accuracy(holdout & gaps)
-    kw_acc, n_kw = clf_accuracy(holdout - gaps)
+    gap_acc, n_gap = branch_textcat.gap_accuracy(
+        ((branch_textcat.predict(nlp, texts[cid])[0], votes[cid])
+         for cid in gaps if cid in votes and texts.get(cid) and is_holdout(cid)),
+        set(fields),
+    )
+    # Every held-out company that is not a gap (keywords, torn, no_website, model tie-break): information only.
+    other_acc, n_other = branch_textcat.accuracy(
+        (branch_textcat.predict(nlp, data.labelled[cid][0])[0], data.labelled[cid][1]) for cid in holdout - gaps
+    )
     measured = n_gap >= MIN_HUMAN_HOLDOUT
     promoted = (measured and gap_acc >= MIN_ACCURACY) or args.promote
 
@@ -129,7 +132,7 @@ def main() -> int:
         "labels": dict(data.counts), "losses": losses,
         "human_holdout": {"gap_companies": n_gap, "gap_accuracy": round(gap_acc, 3),
                           "min_accuracy": MIN_ACCURACY,
-                          "keyword_companies": n_kw, "keyword_company_accuracy": round(kw_acc, 3)},
+                          "other_companies": n_other, "other_company_accuracy": round(other_acc, 3)},
         "promoted": promoted,
         "promoted_by": "measurement" if promoted and not args.promote else ("person (--promote)" if promoted else None),
     }
@@ -137,8 +140,8 @@ def main() -> int:
     if promoted:
         (runner.TEXTCAT_DIR / "current.json").write_text(json.dumps({"version": version}, indent=2))
     log.info(
-        "Model %s: %.3f on %d human-labelled held-out gap companies (%.3f on %d keyword companies, information only). %s",
-        version, gap_acc, n_gap, kw_acc, n_kw,
+        "Model %s: %.3f on %d human-judged held-out gap companies (%.3f on %d other companies, information only). %s",
+        version, gap_acc, n_gap, other_acc, n_other,
         "Promoted." if promoted else (
             "Not promoted, model files not kept: too few human labels on gap companies to know whether it "
             "helps (use --promote to decide yourself)."
