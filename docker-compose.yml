@@ -56,7 +56,9 @@ x-airflow-common: &airflow-common
     CHECKPOINT_FILE: /opt/airflow/data/gewerbedaten_checkpoint.json
     RESET_CHECKPOINT: ${RESET_CHECKPOINT:-false}
     ADRESSEN_CACHE_FILE: /opt/airflow/data/adressen_cache.json
-    PG_DSN: host=postgres port=5432 dbname=${APP_DB_NAME:-unternehmensdatenbank} user=${APP_DB_USER:-app} password=${APP_DB_PASSWORD:-app}
+    # The writer role, like a DAG on the Data Hub: read/write rows, no DDL. Host scripts still
+    # default to the owner `app`; see docs/datahub-emulation.md.
+    PG_DSN: host=postgres port=5432 dbname=${APP_DB_NAME:-unternehmensdatenbank} user=${APP_DB_WRITER_USER:-writer} password=${APP_DB_WRITER_PASSWORD:-writer}
     MAX_RECORDS: ${MAX_RECORDS:-0}
     WFS_PAGE_SIZE: ${WFS_PAGE_SIZE:-2000}
     WFS_START_INDEX: ${WFS_START_INDEX:-0}
@@ -129,6 +131,7 @@ x-airflow-common: &airflow-common
     URL_DISCOVERY_REQUEST_DELAY_S: ${URL_DISCOVERY_REQUEST_DELAY_S:-0.5}
     URL_DISCOVERY_PROGRESS_LOG_EVERY: ${URL_DISCOVERY_PROGRESS_LOG_EVERY:-25}
     URL_DISCOVERY_CHECKPOINT_FILE: ${URL_DISCOVERY_CHECKPOINT_FILE:-/opt/airflow/data/url_discovery_checkpoint.json}
+    ENABLE_FOERDERKATALOG: ${ENABLE_FOERDERKATALOG:-false}
     ENABLE_OSM_DISCOVERY: ${ENABLE_OSM_DISCOVERY:-false}
     OSM_OVERPASS_URL: ${OSM_OVERPASS_URL:-https://overpass-api.de/api/interpreter}
     OSM_DISCOVERY_TIMEOUT_S: ${OSM_DISCOVERY_TIMEOUT_S:-30}
@@ -211,7 +214,9 @@ x-airflow-common: &airflow-common
 
 services:
   postgres:
-    image: postgres:16
+    # Postgres 15 + PostGIS + pgvector, as on the Data Hub. See docs/datahub-emulation.md.
+    build: ./postgres
+    image: unternehmensdatenbank-postgres:15
     environment:
       POSTGRES_USER: ${POSTGRES_SUPERUSER:-postgres}
       POSTGRES_PASSWORD: ${POSTGRES_SUPERPASSWORD:-postgres}
@@ -222,10 +227,23 @@ services:
       APP_DB_NAME: ${APP_DB_NAME:-unternehmensdatenbank}
       APP_DB_USER: ${APP_DB_USER:-app}
       APP_DB_PASSWORD: ${APP_DB_PASSWORD:-app}
+      APP_DB_STAGING_NAME: ${APP_DB_STAGING_NAME:-unternehmensdatenbank_staging}
+      APP_DB_WRITER_USER: ${APP_DB_WRITER_USER:-writer}
+      APP_DB_WRITER_PASSWORD: ${APP_DB_WRITER_PASSWORD:-writer}
+      APP_DB_READER_USER: ${APP_DB_READER_USER:-reader}
+      APP_DB_READER_PASSWORD: ${APP_DB_READER_PASSWORD:-reader}
+      KEYCLOAK_DB_NAME: keycloak
+      KEYCLOAK_DB_USER: keycloak
+      KEYCLOAK_DB_PASSWORD: ${KEYCLOAK_DB_PASSWORD:-keycloak}
+      HASURA_DB_NAME: hasura
+      HASURA_DB_USER: hasura
+      HASURA_DB_PASSWORD: ${HASURA_DB_PASSWORD:-hasura}
     ports:
       - "${POSTGRES_PORT:-5433}:5432"
     volumes:
-      - postgres-data:/var/lib/postgresql/data
+      # A new volume, not `postgres-data`: a Postgres 16 data directory cannot be opened by 15.
+      # The old volume is left in place; docs/datahub-emulation.md has the copy-over steps.
+      - postgres15-data:/var/lib/postgresql/data
       - ./postgres/init:/docker-entrypoint-initdb.d
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_SUPERUSER:-postgres} -d postgres"]
@@ -394,6 +412,8 @@ services:
       - -url=jdbc:postgresql://postgres:5432/${APP_DB_NAME:-unternehmensdatenbank}
       - -user=${APP_DB_USER:-app}
       - -password=${APP_DB_PASSWORD:-app}
+      - -placeholders.writer_role=${APP_DB_WRITER_USER:-writer}
+      - -placeholders.reader_role=${APP_DB_READER_USER:-reader}
       - -locations=filesystem:/flyway/sql
       - -connectRetries=60
       - migrate
@@ -434,8 +454,93 @@ services:
     #           count: all
     #           capabilities: [gpu]
 
+  # --- Data Hub emulation: the platform services the hub runs for us ---------------------------
+  # Profile `datahub`. Versions follow what the hub runs where known; see docs/datahub-emulation.md.
+
+  keycloak:
+    image: quay.io/keycloak/keycloak:26.8.1
+    profiles:
+      - datahub
+    command: start-dev --import-realm --http-port=8080
+    environment:
+      KC_DB: postgres
+      KC_DB_URL: jdbc:postgresql://postgres:5432/keycloak
+      KC_DB_USERNAME: keycloak
+      KC_DB_PASSWORD: ${KEYCLOAK_DB_PASSWORD:-keycloak}
+      # The browser and an app on the host both reach Keycloak here, so tokens carry this issuer.
+      KC_HOSTNAME: http://localhost:${KEYCLOAK_PORT:-8180}
+      KC_BOOTSTRAP_ADMIN_USERNAME: ${KEYCLOAK_ADMIN:-admin}
+      KC_BOOTSTRAP_ADMIN_PASSWORD: ${KEYCLOAK_ADMIN_PASSWORD:-admin}
+      KC_HEALTH_ENABLED: "true"
+    ports:
+      - "${KEYCLOAK_PORT:-8180}:8080"
+    volumes:
+      - ./keycloak:/opt/keycloak/data/import:ro
+    # The image has no curl; bash's /dev/tcp asks the management port's readiness endpoint.
+    healthcheck:
+      test: ["CMD-SHELL", "exec 3<>/dev/tcp/127.0.0.1/9000 && printf 'GET /health/ready HTTP/1.1\\r\\nHost: localhost\\r\\nConnection: close\\r\\n\\r\\n' >&3 && grep -q UP <&3"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      # The first start creates Keycloak's schema and takes minutes.
+      start_period: 300s
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+
+  hasura:
+    # cli-migrations-v3 applies ./hasura/metadata on every start, so the metadata lives in git.
+    image: hasura/graphql-engine:v2.51.3.cli-migrations-v3
+    profiles:
+      - datahub
+    environment:
+      HASURA_GRAPHQL_METADATA_DATABASE_URL: postgres://hasura:${HASURA_DB_PASSWORD:-hasura}@postgres:5432/hasura
+      # Hasura reads as the reader role; V22 grants it INSERT on company_comments and nothing else.
+      HASURA_UDB_DATABASE_URL: postgres://${APP_DB_READER_USER:-reader}:${APP_DB_READER_PASSWORD:-reader}@postgres:5432/${APP_DB_NAME:-unternehmensdatenbank}
+      HASURA_GRAPHQL_ADMIN_SECRET: ${HASURA_ADMIN_SECRET:-local-admin-secret}
+      HASURA_GRAPHQL_ENABLE_CONSOLE: "true"
+      HASURA_GRAPHQL_DEV_MODE: "true"
+      # Keycloak's realm roles become Hasura roles; every authenticated user defaults to `user`.
+      HASURA_GRAPHQL_JWT_SECRET: >-
+        {"type":"RS256","jwk_url":"http://keycloak:8080/realms/datahub/protocol/openid-connect/certs",
+        "claims_map":{"x-hasura-allowed-roles":{"path":"$$.realm_access.roles"},
+        "x-hasura-default-role":{"path":"$$.hasura_default_role","default":"user"},
+        "x-hasura-user-id":{"path":"$$.sub"}}}
+    ports:
+      - "${HASURA_PORT:-8090}:8080"
+    volumes:
+      - ./hasura/metadata:/hasura-metadata:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+      # Hasura exits when it cannot fetch Keycloak's signing keys, so it waits for a ready Keycloak.
+      keycloak:
+        condition: service_healthy
+    restart: unless-stopped
+
+  s3:
+    # RustFS, not MinIO: MinIO stopped publishing images, and RustFS is a CIVITAS/CORE add-on that
+    # speaks the same S3 API. Nothing in this repo uses S3 yet.
+    image: rustfs/rustfs:1.0.4
+    profiles:
+      - datahub
+    command: /data
+    environment:
+      RUSTFS_ACCESS_KEY: ${S3_ACCESS_KEY:-localaccess}
+      RUSTFS_SECRET_KEY: ${S3_SECRET_KEY:-localsecret}
+      RUSTFS_CONSOLE_ENABLE: "true"
+    ports:
+      - "${S3_PORT:-9000}:9000"
+      - "${S3_CONSOLE_PORT:-9001}:9001"
+    volumes:
+      - s3-data:/data
+    restart: unless-stopped
+
 volumes:
   postgres-data:
+  postgres15-data:
+  s3-data:
   pgadmin-data:
   overpass-db:
   nominatim-db:

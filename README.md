@@ -2,7 +2,7 @@
 
 Local development scaffold for a Postgres-backed German company data platform. The goal is to fill in the missing fields of a register export — website, industry field, CEO contact, revenue, employee count — cheaply, and to record *why* every value was chosen.
 
-**What is actually in the database: 14,443 companies from a Northdata export of the Osnabrück region.** Mostly a name and an address. Osnabrück is the **benchmark**, not the target — the real data is Berlin, arriving as another Northdata CSV, and every number in this repo is an Osnabrück measurement that Berlin will replace. Over half the table (7,673 of 14,443) is `erloschen`, meaning dissolved, which is worth knowing before reading any coverage figure.
+**Everything here runs on example data.** The final dataset, Berlin companies probably delivered quarterly by the vendor Fusionbase ([docs/target-columns.md](docs/target-columns.md)), has not arrived yet. Until it does, the database holds **14,443 companies from a Northdata export of the Osnabrück region**, mostly a name and an address. Osnabrück is the **benchmark**, not the target: every number in this repo is an Osnabrück measurement that Berlin will replace. Over half the table (7,673 of 14,443) is `erloschen`, meaning dissolved, which is worth knowing before reading any coverage figure.
 
 Current website coverage: **3,529 of 14,443**. Where they came from is the priority table below.
 
@@ -10,10 +10,11 @@ Current website coverage: **3,529 of 14,443**. Where they came from is the prior
 
 | Component | Version | Role |
 |-----------|---------|------|
-| Postgres | 16 | App database + Airflow metadata (two separate DBs on one server) |
+| Postgres | 15 + PostGIS + pgvector | App databases (prod + staging) + Airflow metadata, as on the Berlin Data Hub |
 | Airflow | 3.2.0 | Pipeline orchestration (Airflow 3 API) |
 | Flyway | 12 | Forward-only SQL migrations |
 | Python | 3.12 | DAG logic, psycopg2 for DB writes |
+| Keycloak · Hasura · RustFS (S3) | 26.8 · 2.51 · 1.0 | Data Hub emulation, profile `datahub` — see [docs/datahub-emulation.md](docs/datahub-emulation.md) |
 
 ## Data model
 
@@ -174,7 +175,10 @@ docker compose --profile geocoding up -d nominatim
 |---------|-----|-------------|
 | Airflow UI | http://localhost:8082 | airflow / airflow |
 | pgAdmin | http://localhost:5051 | admin@example.com / admin |
-| Postgres | localhost:5433 | app / app — db: unternehmensdatenbank |
+| Postgres | localhost:5433 | app / app (owner), writer / writer (DAGs), reader / reader (Hasura) — dbs: unternehmensdatenbank, unternehmensdatenbank_staging |
+| Hasura (`datahub`) | http://localhost:8090/console | admin secret local-admin-secret |
+| Keycloak (`datahub`) | http://localhost:8180/admin | admin / admin · app user dev / dev |
+| S3 / RustFS (`datahub`) | http://localhost:9001 | localaccess / localsecret |
 | SearXNG | http://localhost:8888 | — |
 | Overpass (optional) | http://localhost:12345/api/interpreter | — |
 | Nominatim (optional) | http://localhost:8081/reverse | — |
@@ -186,6 +190,7 @@ All DAGs are disabled by default, and a DAG needs **two** switches: its `ENABLE_
 ```
 # Live
 ENABLE_URL_DISCOVERY=true
+ENABLE_FOERDERKATALOG=true              # @monthly, Förderkatalog des Bundes, free
 ENABLE_BRAVE_SEARCH_DISCOVERY=true      # requires BRAVE_API_KEY, costs money
 ENABLE_EXA_SEARCH_DISCOVERY=true        # requires EXA_API_KEY, costs money
 ENABLE_PARALLEL_SEARCH_DISCOVERY=true   # anonymous MCP, hard ~20-search quota per process
@@ -204,7 +209,7 @@ One run processes `SOURCE_ENRICHMENT_BATCH_SIZE` companies (default 50) and chec
 
 ## Migrations
 
-All schema changes go in `db/migrations/` as `V{N}__description.sql`, currently **V1–V20**. Migrations are **forward-only and immutable** once applied — never edit an applied file, add a new one. Flyway runs as a one-shot Docker service under `--profile tools` and does **not** start with `docker compose up`, so run migrations before starting Airflow whenever schema changes land.
+All schema changes go in `db/migrations/` as `V{N}__description.sql`, currently **V1–V22**. Migrations are **forward-only and immutable** once applied — never edit an applied file, add a new one. Flyway runs as a one-shot Docker service under `--profile tools` and does **not** start with `docker compose up`, so run migrations before starting Airflow whenever schema changes land.
 
 The four most recent, because they changed behaviour and not just shape:
 
@@ -214,11 +219,13 @@ The four most recent, because they changed behaviour and not just shape:
 | **V18** | widened that key from two field names to six |
 | **V19** | deduped `company_managers` 9,195 → 1,047 and added the unique constraint its `ON CONFLICT` had always needed |
 | **V20** | added the `branch_classifier` source and reserved `technologiefeld` / `purpose_field` in `v_companies_enriched`. Schema only at the time; the write path landed later and both columns are now served |
+| **V21** | grants for the Data Hub's three roles: `writer` (DAGs) may write rows but not DDL, `reader` (Hasura) may only read. Role names are Flyway placeholders |
+| **V22** | `company_fundings`, `company_comments` and `v_company_profile`, the target record per company ([docs/target-columns.md](docs/target-columns.md)) |
 
 ## Tests and guards
 
 ```bash
-pytest -q                                                  # 17 tests
+pytest -q                                                  # 21 tests
 pytest -m "not integration"                                # the subset needing neither disk nor Docker
 python tests/integration/test_ground_truth_columns.py      # also runs standalone, without pytest
 python scripts/check_branch_classifier.py                  # one of 7 guard scripts
@@ -227,3 +234,5 @@ python scripts/check_branch_classifier.py                  # one of 7 guard scri
 `tests/` is the pytest tree — `unit/` for tests needing nothing but the code, `integration/` for tests reading the artifacts on disk or the database. Alongside it are **7 guard scripts** in `scripts/` (`check_*.py` plus `replay_judge_gate.py`), all free: no API, no model, no database, no network. A `PostToolUse` hook runs five of them after an edit under `combined_discovery/`, `scripts/` or `tests/`.
 
 The two ground-truth modules assert **counts, never correctness** — not one row of the industry classification has been hand-labelled, so there is no precision figure to assert. A failure means "these numbers moved, find out why". They also run standalone without pytest, which is deliberate: pytest is host-only and absent from `airflow/requirements.txt`.
+
+**They pin one particular copy of the example data**: the database and the files under `airflow/data/combined_discovery/` on the machine where the discovery and classification runs were made (14,443 companies, 3,529 canonical websites). A machine with a different or partial copy fails them with messages like `companies got=7449 want=14443`. That is not a code regression, it just means "not that copy". The pre-commit hook runs these tests, so on such a machine it blocks every commit. To get the pinned copy, take a `pg_dump` of `unternehmensdatenbank` and the `airflow/data/combined_discovery/` folder from that machine, restore both here, and run Flyway. When the final Berlin data arrives, the pinned numbers are replaced wholesale, following the rule in [docs/guards-and-tests.md](docs/guards-and-tests.md).

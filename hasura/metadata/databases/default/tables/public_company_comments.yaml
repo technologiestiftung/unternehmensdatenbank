@@ -1,0 +1,25 @@
+table:
+  name: company_comments
+  schema: public
+configuration:
+  custom_name: comments
+insert_permissions:
+  # author_id comes from the JWT, never from the client.
+  - role: user
+    permission:
+      check: {}
+      set:
+        author_id: x-hasura-User-Id
+      columns:
+        - company_id
+        - body
+select_permissions:
+  - role: user
+    permission:
+      columns:
+        - id
+        - company_id
+        - author_id
+        - body
+        - created_at
+      filter: {}

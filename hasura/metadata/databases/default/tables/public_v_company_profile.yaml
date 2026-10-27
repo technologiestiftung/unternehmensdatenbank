@@ -1,0 +1,28 @@
+table:
+  name: v_company_profile
+  schema: public
+configuration:
+  custom_name: companies
+array_relationships:
+  - name: comments
+    using:
+      manual_configuration:
+        remote_table:
+          name: company_comments
+          schema: public
+        column_mapping:
+          id: company_id
+  - name: fundings
+    using:
+      manual_configuration:
+        remote_table:
+          name: v_company_fundings
+          schema: public
+        column_mapping:
+          id: company_id
+select_permissions:
+  - role: user
+    permission:
+      columns: "*"
+      filter: {}
+      allow_aggregations: true

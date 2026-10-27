@@ -134,6 +134,7 @@ Each has its own README with env vars and provider quirks.
 | [`ollama_search_discovery/`](ollama_search_discovery/README.md) | SearXNG + a local model, no API cost | Ollama + SearXNG |
 | `url_discovery/` | Guesses URLs from the company name, then checks them | nothing |
 | `osm_discovery/` | Matches companies to OpenStreetMap businesses | local Overpass |
+| `foerderkatalog/` | Monthly: every Berlin grant from the Förderkatalog des Bundes into `company_fundings`. Not an observation source, does not trigger the coordinator; linking to companies happens in `v_company_fundings` (V22). `scraper.py` is vendored from udb-foerderkatalog-scraper | nothing |
 
 The first three share `search_discovery_runner` verbatim, which is what makes them comparable.
 
