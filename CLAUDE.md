@@ -266,7 +266,7 @@ writes the worksheet; only `classify-labels-report` reports precision.
   technology field** (rule 1), and a **word naming a quality is not a word naming an industry**
   (rule 6).
 
-## Migrations — currently V1–V22
+## Migrations — currently V1–V24
 
 Schema changes go in `db/migrations/` as `V{N}__description.sql`, forward-only and immutable once
 applied. Flyway is a one-shot service under `--profile tools`; it does **not** run with
