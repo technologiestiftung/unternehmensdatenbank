@@ -4,7 +4,7 @@ Guidance for Claude Code (claude.ai/code) working in this repository.
 
 ## Where the detail lives
 
-**This file is a map, and it is 346 lines against a 300-line target.** It holds only what has cost
+**This file is a map, and it is 354 lines against a 300-line target.** It holds only what has cost
 somebody real time when they got it wrong. When a section wants to grow, the material goes to the
 repo docs or the vault and this file keeps the one-line rule plus the link — that is how the guard
 and test detail left for [guards-and-tests](docs/guards-and-tests.md), and how the industry
@@ -127,6 +127,9 @@ runs by itself once its flag is true and it is unpaused. Per-DAG detail in `airf
 - `url_discovery` guesses URLs from the name; `osm_discovery` matches a local Overpass (Berlin only).
 - `foerderkatalog` (`@monthly`) loads federal grants into `company_fundings`. Not an observation source
   and no coordinator trigger; `v_company_fundings` links grants to companies on read (V22).
+- `manager_ner_extract` / `manager_ner_train`: spaCy reads manager names from the Impressum (only the
+  lines after a label like "Geschäftsführer"), and retrains weekly from the app's votes and corrections
+  (`extraction_feedback`). A model is promoted only if it beats the current one on held-out companies.
 - DAG packages import their own modules **by package name** (`from url_discovery.scorer import …`).
   A bare `from scorer import` after a `sys.path` insert broke `airflow dags test`: two packages
   have a `scorer.py`, and whichever loaded first won.
@@ -202,6 +205,9 @@ Commands, in order: [running-branch-classification](docs/running-branch-classifi
    stop-list in the code. Ask whether it is generic in **German** or only in Osnabrück.
 7. **Keywords decide; the model only breaks ties, from three options**, and `think` stays off. The
    current file has `llm_branch` empty on all 14,443 rows: `decided_by` is `keywords` for all 403.
+   **One opt-in exception:** `classify --textcat` lets a spaCy text classifier, seeded by the keyword
+   rows and corrected by app votes (`scripts/train_branch_textcat.py`), fill `no_keyword` rows only,
+   as `decided_by = textcat` at confidence 0.53. Where a keyword fired, the keywords still decide.
 8. **`classify` makes zero web requests** but opens **one database connection** for the gate, so Docker
    must be up. `fetch-content` is the only part that downloads.
 9. **Column 3 has no website gate — that is its point**, and `purpose_branch` never calls `classify()`.
@@ -288,7 +294,7 @@ Two hooks, tracked in `.claude/` since 2026-09-24 and wired from `.claude/settin
 edit, `guard_after_edit.py` runs **ruff** on any `.py` and the six guards under `combined_discovery/`,
 `scripts/` or `tests/`; before a `git commit`, `run_checks_before_commit.py` runs ruff on the staged
 files, the six guards and the ten Postgres tests — **Docker down blocks the commit**, except on a
-machine without the reference example data (`airflow/data/combined_discovery/` absent): there the two
+machine without the reference example data (no `airflow/data/combined_discovery/branches.jsonl`): there the two
 pinned-number modules are skipped with a notice, and ruff plus the rule guards still run. `ruff.toml`
 holds the default rule set only; E501 is off on purpose.
 
