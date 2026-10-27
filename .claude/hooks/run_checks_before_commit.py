@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""PreToolUse hook: before Claude runs `git commit`, lint, run the guards, run all 17 tests.
+"""PreToolUse hook: before Claude runs `git commit`, lint, run the guards, run the pinned tests.
 
 Agreed 2026-09-24. The edit-time hook (`guard_after_edit.py`) catches a breakage in the turn it
 happens, but only for edits under the watched directories and never for the ten tests that need
@@ -13,6 +13,14 @@ Postgres. A commit is the moment the change becomes history, so this is where ev
    **blocks the commit**. This is deliberately the opposite of the edit-time rule ("Docker down must
    not block an edit"): an edit is provisional, a commit is not, and Tu decided on 2026-09-24 that
    every commit needs all 17 tests, a docs-only one included.
+
+**Except on a machine without the reference copy of the example data** (decided 2026-10-27). The
+two ground-truth modules pin the numbers of one copy: the database and
+`airflow/data/combined_discovery/` on the machine where the pipelines ran. Anywhere else they fail on
+the data, not on the change. Their marker is that folder, found by `tests.paths.artifacts()`. It is
+NOT the company count, because a bug that deletes companies must still fail on the reference
+machine. Without the folder both modules are skipped, Postgres is not required, and the hook says
+so in a message to the user; ruff and the five rule guards still run.
 
 What passes straight through, in well under a second: any Bash command that is not a `git commit`
 (one regex), and a `git commit` with nothing staged and no `-a` — git will refuse that itself.
@@ -39,9 +47,13 @@ sys.path.insert(0, str(REPO))
 
 from check_commit_message import _GIT_COMMIT  # noqa: E402  the one definition of "a git commit"
 from guard_after_edit import GUARDS, ruff_check, run_guard  # noqa: E402
+from tests.paths import artifacts  # noqa: E402  the tests' own lookup, so both agree on "present"
 
 #: The tests that need Postgres. Run through pytest so the 10 results are counted, not just exit 0.
 DB_TESTS = "tests/integration/test_ground_truth_discovery.py"
+
+#: The two modules that pin numbers of the reference copy of the example data.
+PINNED_TESTS = (DB_TESTS, "tests/integration/test_ground_truth_columns.py")
 
 #: libpq reads this. Docker down is "connection refused" and returns at once; a firewalled host would
 #: otherwise hang for libpq's default of forever.
@@ -75,6 +87,15 @@ def anything_to_commit(argv: list[str]) -> bool:
     if _commits_all(argv):
         return True
     return _git("diff", "--cached", "--quiet").returncode == 1
+
+
+def reference_data_missing() -> str | None:
+    """None on the machine that holds the reference copy, else why it is absent."""
+    try:
+        artifacts()
+    except AssertionError as exc:
+        return str(exc)
+    return None
 
 
 def postgres_failure() -> str | None:
@@ -134,10 +155,22 @@ def main() -> int:
     if failure:
         return blocked(failure)
 
+    missing = reference_data_missing()
     for guard in GUARDS:
+        if missing and guard in PINNED_TESTS:
+            continue
         failure = run_guard(guard)
         if failure:
             return blocked(failure)
+
+    if missing:
+        notice = (
+            "Commit checks: ruff and the rule guards passed. The pinned-number tests "
+            f"({', '.join(PINNED_TESTS)}) were SKIPPED: this machine does not hold the reference "
+            f"copy of the example data ({missing}). See README, 'Tests and guards'."
+        )
+        print(json.dumps({"systemMessage": notice}))
+        return 0
 
     error = postgres_failure()
     if error:
