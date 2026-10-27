@@ -551,7 +551,6 @@ flowchart LR
 - [ ] Page cache bug: 39 of 268 websites found by URL pattern have no cached homepage
 
 ### Tidy up
-- [ ] Commit gate: use `branches.jsonl` as the marker for the reference data (patch prepared)
 - [ ] Newline gap in the data repo's commit and push hooks (already fixed in the app repo)
 - [ ] Align local Airflow 3.2 with the hub's version (the add-on defaults to 3.3; unconfirmed)
 - [ ] Repeat the crawler measurement on Berlin data

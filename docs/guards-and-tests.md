@@ -57,6 +57,8 @@ had to start green). A missing ruff blocks with "pip install ruff" rather than p
 Second, after an edit under `combined_discovery/`, `scripts/` or `tests/` it runs **six** things —
 five guards plus `tests/integration/test_ground_truth_columns.py` — and blocks the edit if one fails,
 so a breakage reports in the same turn it happened rather than three edits later. About four seconds.
+Without the reference example data (no `branches.jsonl`, the same marker as the commit hook below) it
+skips `test_ground_truth_columns.py` and runs the five guards only.
 
 ### `run_checks_before_commit.py` — `PreToolUse` on Bash|PowerShell
 
