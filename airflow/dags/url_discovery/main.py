@@ -9,14 +9,10 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-import sys as _sys
-import os as _os
-_sys.path.insert(0, _os.path.dirname(_os.path.abspath(__file__)))
-
-from candidate_generator import generate_candidates
-from http_client import fetch_impressum, verify_url
-from imprint_extractor import extract_from_html
-from scorer import AUTO_ACCEPT_SCORE, MIN_STORE_SCORE, name_uniqueness, score_candidate
+from url_discovery.candidate_generator import generate_candidates
+from url_discovery.http_client import fetch_impressum, verify_url
+from url_discovery.imprint_extractor import extract_from_html
+from url_discovery.scorer import AUTO_ACCEPT_SCORE, MIN_STORE_SCORE, name_uniqueness, score_candidate
 from search_common import is_own_site_candidate, own_site_verdict
 from source_enrichment_common import (
     dump_preview_payload,
