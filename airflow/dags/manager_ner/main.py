@@ -229,11 +229,10 @@ def run_train() -> None:
 
     new_version = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
     out = MODEL_DIR / new_version
+    out.mkdir(parents=True)  # spaCy's to_disk creates only the last folder, not MODEL_DIR
     promoted = after.f1 > before.f1
     if promoted:
         nlp.to_disk(out)
-    else:
-        out.mkdir(parents=True)
     metrics = {
         "version": new_version, "trained_from": version or BASE_MODEL,
         "companies_train": len(training), "companies_held_out": len(held_out), "losses": losses,

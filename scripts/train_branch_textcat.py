@@ -123,10 +123,9 @@ def main() -> int:
 
     version = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
     out = runner.TEXTCAT_DIR / version
+    out.mkdir(parents=True)  # spaCy's to_disk creates only the last folder, not TEXTCAT_DIR
     if promoted:
         nlp.to_disk(out)
-    else:
-        out.mkdir(parents=True)
     metrics = {
         "version": version, "fields": len(fields), "examples_train": len(train_examples),
         "labels": dict(data.counts), "losses": losses,
