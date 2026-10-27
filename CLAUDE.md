@@ -4,7 +4,7 @@ Guidance for Claude Code (claude.ai/code) working in this repository.
 
 ## Where the detail lives
 
-**This file is a map, and it is 346 lines against a 300-line target.** It holds only what has cost
+**This file is a map, and it is 352 lines against a 300-line target.** It holds only what has cost
 somebody real time when they got it wrong. When a section wants to grow, the material goes to the
 repo docs or the vault and this file keeps the one-line rule plus the link — that is how the guard
 and test detail left for [guards-and-tests](docs/guards-and-tests.md), and how the industry
@@ -291,6 +291,10 @@ files, the six guards and the ten Postgres tests — **Docker down blocks the co
 machine without the reference example data (`airflow/data/combined_discovery/` absent): there the two
 pinned-number modules are skipped with a notice, and ruff plus the rule guards still run. `ruff.toml`
 holds the default rule set only; E501 is off on purpose.
+
+**Shipping:** if `no-mistakes` is installed (`command -v no-mistakes`), validate and open the PR with
+`/no-mistakes`; `.no-mistakes.yaml` runs ruff, the unit tests and the rule guards in a container.
+Without it, the normal branch + PR flow. It is optional, never a requirement for contributors.
 
 Neither kind checks whether the answers are **correct** — nothing here does, because not one row of
 the three industry columns has ever been hand-labelled. A failure means "these numbers moved, find
