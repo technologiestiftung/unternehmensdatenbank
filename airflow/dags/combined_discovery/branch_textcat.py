@@ -135,8 +135,11 @@ def train(examples: list[tuple[str, str]], fields: list[str], *, epochs: int, se
     """A fresh German pipeline with one exclusive text classifier over `fields`."""
     import spacy
     from spacy.training import Example
-    from spacy.util import minibatch
+    from spacy.util import fix_random_seed, minibatch
 
+    # The weights and dropout draw from spaCy's own generator, not `rng`; without this the same seed
+    # gives a different model on every run.
+    fix_random_seed(seed)
     nlp = spacy.blank("de")
     textcat = nlp.add_pipe("textcat")
     for name in fields:
