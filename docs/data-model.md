@@ -303,6 +303,41 @@ whether an unverified third-party URL should outrank a page carrying the company
 number is undecided, and the 207 companies where the two disagree are the evidence nobody has
 looked at.
 
+## Loading the OffeneRegister Berlin set
+
+**OffeneRegister** is a snapshot of the German Handelsregister, retrieved between June 2017 and
+January 2019. It is closer to the target than Osnabrück (it is Berlin) but it is still example data:
+6–9 years old, so companies founded since are missing and "active" means active in 2018.
+
+It goes into its **own database**, `unternehmensdatenbank_berlin`, so the Osnabrück database and the
+numbers pinned to it are untouched. Loaded on 2026-10-27:
+
+| | |
+|---|---|
+| companies (register court Berlin-Charlottenburg) | **296,486** |
+| `aktiv` / `erloschen` | 142,571 / 153,915 |
+| with an address | 116,527 |
+| with a legal form (read from the end of the name) | 256,845 |
+| WZ code, purpose, founding date, website | **none** — the dump does not have them |
+
+The dump's officer table (348,904 Berlin entries with first and last names) is **not loaded**: it is
+personal data and needs a privacy review first. The address is cut after postcode and city for the
+same reason, because some rows continue with register text naming managers and their birth dates.
+
+```bash
+python scripts/prepare_offeneregister_import.py openregister.db berlin.csv
+docker compose exec -T postgres psql -U postgres -c "CREATE DATABASE unternehmensdatenbank_berlin OWNER app"
+docker compose exec -T postgres psql -U postgres -d unternehmensdatenbank_berlin \
+  -c "CREATE EXTENSION IF NOT EXISTS postgis; CREATE EXTENSION IF NOT EXISTS vector;"
+APP_DB_NAME=unternehmensdatenbank_berlin docker compose --profile tools run --rm flyway
+docker compose exec -T postgres psql -U app -d unternehmensdatenbank_berlin -c "\copy public.companies \
+  (company_name, normalized_name, registration_number, legal_form, business_purpose, wz_code, address, \
+  established_at, postcode, city, register_status, metadata) FROM STDIN WITH (FORMAT csv, HEADER true)" < berlin.csv
+```
+
+To point Airflow and Hasura at it, set `APP_DB_NAME=unternehmensdatenbank_berlin` in `.env` and
+recreate those containers.
+
 ## Resolution lifecycle
 
 For each incoming company row from a source:
