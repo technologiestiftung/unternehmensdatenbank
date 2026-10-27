@@ -64,9 +64,11 @@ _TRAILING_WORDS = re.compile(
 # managers' names and dates of birth, which must not land in `address`.
 # shortcut: the city is one word, so "Frankfurt am Main" becomes "Frankfurt"; fine for Berlin.
 _ADDRESS = re.compile(r"^(.*?\b(\d{5})\s+([^\s,.:;]+))")
-# "c/o Erika Muster, Weg 1, 10115 Berlin": a segment naming who receives the post is a person or another
-# company, not a place. 10,423 of the 116,527 Berlin addresses have one; the whole segment is dropped.
+# "c/o Muster, Erika, Weg 1, 10115 Berlin": a segment naming who receives the post is a person or another
+# company, not a place. 10,423 of the 116,527 Berlin addresses have one. Before the postcode, only
+# segments with a digit (house number, building, postcode) and no such marker are kept.
 _CARE_OF = re.compile(r"c/o|c\.o\.|\bbei\b|z\.\s*hd\.|zu händen", re.IGNORECASE)
+_DIGIT = re.compile(r"\d")
 
 
 def legal_form(name: str) -> str | None:
@@ -81,14 +83,19 @@ def legal_form(name: str) -> str | None:
 def parse_address(raw: str) -> tuple[str | None, str | None, str | None]:
     """"Street 1, 10119 Berlin. Gegenstand: …" → ("Street 1, 10119 Berlin", "10119", "Berlin").
 
-    No postcode, no address: what is left is register text, not a place. Comma-separated segments
-    with "c/o", "bei" or "z. Hd." are dropped (10,423 of the 116,527 Berlin addresses have one).
+    No postcode, no address: what is left is register text, not a place. Before the postcode, a
+    comma-separated segment is kept only if it has a digit and no "c/o", "bei" or "z. Hd." (10,423 of
+    the 116,527 Berlin addresses have one); the postcode's own segment then starts at the postcode.
     """
     match = _ADDRESS.match(raw.strip())
     if not match:
         return None, None, None
-    kept = [part.strip() for part in match.group(1).split(",") if part.strip() and not _CARE_OF.search(part)]
-    return ", ".join(kept) or None, match.group(2), match.group(3)
+    address = match.group(1)
+    *rest, last = address.split(",")
+    if _CARE_OF.search(last):
+        last = address[match.start(2):]
+    kept = [part.strip() for part in rest if _DIGIT.search(part) and not _CARE_OF.search(part)]
+    return ", ".join([*kept, last.strip()]), match.group(2), match.group(3)
 
 
 def to_row(record: dict) -> dict:

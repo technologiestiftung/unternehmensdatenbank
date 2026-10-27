@@ -50,6 +50,10 @@ def test_address_drops_care_of_segments() -> None:
     assert parse_address("Weg 1, z.Hd. Erika Muster, 10115 Berlin") == ("Weg 1, 10115 Berlin", "10115", "Berlin")
     assert parse_address("C.O. Beispiel GmbH, Weg 1, 10115 Berlin") == ("Weg 1, 10115 Berlin", "10115", "Berlin")
     assert parse_address("Weg 1, zu Händen Erika Muster, 10115 Berlin") == ("Weg 1, 10115 Berlin", "10115", "Berlin")
+    # A name split by a comma, and a marker in the postcode's own segment.
+    assert parse_address("c/o Muster, Erika, Weg 1, 10115 Berlin") == ("Weg 1, 10115 Berlin", "10115", "Berlin")
+    assert parse_address("Weg 1, c/o Muster 10115 Berlin") == ("Weg 1, 10115 Berlin", "10115", "Berlin")
+    assert parse_address("Weg 1, Aufgang 2, 10115 Berlin") == ("Weg 1, Aufgang 2, 10115 Berlin", "10115", "Berlin")
     # "bei" only as a word, not inside one.
     assert parse_address("Beiersdorfweg 1, 10115 Berlin") == ("Beiersdorfweg 1, 10115 Berlin", "10115", "Berlin")
 
