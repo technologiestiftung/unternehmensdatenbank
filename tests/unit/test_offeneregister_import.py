@@ -44,6 +44,16 @@ def test_address_stops_after_postcode_and_city() -> None:
     assert parse_address("Berlin. Gegenstand: Handel") == (None, None, None)
 
 
+def test_address_drops_care_of_segments() -> None:
+    assert parse_address("c/o Erika Muster, Weg 1, 10115 Berlin") == ("Weg 1, 10115 Berlin", "10115", "Berlin")
+    assert parse_address("Weg 1, bei Max Beispiel, 10115 Berlin") == ("Weg 1, 10115 Berlin", "10115", "Berlin")
+    assert parse_address("Weg 1, z.Hd. Erika Muster, 10115 Berlin") == ("Weg 1, 10115 Berlin", "10115", "Berlin")
+    assert parse_address("C.O. Beispiel GmbH, Weg 1, 10115 Berlin") == ("Weg 1, 10115 Berlin", "10115", "Berlin")
+    assert parse_address("Weg 1, zu Händen Erika Muster, 10115 Berlin") == ("Weg 1, 10115 Berlin", "10115", "Berlin")
+    # "bei" only as a word, not inside one.
+    assert parse_address("Beiersdorfweg 1, 10115 Berlin") == ("Beiersdorfweg 1, 10115 Berlin", "10115", "Berlin")
+
+
 def test_row_uses_northdatas_register_format_and_german_status() -> None:
     row = to_row({
         "company_number": "F1103R_HRB1", "native_company_number": "Berlin (Charlottenburg) HRB 1",

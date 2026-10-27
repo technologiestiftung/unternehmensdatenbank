@@ -323,6 +323,9 @@ numbers pinned to it are untouched. Loaded on 2026-10-27:
 The dump's officer table (348,904 Berlin entries with first and last names) is **not loaded**: it is
 personal data and needs a privacy review first. The address is cut after postcode and city for the
 same reason, because some rows continue with register text naming managers and their birth dates.
+A part of the address naming who receives the post — `c/o`, `bei`, `z. Hd.`, `zu Händen` — is
+dropped too, person or company alike: **10,423** of the 116,527 addresses had one. Street, postcode
+and city stay.
 
 ```bash
 python scripts/prepare_offeneregister_import.py openregister.db berlin.csv
