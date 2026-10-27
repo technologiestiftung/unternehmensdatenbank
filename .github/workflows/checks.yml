@@ -1,0 +1,28 @@
+name: Checks
+
+# The free checks and the migration image test. Called by ci.yml for every PR and push to main,
+# and by release.yml before a release is tagged, so nothing reaches an image unchecked.
+# The pinned-number tests (tests/integration/) are left out: they need one machine's example data.
+
+on:
+  workflow_call:
+
+jobs:
+  python:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          # Matches the Airflow image.
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: airflow/requirements.txt
+      - run: pip install ruff pytest -r airflow/requirements.txt
+      - run: scripts/free_checks.sh
+
+  migrations:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: scripts/test_migration_image.sh
