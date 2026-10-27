@@ -8,6 +8,7 @@ from combined_discovery.branch_textcat import (
     DECIDED_BY_TEXTCAT,
     accuracy,
     classifier_text,
+    gap_companies,
     human_label,
     predict,
     train,
@@ -59,6 +60,18 @@ def test_seed_is_overridden_removed_or_kept() -> None:
     }
     assert data.human == {"b", "d"}
     assert data.counts == {"seed": 1, "human_label": 1, "seed_removed_by_vote": 1, "seed_confirmed": 1}
+
+
+def test_gap_companies_are_the_rows_the_keywords_did_not_decide() -> None:
+    rows = [
+        row("kw", "Software"),
+        row("tie", "Software", decided_by="model"),
+        row("gap", None, outcome="no_keyword", decided_by=""),
+        row("filled", "Software", decided_by=DECIDED_BY_TEXTCAT),
+        row("site", None, outcome="no_website", decided_by=""),
+        row("", None, outcome="no_keyword", decided_by=""),
+    ]
+    assert gap_companies(rows) == {"gap", "filled"}
 
 
 def test_companies_without_text_are_skipped() -> None:

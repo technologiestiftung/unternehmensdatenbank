@@ -8,8 +8,9 @@ manager_ner_train    Votes and corrections from the app (`extraction_feedback`, 
                      fifth of the companies against itself and the regex extractor, and promoted
                      only if it beats the current model.
 
-Models live under MANAGER_NER_MODEL_DIR: one folder per version, each with `metrics.json`, and
-`current.json` naming the version in use. Without one, the base model (de_core_news_md) is used.
+Models live under MANAGER_NER_MODEL_DIR: one folder per trained version with its `metrics.json`,
+the model files only for a promoted version, and `current.json` naming the version in use. Without
+one, the base model (de_core_news_md) is used.
 On the Data Hub that directory needs a persistent volume or S3; Airflow there has no shared disk.
 
 Each company is read once, like every other source DAG here: `ceo_name_or_contact` has no upsert
@@ -228,8 +229,11 @@ def run_train() -> None:
 
     new_version = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
     out = MODEL_DIR / new_version
-    nlp.to_disk(out)
     promoted = after.f1 > before.f1
+    if promoted:
+        nlp.to_disk(out)
+    else:
+        out.mkdir(parents=True)
     metrics = {
         "version": new_version, "trained_from": version or BASE_MODEL,
         "companies_train": len(training), "companies_held_out": len(held_out), "losses": losses,

@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
 """Train the Technologiefeld text classifier from the keyword seed and the app's votes.
 
-    python scripts/train_branch_textcat.py              # train, measure, promote if it beats the keywords
+    python scripts/train_branch_textcat.py              # train, measure, promote if accurate on the gaps
     python scripts/train_branch_textcat.py --promote    # promote even without enough human labels
 
 Reads `branches.jsonl` (run `classify` first), the cached website texts, and the `technologiefeld`
-votes in `extraction_feedback`. Writes a model folder under `TEXTCAT_DIR` with `metrics.json`, and
-`current.json` when the model is promoted. `classify --textcat` then uses it for the gaps.
+votes in `extraction_feedback`. Writes a version folder under `TEXTCAT_DIR` with `metrics.json`; the
+model files and `current.json` only when the model is promoted. `classify --textcat` then uses it for the gaps.
 
 Free: no API and no download, but it needs the database for the votes and the page cache for the
 texts, and training takes minutes on a laptop. The reasoning is in
@@ -14,9 +14,11 @@ airflow/dags/combined_discovery/branch_textcat.py.
 
 PROMOTION
 
-Automatic only when at least MIN_HUMAN_HOLDOUT held-out companies carry a human label and the
-classifier is at least as accurate on them as the keywords are. Without those labels nobody knows
-whether it is better, so `--promote` is a human decision, logged as such in metrics.json.
+Automatic only when at least MIN_HUMAN_HOLDOUT held-out gap companies (no keyword decided them) carry
+a human label and the classifier gets at least MIN_ACCURACY of them right. Accuracy on the companies
+the keywords answered is logged, never used. Without those labels nobody knows whether it helps, so
+`--promote` is a human decision, logged as such in metrics.json. Where gap labels come from:
+branch_textcat.py, "HOW IT IS JUDGED".
 """
 from __future__ import annotations
 
@@ -42,6 +44,7 @@ log = logging.getLogger("train_branch_textcat")
 
 MIN_EXAMPLES = int(os.getenv("BRANCH_TEXTCAT_MIN_EXAMPLES", "50"))
 MIN_HUMAN_HOLDOUT = int(os.getenv("BRANCH_TEXTCAT_MIN_HUMAN_HOLDOUT", "20"))
+MIN_ACCURACY = float(os.getenv("BRANCH_TEXTCAT_MIN_ACCURACY", "0.7"))
 EPOCHS = int(os.getenv("BRANCH_TEXTCAT_EPOCHS", "10"))
 
 
@@ -103,22 +106,30 @@ def main() -> int:
 
     nlp, losses = branch_textcat.train(train_examples, fields, epochs=EPOCHS)
 
-    seeds = {r["company_id"]: r.get("branch") for r in branch_rows if r.get("decided_by") == "keywords"}
-    clf_acc, n = branch_textcat.accuracy(
-        (branch_textcat.predict(nlp, data.labelled[cid][0])[0], data.labelled[cid][1]) for cid in holdout
-    )
-    kw_acc, n_kw = branch_textcat.accuracy((seeds.get(cid), data.labelled[cid][1]) for cid in holdout)
-    measured = n >= MIN_HUMAN_HOLDOUT
-    promoted = (measured and clf_acc >= kw_acc) or args.promote
+    gaps = branch_textcat.gap_companies(branch_rows)
+
+    def clf_accuracy(companies: set[str]) -> tuple[float, int]:
+        return branch_textcat.accuracy(
+            (branch_textcat.predict(nlp, data.labelled[cid][0])[0], data.labelled[cid][1]) for cid in companies
+        )
+
+    gap_acc, n_gap = clf_accuracy(holdout & gaps)
+    kw_acc, n_kw = clf_accuracy(holdout - gaps)
+    measured = n_gap >= MIN_HUMAN_HOLDOUT
+    promoted = (measured and gap_acc >= MIN_ACCURACY) or args.promote
 
     version = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
     out = runner.TEXTCAT_DIR / version
-    nlp.to_disk(out)
+    if promoted:
+        nlp.to_disk(out)
+    else:
+        out.mkdir(parents=True)
     metrics = {
         "version": version, "fields": len(fields), "examples_train": len(train_examples),
         "labels": dict(data.counts), "losses": losses,
-        "human_holdout": {"companies": n, "classifier_accuracy": round(clf_acc, 3),
-                          "keyword_accuracy": round(kw_acc, 3), "keyword_compared": n_kw},
+        "human_holdout": {"gap_companies": n_gap, "gap_accuracy": round(gap_acc, 3),
+                          "min_accuracy": MIN_ACCURACY,
+                          "keyword_companies": n_kw, "keyword_company_accuracy": round(kw_acc, 3)},
         "promoted": promoted,
         "promoted_by": "measurement" if promoted and not args.promote else ("person (--promote)" if promoted else None),
     }
@@ -126,11 +137,12 @@ def main() -> int:
     if promoted:
         (runner.TEXTCAT_DIR / "current.json").write_text(json.dumps({"version": version}, indent=2))
     log.info(
-        "Model %s: classifier %.3f vs keywords %.3f on %d human-labelled held-out companies. %s",
-        version, clf_acc, kw_acc, n,
+        "Model %s: %.3f on %d human-labelled held-out gap companies (%.3f on %d keyword companies, information only). %s",
+        version, gap_acc, n_gap, kw_acc, n_kw,
         "Promoted." if promoted else (
-            "Not promoted: too few human labels to know whether it is better (use --promote to decide yourself)."
-            if not measured else "Not promoted: the keywords are more accurate."
+            "Not promoted, model files not kept: too few human labels on gap companies to know whether it "
+            "helps (use --promote to decide yourself)."
+            if not measured else f"Not promoted, model files not kept: below {MIN_ACCURACY} on the gaps."
         ),
     )
     return 0

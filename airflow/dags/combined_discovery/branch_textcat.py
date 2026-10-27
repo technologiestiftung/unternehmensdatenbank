@@ -18,9 +18,20 @@ WHERE THE LABELS COME FROM
 
 HOW IT IS JUDGED
 
-Only against people. A fixed fifth of the companies with a human label is held out, and the
-classifier's accuracy there is compared with the keywords' accuracy on the same companies. Scoring
-it against keyword labels would grade the student against its own teacher.
+Only against people, and only on the companies it will be used on. A fixed fifth of the companies
+with a human label is held out. Of those, only the gap companies count: the ones the keywords left
+open (`no_keyword`, or filled by the classifier itself). On companies the keywords answered, the
+classifier mostly copies the seed it learned from, so agreeing there says nothing about the gaps.
+Its accuracy on the keyword companies is kept in `metrics.json` for information only.
+
+The keywords give nothing in a gap, so the bar is not a tie with them: the classifier is promoted
+automatically only with at least `BRANCH_TEXTCAT_MIN_HUMAN_HOLDOUT` held-out gap labels and an
+accuracy of at least `BRANCH_TEXTCAT_MIN_ACCURACY` on them. Otherwise `--promote` is a person's call.
+
+Gap labels exist only once people have judged a gap company: votes in the app on textcat
+suggestions, which are shown only after a person promoted a model with `--promote` and ran
+`classify --textcat`; or corrections that name a field for a `no_keyword` company, for example
+taken over from the `classify-labels` worksheet. Before that, nothing can be promoted automatically.
 
 WHERE IT DECIDES
 
@@ -77,6 +88,14 @@ def human_label(votes: Iterable[Mapping[str, Any]], fields: set[str]) -> tuple[s
     confirmed = [value for value, t in tally.items() if t["correct"] > t["wrong"] and value in fields]
     rejected = {value for value, t in tally.items() if t["wrong"] > t["correct"]}
     return (confirmed[0] if len(confirmed) == 1 else None), rejected
+
+
+def gap_companies(branch_rows: Iterable[Mapping[str, Any]]) -> set[str]:
+    """company_ids where the keywords decided nothing, which are the only rows the classifier fills."""
+    return {
+        row["company_id"] for row in branch_rows
+        if row.get("company_id") and (row.get("outcome") == "no_keyword" or row.get("decided_by") == DECIDED_BY_TEXTCAT)
+    }
 
 
 def training_set(

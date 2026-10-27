@@ -359,7 +359,7 @@ flowchart LR
   FB --> TR["manager_ner_train, weekly"]
   TR --> EV{"New model better on<br/>held-out companies?"}
   EV -->|"yes"| CUR["current.json points<br/>to the new version"]
-  EV -->|"no"| KEEP["keep the current model<br/>metrics saved anyway"]
+  EV -->|"no"| KEEP["keep the current model<br/>only metrics.json saved"]
   CUR --> EX
 ```
 
@@ -375,13 +375,40 @@ How votes become training data, per company:
 - Training continues from the model in use (at first the German base model `de_core_news_md`).
 - A fifth of the companies is always held out (the same ones every run). The new model is scored
   there against the current model and the regex extractor; only a better F1 score promotes it.
-- Every version is stored with its `metrics.json`; `current.json` names the one in use.
+- Every trained version gets a folder with its `metrics.json`; the model files are kept only for a
+  promoted version, so a weekly run that changes nothing adds a few kilobytes, not a model.
+  `current.json` names the one in use.
 - Training starts only with at least 30 companies with usable votes (setting
   `MANAGER_NER_MIN_COMPANIES`); below that the DAG logs the count and stops.
 - Votes are possible for manager names, website and Technologiefeld, on the company page and, with
   "Werte bewerten" switched on, in the table. Corrections are entered on the company page.
 - Corrections do not change the shown value. Whether they should become a source of their own, at
   which priority, is an open decision.
+
+The Technologiefeld text classifier follows the same loop, run by hand with
+`scripts/train_branch_textcat.py`:
+
+```mermaid
+flowchart LR
+  KW["keyword results<br/>branches.jsonl"] --> SEED["seed labels"]
+  FB[("extraction_feedback<br/>technologiefeld votes")] --> SEED
+  SEED --> TR["train_branch_textcat.py"]
+  TR --> EV{"at least 20 held-out gap labels<br/>and accuracy at least 0.7 on them?"}
+  EV -->|"yes"| CUR["current.json points<br/>to the new version"]
+  EV -->|"no"| KEEP["only metrics.json saved<br/>a person may still --promote"]
+  CUR --> CL["classify --textcat<br/>fills no_keyword rows only"]
+  CL --> APPV["App shows the suggestion"] --> FB
+```
+
+- Keyword rows are the seed. A correction replaces a label; a "wrong" without one removes it.
+- It is judged only on held-out gap companies: those no keyword decided, which are the only rows it
+  fills. On companies the keywords answered it mostly repeats its seed, so its accuracy there is
+  stored for information and never decides.
+- Keywords give nothing in a gap, so the bar is a fixed accuracy (`BRANCH_TEXTCAT_MIN_ACCURACY`,
+  0.7) on at least 20 gap labels (`BRANCH_TEXTCAT_MIN_HUMAN_HOLDOUT`), not a tie with the keywords.
+- Gap labels come from votes on shown textcat suggestions, which exist only after a person promoted
+  a model with `--promote`, or from corrections for `no_keyword` companies, for example taken from
+  the `classify-labels` worksheet. Until then nothing is promoted automatically.
 
 ## 10. The app
 
