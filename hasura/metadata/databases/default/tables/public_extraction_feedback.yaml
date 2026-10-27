@@ -1,0 +1,42 @@
+table:
+  name: extraction_feedback
+  schema: public
+configuration:
+  custom_name: feedback
+insert_permissions:
+  # author_id comes from the JWT, never from the client.
+  - role: user
+    permission:
+      check: {}
+      set:
+        author_id: x-hasura-User-Id
+      columns:
+        - company_id
+        - field_name
+        - value
+        - verdict
+        - correction
+select_permissions:
+  - role: user
+    permission:
+      columns:
+        - company_id
+        - field_name
+        - value
+        - verdict
+        - correction
+        - author_id
+      filter: {}
+update_permissions:
+  # Only your own vote, and only its verdict and correction: the upsert behind "change my vote".
+  - role: user
+    permission:
+      columns:
+        - verdict
+        - correction
+      filter:
+        author_id:
+          _eq: x-hasura-User-Id
+      check:
+        author_id:
+          _eq: x-hasura-User-Id

@@ -134,6 +134,7 @@ Each has its own README with env vars and provider quirks.
 | [`ollama_search_discovery/`](ollama_search_discovery/README.md) | SearXNG + a local model, no API cost | Ollama + SearXNG |
 | `url_discovery/` | Guesses URLs from the company name, then checks them | nothing |
 | `osm_discovery/` | Matches companies to OpenStreetMap businesses | local Overpass |
+| `manager_ner/` | Two DAGs. `manager_ner_extract`: the current spaCy model reads the Impressum of companies with a website and writes `ceo_name_or_contact` observations (source `spacy_ner`), once per company. `manager_ner_train` (`@weekly`): the app's votes and corrections (V23/V24) become partially annotated examples; the model is promoted only if it beats the current one on a fixed held-out fifth. Needs at least `MANAGER_NER_MIN_COMPANIES` (30) companies with votes | `ENABLE_MANAGER_NER`, spaCy + `de_core_news_md` |
 | `foerderkatalog/` | Monthly: every Berlin grant from the Förderkatalog des Bundes into `company_fundings`. Not an observation source, does not trigger the coordinator; linking to companies happens in `v_company_fundings` (V22). `scraper.py` is vendored from udb-foerderkatalog-scraper | nothing |
 
 The first three share `search_discovery_runner` verbatim, which is what makes them comparable.

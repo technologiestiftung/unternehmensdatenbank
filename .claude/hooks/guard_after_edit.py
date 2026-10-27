@@ -28,6 +28,31 @@ from typing import Sequence
 
 REPO = Path(__file__).resolve().parents[2]
 
+#: Written only by `classify`, which only the reference machine has run over the full table. The
+#: pinned-number tests describe that machine's copy of the example data and fail on any other.
+REFERENCE_MARKER = "branches.jsonl"
+#: Guards that pin numbers of the reference copy; skipped where it is absent.
+PINNED_GUARDS = ("tests/integration/test_ground_truth_columns.py",)
+
+
+def reference_data_missing() -> str | None:
+    """None on the machine that holds the reference copy, else why it is absent.
+
+    The marker is a file `classify` writes, not the result folder: a `run` for a page cache creates
+    the folder on any machine. Nor the company count: a bug that deletes companies must still fail.
+    """
+    if str(REPO) not in sys.path:
+        sys.path.insert(0, str(REPO))
+    from tests.paths import artifacts  # the tests' own lookup, so both agree on "present"
+
+    try:
+        folder = artifacts()
+    except AssertionError as exc:
+        return str(exc)
+    if not (folder / REFERENCE_MARKER).is_file():
+        return f"no {REFERENCE_MARKER} in {folder}; `classify` writes it on the reference machine"
+    return None
+
 #: Only these parts of the tree are guarded. An edit to a doc or an unrelated DAG runs nothing.
 WATCHED = ("combined_discovery", "scripts", "tests")
 
@@ -137,7 +162,10 @@ def main() -> int:
     if not any(part in path for part in WATCHED):
         return 0
 
+    missing = reference_data_missing()
     for guard in GUARDS:
+        if missing and guard in PINNED_GUARDS:
+            continue
         failure = run_guard(guard)
         if failure:
             sys.stderr.write(f"after editing {path}: {failure}")

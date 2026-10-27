@@ -57,6 +57,8 @@ had to start green). A missing ruff blocks with "pip install ruff" rather than p
 Second, after an edit under `combined_discovery/`, `scripts/` or `tests/` it runs **six** things —
 five guards plus `tests/integration/test_ground_truth_columns.py` — and blocks the edit if one fails,
 so a breakage reports in the same turn it happened rather than three edits later. About four seconds.
+Without the reference example data (no `branches.jsonl`, the same marker as the commit hook below) it
+skips `test_ground_truth_columns.py` and runs the five guards only.
 
 ### `run_checks_before_commit.py` — `PreToolUse` on Bash|PowerShell
 
@@ -72,10 +74,10 @@ Then, in order, blocking on the first failure:
    unreachable blocks the commit.** That is the opposite of the edit-time rule below and is meant
    to be: an edit is provisional, a commit is history, and Tu decided on 2026-09-24 that every commit
    needs all 17 tests, a docs-only commit included. Start the stack with `./scripts/dev-up.sh`.
-   **Exception since 2026-10-27:** where `airflow/data/combined_discovery/` does not exist (found by
-   `tests.paths.artifacts()`), the machine does not hold the reference copy of the example data, so
+   **Exception since 2026-10-27:** where `airflow/data/combined_discovery/branches.jsonl` does not exist
+   (folder found by `tests.paths.artifacts()`; only `classify` writes that file), the machine does not hold the reference copy of the example data, so
    both ground-truth modules are skipped, Postgres is not required, and the hook prints a notice. The
-   marker is the folder, not the company count, so a bug that deletes companies still fails on the
+   marker is that file, not the folder (a `run` for a page cache creates the folder) and not the company count, so a bug that deletes companies still fails on the
    reference machine.
 
 ### `ask_before_push.py` and `confirm_before_commit.py` — `PreToolUse` on Bash|PowerShell

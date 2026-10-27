@@ -322,6 +322,43 @@ against the page and the taxonomy version. The model only ever chooses between t
 the keywords shortlisted, plus "keine"; an answer that was not on the menu is thrown away, and "keine"
 flags the row for a human.
 
+## 7b. Optional: a text classifier for the rows no keyword reached
+
+The keyword rows are the seed; the app's votes on `technologiefeld` correct it (a correction
+replaces a label, a "wrong" without one removes it). The classifier then fills only `no_keyword`
+rows that have a verified website, and is judged only against human votes. Reasoning:
+`airflow/dags/combined_discovery/branch_textcat.py`.
+
+```bash
+python scripts/run_combined_discovery.py classify                  # the seed: branches.jsonl
+python scripts/train_branch_textcat.py                             # train, measure, promote if good on the gaps
+python scripts/run_combined_discovery.py classify --textcat        # fill the gaps
+```
+
+- Training needs at least 50 labelled companies (`BRANCH_TEXTCAT_MIN_EXAMPLES`).
+- It is judged only on held-out **gap companies**: those the keywords did not decide (`no_keyword`,
+  or filled by the classifier itself), because those are the only rows it fills. On the companies
+  the keywords answered it mostly repeats the seed it learned from; its accuracy on every held-out
+  company that is not a gap (`other_company_accuracy`) is written to `metrics.json` for information
+  and never decides.
+- On a gap company a confirmed value or a correction is the label. A "wrong" without a correction
+  counts as a miss when it rejects exactly the field the classifier predicts; a "wrong" on another
+  value says nothing about the prediction and is ignored.
+- It promotes a model by itself only when at least 20 held-out gap companies carry a human label
+  (`BRANCH_TEXTCAT_MIN_HUMAN_HOLDOUT`) and it gets at least 70% of them right
+  (`BRANCH_TEXTCAT_MIN_ACCURACY`, 0.7). The keywords give nothing there, so a tie with them proves
+  nothing. Without those labels, `--promote` is your decision, and `metrics.json` records it.
+- Where gap labels come from: votes in the app on textcat suggestions, which are shown only after
+  you promoted a model with `--promote` and ran `classify --textcat`; or corrections naming a field
+  for a `no_keyword` company, for example taken over from the `classify-labels` worksheet. Before
+  either exists, nothing is promoted automatically.
+- Models: `airflow/data/combined_discovery/models/branch_textcat/<version>/` with `metrics.json`;
+  the model files only for a promoted version. `current.json` names the one in use.
+- Each row records `textcat_branch` and `textcat_score` whenever the classifier was asked, also
+  below the threshold (`BRANCH_TEXTCAT_MIN_SCORE`, 0.6).
+- With `--textcat` the pinned numbers in `tests/integration/` move on purpose: re-measure and
+  update them in the same commit (docs/guards-and-tests.md, "Changing a pinned number").
+
 ## 8. When Berlin's list changes
 
 ```powershell
