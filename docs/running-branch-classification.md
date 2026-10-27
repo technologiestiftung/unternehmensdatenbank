@@ -322,6 +322,30 @@ against the page and the taxonomy version. The model only ever chooses between t
 the keywords shortlisted, plus "keine"; an answer that was not on the menu is thrown away, and "keine"
 flags the row for a human.
 
+## 7b. Optional: a text classifier for the rows no keyword reached
+
+The keyword rows are the seed; the app's votes on `technologiefeld` correct it (a correction
+replaces a label, a "wrong" without one removes it). The classifier then fills only `no_keyword`
+rows that have a verified website, and is judged only against human votes. Reasoning:
+`airflow/dags/combined_discovery/branch_textcat.py`.
+
+```bash
+python scripts/run_combined_discovery.py classify                  # the seed: branches.jsonl
+python scripts/train_branch_textcat.py                             # train, measure, promote if better
+python scripts/run_combined_discovery.py classify --textcat        # fill the gaps
+```
+
+- Training needs at least 50 labelled companies (`BRANCH_TEXTCAT_MIN_EXAMPLES`).
+- It promotes a model by itself only when at least 20 held-out companies carry a human label
+  (`BRANCH_TEXTCAT_MIN_HUMAN_HOLDOUT`) and the classifier is at least as accurate there as the
+  keywords. Without those labels, `--promote` is your decision, and `metrics.json` records it.
+- Models: `airflow/data/combined_discovery/models/branch_textcat/<version>/` with `metrics.json`;
+  `current.json` names the one in use.
+- Each row records `textcat_branch` and `textcat_score` whenever the classifier was asked, also
+  below the threshold (`BRANCH_TEXTCAT_MIN_SCORE`, 0.6).
+- With `--textcat` the pinned numbers in `tests/integration/` move on purpose: re-measure and
+  update them in the same commit (docs/guards-and-tests.md, "Changing a pinned number").
+
 ## 8. When Berlin's list changes
 
 ```powershell

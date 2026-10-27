@@ -1574,6 +1574,10 @@ KEYWORD_PROPOSALS_PATH = OUT_DIR / "keyword_proposals.csv"
 #: rule. See `combined_discovery/purpose_branch.py`.
 PURPOSE_BRANCHES_PATH = OUT_DIR / "purpose_branches.jsonl"
 
+#: Trained Technologiefeld classifiers, one folder per version; `current.json` names the one in use.
+#: Written by scripts/train_branch_textcat.py, read by `classify --textcat`.
+TEXTCAT_DIR = OUT_DIR / "models" / "branch_textcat"
+
 #: COLUMN 3's hand-labelling worksheet. Its own file, beside `branch_labels_todo.csv` and never
 #: sharing with it: the two columns ask different questions and a label for one is not a label for
 #: the other.
@@ -1846,10 +1850,22 @@ def fetch_content(limit: int | None, workers: int) -> None:
     )
 
 
+def load_textcat() -> tuple[Any, str] | None:
+    """(model, version) named by `current.json`, or None when no classifier has been promoted."""
+    try:
+        version = json.loads((TEXTCAT_DIR / "current.json").read_text())["version"]
+    except (FileNotFoundError, KeyError, json.JSONDecodeError):
+        return None
+    import spacy
+
+    return spacy.load(TEXTCAT_DIR / version), version
+
+
 def classify(
     limit: int | None,
     sources: set[str],
     use_llm: bool,
+    use_textcat: bool = False,
 ) -> None:
     """Work out each company's branch and write one JSON line per company.
 
@@ -1858,7 +1874,7 @@ def classify(
     any company can be scored.
     """
     from combined_discovery import branch_classifier as bc
-    from combined_discovery import branch_llm, wz_cluster
+    from combined_discovery import branch_llm, branch_textcat, wz_cluster
 
     taxonomy = bc.load_taxonomy()
     clusters = wz_cluster.load_clusters()
@@ -1909,7 +1925,7 @@ def classify(
             "texts": sorted(texts),
             "keywords": found,
             "had_text": bool(texts),
-            "page_text": " ".join(texts.get(s, "") for s in ("services", "homepage")).strip(),
+            "page_text": branch_textcat.classifier_text(texts),
             "snippets": snippets,
             "fallback": fallback,
         }
@@ -1942,6 +1958,12 @@ def classify(
             "the model is not asked anything new about them",
             sum(1 for skip in skip_model_for.values() if skip), len(scope),
         )
+
+    textcat = load_textcat() if use_textcat else None
+    if use_textcat and textcat is None:
+        log.warning("--textcat given but no classifier promoted in %s; keywords only.", TEXTCAT_DIR)
+    elif textcat:
+        log.info("The text classifier is ON (version %s) for no_keyword rows with a website.", textcat[1])
 
     BRANCHES_PATH.parent.mkdir(parents=True, exist_ok=True)
     if BRANCHES_PATH.exists():
@@ -2007,6 +2029,16 @@ def classify(
                 # firing, and a human should see it.
                 result.needs_review = True
 
+        # The text classifier fills only what the keywords left open, and only behind the website
+        # gate. Where a keyword fired, the keywords decide; see branch_textcat.py.
+        textcat_branch, textcat_score = None, None
+        if textcat and result.outcome == "no_keyword" and has_website and state["page_text"]:
+            textcat_branch, textcat_score = branch_textcat.predict(textcat[0], state["page_text"])
+            if textcat_branch and textcat_score >= branch_textcat.TEXTCAT_MIN_SCORE:
+                result.branch = textcat_branch
+                result.outcome = "assigned"
+                result.decided_by = branch_textcat.DECIDED_BY_TEXTCAT
+
         # The second column, attached to every company whether or not any text was read. It is a
         # lookup in the official classification, not a decision, so it neither needs nor gets any of
         # the machinery above.
@@ -2062,6 +2094,11 @@ def classify(
             "llm_branch": verdict.branch if verdict else None,
             "llm_reason": verdict.reason if verdict else "",
             "llm_refused": verdict.refused if verdict else "",
+            # What the text classifier said, whether or not it cleared the threshold. Null when it
+            # was not asked (off, a keyword fired, no website, or no text).
+            "textcat_branch": textcat_branch,
+            "textcat_score": round(textcat_score, 4) if textcat_score is not None else None,
+            "textcat_version": textcat[1] if textcat and textcat_branch else None,
             "taxonomy_version": taxonomy.version,
             # What the keyword weights were computed over. A keyword's weight depends on how many
             # companies use it, so `--limit 1000` and a full run give the same company DIFFERENT
@@ -4197,6 +4234,13 @@ def main() -> None:
         ),
     )
     p_classify.add_argument(
+        "--textcat", action="store_true",
+        help=(
+            "let the promoted text classifier fill rows where no keyword fired (website required, "
+            "BRANCH_TEXTCAT_MIN_SCORE). Train one with scripts/train_branch_textcat.py first."
+        ),
+    )
+    p_classify.add_argument(
         "--llm", action="store_true",
         help=(
             "ask a local model to break the remaining ties, choosing from three shortlisted "
@@ -4305,7 +4349,7 @@ def main() -> None:
                 f"unknown source(s): {sorted(unknown)}. The Technologiefeld is filled only from "
                 "text the company published: page, purpose."
             )
-        classify(args.limit, sources, args.llm)
+        classify(args.limit, sources, args.llm, args.textcat)
     elif args.command == "classify-report":
         classify_report()
     elif args.command == "classify-labels":

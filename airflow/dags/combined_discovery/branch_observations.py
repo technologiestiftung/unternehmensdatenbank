@@ -76,6 +76,9 @@ from combined_discovery.purpose_branch import (
     DECIDED_BY_MODEL_TIEBREAK,
 )
 
+#: Column 1's text classifier. It only fills gaps the keywords left (see branch_textcat.py).
+from combined_discovery.branch_textcat import DECIDED_BY_TEXTCAT
+
 #: The resolver's own bar, imported and never re-typed. Two copies of a threshold drift apart, and
 #: this one has zero margin: see the assertion below.
 from pipeline_coordinator.resolver import _FIELD_MIN_CONF
@@ -105,6 +108,9 @@ _CONFIDENCE = {
     DECIDED_BY_KEYWORDS: 0.60,
     DECIDED_BY_MODEL_TIEBREAK: 0.55,
     DECIDED_BY_MODEL_DIRECT: 0.52,
+    # A classifier trained on keyword seeds and app votes, used only where no keyword fired. Below
+    # the keywords it learned from and the tie-break model, above model_direct and the 0.50 bar.
+    DECIDED_BY_TEXTCAT: 0.53,
 }
 
 #: The withheld pair, and column 1's assigned rows, carry a flat 0.60. Column 1 has no model in the
