@@ -29,11 +29,13 @@ docker run -d --name "$pg" --network "$net" \
   udb-postgres:test >/dev/null
 
 # pg_isready turns true during the init phase too; the init script's last database is the signal.
+ready=
 for _ in $(seq 60); do
   docker exec "$pg" psql -U postgres -tAc "SELECT 1 FROM pg_database WHERE datname = 'hasura'" 2>/dev/null | grep -q 1 \
-    && docker exec "$pg" pg_isready -U postgres -h localhost >/dev/null 2>&1 && break
+    && docker exec "$pg" pg_isready -U postgres -h localhost >/dev/null 2>&1 && ready=1 && break
   sleep 2
 done
+[ -n "$ready" ] || { echo "Postgres not ready after 120 s"; docker logs "$pg"; exit 1; }
 
 migrate() {
   docker run --rm --network "$net" \
@@ -44,8 +46,13 @@ migrate() {
     udb-migrations:test
 }
 
-migrate | grep -E "Successfully applied"
-migrate | grep -E "No migration necessary"
+expect() {
+  out=$(migrate 2>&1) || { echo "$out"; exit 1; }
+  echo "$out" | grep -E "$1" || { echo "$out"; echo "expected: $1"; exit 1; }
+}
+
+expect "Successfully applied"
+expect "No migration necessary"
 
 grants=$(docker exec "$pg" psql -U postgres -d udb -tAc \
   "SELECT has_table_privilege('hub_writer', 'public.companies', 'INSERT')::text || ',' ||

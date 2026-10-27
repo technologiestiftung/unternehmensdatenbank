@@ -20,6 +20,9 @@ jobs:
   staging-image:
     if: github.event_name == 'push'
     needs: checks
+    concurrency:
+      group: staging-image
+      cancel-in-progress: false
     runs-on: ubuntu-latest
     permissions:
       contents: read
