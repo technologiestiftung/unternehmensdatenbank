@@ -6,3 +6,6 @@ scipy>=1.13.0
 numpy>=1.26.0
 psycopg2-binary>=2.9.9
 PyYAML>=6.0
+# manager_ner: spaCy and its German model, pinned together (the model is built for 3.8).
+spacy>=3.8,<3.9
+de_core_news_md @ https://github.com/explosion/spacy-models/releases/download/de_core_news_md-3.8.0/de_core_news_md-3.8.0-py3-none-any.whl

@@ -301,6 +301,20 @@ def _leading_name(part: str) -> str | None:
     return name if 5 <= len(name) <= 60 else None
 
 
+def ceo_label_windows(text: str) -> list[list[str]]:
+    """For each manager label ("Geschäftsführer", "Vertreten durch", ...), the lines a name can be on.
+
+    Same line first, then the next non-empty one. Two lines is enough for the layouts that occur;
+    going further starts picking up the address block below. `extract_ceo_names` and the spaCy
+    extractor (`manager_ner`) both read exactly these lines, so they are compared on equal input.
+    """
+    windows = []
+    for match in _CEO_LABEL_RE.finditer(text):
+        rest = re.sub(r"^\s*[:\-–]?[^\S\n]*", "", text[match.end():])
+        windows.append([line for line in rest.split("\n")[:3] if line.strip()][:2])
+    return windows
+
+
 def extract_ceo_names(text: str) -> list[str]:
     """Return the manager names named on an Impressum page.
 
@@ -310,11 +324,7 @@ def extract_ceo_names(text: str) -> list[str]:
     den Geschäftsführer" puts a whole clause between the label and the name.
     """
     names: list[str] = []
-    for match in _CEO_LABEL_RE.finditer(text):
-        rest = re.sub(r"^\s*[:\-–]?[^\S\n]*", "", text[match.end():])
-        # Same line first, then the next non-empty one. Two lines is enough for the layouts
-        # that occur; going further starts picking up the address block below.
-        lines = [line for line in rest.split("\n")[:3] if line.strip()][:2]
+    for lines in ceo_label_windows(text):
         for line in lines:
             cleaned = _CEO_NOISE.sub("", line).strip(" ,;")
             found_on_this_line = False
