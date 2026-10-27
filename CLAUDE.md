@@ -4,7 +4,7 @@ Guidance for Claude Code (claude.ai/code) working in this repository.
 
 ## Where the detail lives
 
-**This file is a map, and it is 354 lines against a 300-line target.** It holds only what has cost
+**This file is a map, and it is 360 lines against a 300-line target.** It holds only what has cost
 somebody real time when they got it wrong. When a section wants to grow, the material goes to the
 repo docs or the vault and this file keeps the one-line rule plus the link — that is how the guard
 and test detail left for [guards-and-tests](docs/guards-and-tests.md), and how the industry
@@ -19,7 +19,7 @@ on 2026-09-24 (each has a dated "State on 2026-09-24" section carrying what move
   [running-branch-classification](docs/running-branch-classification.md) ·
   [combined-discovery-verification](docs/combined-discovery-verification.md) (why a page is judged
   to belong to a company) · [running-discovery](docs/running-discovery.md) ·
-  [data-model](docs/data-model.md) · [guards-and-tests](docs/guards-and-tests.md) ·
+  [data-model](docs/data-model.md) · [guards-and-tests](docs/guards-and-tests.md) · [release](docs/release.md) ·
   [core-queries-current.sql](docs/core-queries-current.sql) ·
   [airflow/dags/README.md](airflow/dags/README.md). The module docstrings are long on purpose and
   are the real documentation.
@@ -266,7 +266,7 @@ writes the worksheet; only `classify-labels-report` reports precision.
   technology field** (rule 1), and a **word naming a quality is not a word naming an industry**
   (rule 6).
 
-## Migrations — currently V1–V22
+## Migrations — currently V1–V24
 
 Schema changes go in `db/migrations/` as `V{N}__description.sql`, forward-only and immutable once
 applied. Flyway is a one-shot service under `--profile tools`; it does **not** run with
@@ -301,6 +301,8 @@ holds the default rule set only; E501 is off on purpose.
 **Shipping:** if `no-mistakes` is installed (`command -v no-mistakes`), validate and open the PR with
 `/no-mistakes`; `.no-mistakes.yaml` runs ruff, the unit tests and the rule guards in a container.
 Without it, the normal branch + PR flow. It is optional, never a requirement for contributors.
+Both, and CI, run the same `scripts/free_checks.sh`; add a check there, not in one of them.
+Releases (the migration image for the hub, the "Create release" button): [release](docs/release.md).
 
 Neither kind checks whether the answers are **correct** — nothing here does, because not one row of
 the three industry columns has ever been hand-labelled. A failure means "these numbers moved, find

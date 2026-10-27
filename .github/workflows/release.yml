@@ -1,0 +1,105 @@
+name: Create release
+
+# The release button: Actions → "Create release" → Run workflow (from main) → patch/minor/major.
+#
+# 1. runs the checks on the exact commit being released,
+# 2. works out the next version from the existing vX.Y.Z tags and refuses if it exists,
+# 3. tags that commit and publishes a GitHub Release with notes generated from the merged PRs,
+# 4. builds the PRODUCTION migration image :X.Y.Z and :X.Y from the tag, after the `production`
+#    environment's reviewers approve.
+#
+# Tags and images are never overwritten. A hotfix is a new patch release from main.
+
+on:
+  workflow_dispatch:
+    inputs:
+      bump:
+        description: Version bump
+        required: true
+        default: patch
+        type: choice
+        options: [patch, minor, major]
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}-migrations
+
+jobs:
+  checks:
+    if: github.ref == 'refs/heads/main'
+    uses: ./.github/workflows/checks.yml
+
+  tag:
+    needs: checks
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    outputs:
+      tag: ${{ steps.version.outputs.tag }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - id: version
+        env:
+          BUMP: ${{ inputs.bump }}
+        run: |
+          latest=$(git tag --list 'v*' --sort=-v:refname | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | head -n1)
+          IFS=. read -r major minor patch <<< "${latest#v}"
+          major=${major:-0}; minor=${minor:-0}; patch=${patch:-0}
+          case "$BUMP" in
+            major) major=$((major + 1)); minor=0; patch=0 ;;
+            minor) minor=$((minor + 1)); patch=0 ;;
+            patch) patch=$((patch + 1)) ;;
+            *) echo "Unknown bump: $BUMP"; exit 1 ;;
+          esac
+          tag="v${major}.${minor}.${patch}"
+          if git rev-parse -q --verify "refs/tags/${tag}" >/dev/null; then
+            echo "Tag ${tag} already exists; releases are never overwritten."
+            exit 1
+          fi
+          echo "Releasing ${tag} (previous: ${latest:-none}) at ${GITHUB_SHA}"
+          echo "tag=${tag}" >> "$GITHUB_OUTPUT"
+      - env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ steps.version.outputs.tag }}
+        run: gh release create "$TAG" --target "$GITHUB_SHA" --title "$TAG" --generate-notes
+
+  production-image:
+    needs: tag
+    runs-on: ubuntu-latest
+    # Required reviewers are set on this environment in the repo settings.
+    environment: production
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.tag.outputs.tag }}
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          # No :latest: with staging and prod on one platform it would name neither.
+          tags: |
+            type=semver,pattern={{version}},value=${{ needs.tag.outputs.tag }}
+            type=semver,pattern={{major}}.{{minor}},value=${{ needs.tag.outputs.tag }}
+          flavor: latest=false
+      - uses: docker/build-push-action@v6
+        with:
+          context: db
+          platforms: linux/amd64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}

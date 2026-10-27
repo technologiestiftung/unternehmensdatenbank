@@ -172,8 +172,9 @@ def train(nlp: Any, examples: list[Any], *, epochs: int, seed: int = 0) -> list[
     Returns the loss per epoch. Small data, so few epochs and dropout: the aim is to correct the
     model on Impressum layouts, not to replace what it learned about German names.
     """
-    from spacy.util import minibatch
+    from spacy.util import fix_random_seed, minibatch
 
+    fix_random_seed(seed)  # weights and dropout; `rng` below only orders the examples
     rng = random.Random(seed)
     losses_per_epoch = []
     with nlp.select_pipes(enable=["ner"]):
