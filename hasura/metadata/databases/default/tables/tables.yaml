@@ -4,3 +4,5 @@
 - "!include public_extraction_feedback.yaml"
 - "!include public_v_field_provenance.yaml"
 - "!include public_sources.yaml"
+- "!include public_v_source_overview.yaml"
+- "!include public_v_source_fields.yaml"
