@@ -65,7 +65,7 @@ from source_enrichment_common import (
 
 #: The bar `pipeline_coordinator` applies before a website observation may become a company's
 #: official website. Imported, never re-typed: two copies of a threshold drift apart.
-from enrichment.confidence import WEBSITE_MIN_CONFIDENCE
+from enrichment.confidence import UNVERIFIED_CAP, WEBSITE_MIN_CONFIDENCE
 
 log = logging.getLogger(__name__)
 
@@ -165,6 +165,11 @@ def build_payload(
         "elapsed_s": result.get("elapsed_s"),
         "errors": result.get("errors") or [],
     }
+
+
+def retires_unconfirmed(result: dict[str, Any]) -> bool:
+    """Whether a check may retire the websites it did not find again: only one that ran cleanly."""
+    return not result.get("errors")
 
 
 def write_company_result(
@@ -290,6 +295,25 @@ def write_company_result(
                 "discovered_via": "overpass_api",
             },
             confidence=result.get("osm_match_score"),
+        )
+
+
+    # 4. A recheck that no longer finds a website this source found before must not leave it
+    #    published. Every website re-found above was just rewritten, so it carries this
+    #    transaction's now(); a row older than that was not found again and drops below the bar.
+    #    Not after a failed check: an outage on our side must not take websites offline.
+    if retires_unconfirmed(result):
+        cur.execute(
+            """
+            UPDATE public.company_field_observations
+            SET confidence = %s,
+                metadata = metadata || jsonb_build_object(
+                  'not_found_again', jsonb_build_object('at', now(), 'was', confidence)),
+                updated_at = now()
+            WHERE company_id = %s AND source_id = %s AND field_name = 'website'
+              AND updated_at < now() AND confidence > %s
+            """,
+            (UNVERIFIED_CAP, company.id, source_id, UNVERIFIED_CAP),
         )
 
     return was_created

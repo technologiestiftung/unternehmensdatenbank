@@ -132,7 +132,11 @@ def get_connection() -> Any:
     return psycopg2.connect(PG_DSN)
 
 
-def fetch_companies_without_source(source_key: str, limit: int = SOURCE_ENRICHMENT_BATCH_SIZE) -> list[CompanyCandidate]:
+def fetch_companies_without_source(
+    source_key: str, limit: int = SOURCE_ENRICHMENT_BATCH_SIZE, recheck_after_days: int | None = None
+) -> list[CompanyCandidate]:
+    """Companies this source has not looked at; with `recheck_after_days`, also those it last looked
+    at longer ago than that (its source record's `last_synced_at`, which every write refreshes)."""
     connection = get_connection()
     try:
         with connection, connection.cursor() as cur:
@@ -160,13 +164,14 @@ def fetch_companies_without_source(source_key: str, limit: int = SOURCE_ENRICHME
                   WHERE csr.company_id = c.id
                     AND s.key = %s
                     AND COALESCE(csr.source_payload ->> 'status', '') <> 'planned'
+                    AND (%s::int IS NULL OR csr.last_synced_at > now() - %s::int * interval '1 day')
                 )
                 {_ACTIVE_ONLY_SQL}
                 {_SKIP_RESOLVED_WEBSITE_SQL}
                 ORDER BY c.updated_at DESC, c.company_name ASC
                 LIMIT %s
                 """,
-                (source_key, limit * SOURCE_ENRICHMENT_SELECTION_WINDOW),
+                (source_key, recheck_after_days, recheck_after_days, limit * SOURCE_ENRICHMENT_SELECTION_WINDOW),
             )
             return _rank_company_candidates([CompanyCandidate(*row) for row in cur.fetchall()], limit)
     finally:
