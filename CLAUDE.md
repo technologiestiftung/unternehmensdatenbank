@@ -85,6 +85,7 @@ Multi-source canonical resolution, detail in [data-model](docs/data-model.md):
 
 [airflow/dags/README.md](airflow/dags/README.md): `pipeline_coordinator`, `website_discovery`,
 `website_contacts` and `website_keywords` (contacts and keywords from the proven website),
+`register_announcements` (Berlin's register announcements, `@weekly`; creates companies it does not find),
 `manager_ner_extract` / `manager_ner_train` (spaCy, retrained from the app's votes),
 `foerderkatalog` and `berlin_zuwendungen` (grants, `@monthly`), and the library `enrichment/`.
 `berlin_gewerbedaten` was removed on 2026-10-28: Berlin's open trade data is anonymised (no name,
@@ -94,6 +95,9 @@ yet; it is rebuilt on the library next (#18).
 - **`email` and `phone` are stored, never resolved.** `website_contacts` writes them, but a resolved
   value reaches the app and `v_field_provenance`, and a sole trader's phone is personal data. They
   stay unresolved until a privacy review clears them.
+- **A register announcement is a hint, never the status.** A deletion announcement does not make a
+  company `erloschen`; `register_announcement` stands next to `register_status`. The DAG reads only the
+  result list, never a detail page: those name liquidators and officers.
 - **A keyword is never a person's name.** `activity_keywords.is_candidate` drops anything
   `imprint_extractor.looks_like_person_name` accepts, at the cost of some real two-word keywords.
 

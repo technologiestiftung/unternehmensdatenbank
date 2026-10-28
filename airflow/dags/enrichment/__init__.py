@@ -1,7 +1,7 @@
 """The building blocks that fill a company's fields from the open web. No API, no key, no bill.
 
-This package is a library, not a DAG. `website_discovery`, `website_contacts`, `website_keywords`
-and `manager_ner` run it; the Technologiefeld DAG is still to be rebuilt on it (issue #18).
+This package is a library, not a DAG. `website_discovery`, `website_contacts`, `website_keywords`,
+`register_announcements` and `manager_ner` run it; the Technologiefeld DAG is still to be rebuilt on it (issue #18).
 
 Website discovery
   url_patterns.py     guess domains from the company name, check DNS, download the live ones
@@ -21,6 +21,9 @@ Reading pages
   imprint_extractor.py               regex: register number, VAT ID, Geschäftsführer, contact
   page_cache.py, content_pages.py    cache downloaded pages; fetch the services pages
   activity_keywords.py               product/service keywords from meta tags and services-page headings
+
+Register
+  register_names.py                  name key and legal form, shared with the OffeneRegister import
 
 Industry classification (three columns that must never be mixed: docs/branch-classification.md)
   branch_classifier.py, branch_taxonomy.yaml   Technologiefeld from the words a company publishes
