@@ -1,9 +1,10 @@
 # Unternehmensdatenbank: Architecture Overview
 
-> State on 2026-10-27. The target setup: the **Fusionbase API** delivers the base record of every
+> State on 2026-10-28. The target setup: the **Fusionbase API** delivers the base record of every
 > Berlin company, and our **Airflow DAGs** enrich it. Fusionbase is not connected yet; until it is,
-> everything runs on example data, 14,443 companies from a Northdata export of the Osnabrück region.
-> Every number on this page is an Osnabrück measurement that Berlin will replace.
+> the example data is **296,486 Berlin companies from OffeneRegister** (a Handelsregister snapshot
+> from 2017–2019). Numbers marked "example data" below were measured on the earlier Osnabrück data
+> (14,443 companies, removed 2026-10-28). The next steps are in issue #18.
 
 ## 1. Goal
 
@@ -217,7 +218,7 @@ flowchart TD
 flowchart LR
   FB["Fusionbase API<br/>base record"]
   subgraph DAGS["Our Airflow DAGs"]
-    DISC["Website discovery<br/>url_discovery, combined_discovery"]
+    DISC["Website discovery<br/>enrichment library, DAG being rebuilt"]
     BC["branch_classifier"]
     NER["manager_ner<br/>spaCy"]
     FKD["foerderkatalog"]
@@ -283,9 +284,9 @@ output from the vendor and are checked like our own.
 | Pipeline | Source | Kind | Priority | Cost | Result on example data |
 |---|---|---|---|---|---|
 | Fusionbase import | Fusionbase API | DAG, quarterly, to build | high, proposed | contract | none yet |
-| `url_discovery`: guesses URLs from the name | company websites | DAG | 100 | free | 37 websites |
-| `combined_discovery`: URL patterns, Impressum and register check | company websites | script | 100 | free | 552 websites |
-| `branch_classifier`: 77 technology fields | company websites, register purpose | script and import | 100 | free | Technologiefeld and purpose field |
+| OffeneRegister import | Handelsregister snapshot 2017–2019 | scripts, once | register facts | free | 296,486 Berlin companies, full record per company |
+| Website discovery: URL patterns, OSM, Impressum and register check | company websites | DAG to rebuild on `enrichment/` (#18) | 100 | free | 552 websites on example data; 106 of 1,000 active Berlin companies |
+| `branch_classifier`: 77 technology fields | company websites, register purpose | DAG to rebuild on `enrichment/` (#18) | 100 | free | 27 of 106 Berlin companies with a website |
 | `manager_ner`: names from the Impressum | Impressum pages, app votes | DAGs | 100 | free | measured on 222 Impressum pages (section 9) |
 | `foerderkatalog` | Förderkatalog des Bundes | DAG, monthly | | free | grants table |
 | `pipeline_coordinator` | all of the above | DAG | | free | picks the winning values |
@@ -294,16 +295,17 @@ Every DAG is off by default. It needs its `ENABLE_*` flag and must be unpaused i
 
 ## 8. Experiments on the example data (not part of the target)
 
-These ran only on the Osnabrück example data, to learn what works. None of them is a source in the
-target setup.
+These ran only on the Osnabrück example data, to learn what works. **All of them except OSM were
+removed from the repo on 2026-10-28** (code, DAGs and docker-compose services); the backup of that
+state is outside the repo.
 
 | Experiment | What it did | Measured result | What happens to it |
 |---|---|---|---|
-| Northdata export | example base data, 14,443 companies; its websites imported at priority 50 | 2,815 canonical websites | drop once Fusionbase is connected |
-| Brave, Exa and Parallel search | paid web search plus a model that picks the company's site | 85, 39 and 1 canonical websites | drop: paid, used once |
-| OpenStreetMap (local Overpass) | matches a company to a mapped business with a website | no separate count; part of the 552 combined discovery websites | keep as a local tool |
-| SearXNG | free local web search for the `llm` stage | found nothing: search engines answer with a CAPTCHA on this network | drop |
-| Ollama judge | a local model reads a downloaded page and says whether it is this company's site | 886 high, 56 medium, 1 low among 943 websites | decide after comparing `band` with `band_without_judge` |
+| Northdata export | example base data, 14,443 companies; its websites imported at priority 50 | 2,815 canonical websites | removed |
+| Brave, Exa and Parallel search | paid web search plus a model that picks the company's site | 85, 39 and 1 canonical websites | removed: paid, used once |
+| OpenStreetMap | matches a company to a mapped business with a website | 3 of 1,000 active Berlin companies | kept, in `enrichment/`; to be extended (#18) |
+| SearXNG | free local web search for the `llm` stage | found nothing: search engines answer with a CAPTCHA on this network | removed |
+| Ollama judge | a local model reads a downloaded page and says whether it is this company's site | 886 high, 56 medium, 1 low among 943 websites | removed: no GPUs on the hub |
 
 ## 9. AI and models
 

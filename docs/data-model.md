@@ -88,20 +88,19 @@ First, a dissolved company's domain is exactly the kind that gets sold to somebo
 
 Second, the expensive stages can skip them. `DISCOVERY_ACTIVE_ONLY=1` restricts every discovery
 query and every new model call to `register_status = 'aktiv'` — `in Liquidation` counts as inactive,
-which costs 7 high-confidence websites and skips 472 companies. It is **off by default**, on purpose:
-see the note on `SAMPLE_SQL` in `scripts/run_combined_discovery.py` before you compare a filtered run
-to anything.
+which on the earlier example data cost 7 high-confidence websites and skipped 472 companies. With
+a limit, the limit applies *after* the filter, so a limited run gets a different sample, not a
+smaller one. Compare a filtered run only with another filtered run.
 
 The column was added in `V13__company_register_status.sql`, which backfilled it from
 `metadata->>'status'` — the value had been imported all along, just never read. `metadata` keeps its
 copy as the raw source record.
 
-> **The manual load has to map this column.** There is no loader script in this repo: a prepared CSV
-> goes into Postgres by hand. `prepare_company_import.py` emits `register_status`, but if the
-> hand-written `\copy` column list leaves it out, every row lands `NULL`; the filter is `= 'aktiv'`,
-> which excludes `NULL`, so an active-only run would find nothing to do at all. `load_sample()`
-> raises rather than reporting a clean run over zero companies, but that is a net under the tightrope
-> — put the column in the copy list.
+> **The load has to map this column.** The prepared CSV goes into Postgres with a `\copy`.
+> `prepare_offeneregister_import.py` emits `register_status`, but if the `\copy` column list leaves
+> it out, every row lands `NULL`; the filter is `= 'aktiv'`, which excludes `NULL`, so an
+> active-only run would find nothing to do at all. The command in "Loading the OffeneRegister
+> Berlin set" below maps it.
 
 ### `public.sources`
 
@@ -298,7 +297,8 @@ Four things to know before using it.
    `registration_number`, which each carry 158 duplicates. A Berlin export may land before its
    companies are imported; NULL then means unmatched, never failed.
 
-Loaded by `scripts/import_northdata_export.py`, idempotent per file. Nothing reads the table yet:
+It was loaded by a Northdata import script that was removed with the Osnabrück data on 2026-10-28;
+the table stays in the schema until the squash in issue #18. Nothing reads it:
 whether an unverified third-party URL should outrank a page carrying the company's own register
 number is undecided, and the 207 companies where the two disagree are the evidence nobody has
 looked at.
@@ -369,7 +369,7 @@ For each incoming company row from a source:
 
 ## Query groups
 
-The canonical query catalog lives in [core-queries.sql](core-queries.sql).
+Working queries: [core-queries-current.sql](core-queries-current.sql).
 
 The most important groups are:
 

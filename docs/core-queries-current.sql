@@ -1,16 +1,10 @@
--- Queries that work against the schema as it stands (V20, 2026-09-09).
---
--- The companion to `docs/core-queries.sql`, which was written against V1-V8 and is now mostly
--- unrunnable -- read the warning at the top of that file before using anything from it.
+-- Queries that work against the schema as it stands (V24).
 --
 -- WHY THIS FILE CARRIES NO EXPECTED OUTPUT. Every number in this repo's documentation has gone
 -- stale at least once, and a comment saying "should return 3,529" is a number nobody re-measures.
--- The counts these queries produce are pinned instead in `tests/integration/`, where they FAIL when
--- they move. Each query below names the constant that pins it. If a query disagrees with its
--- constant, run the test -- it will tell you which of the two is wrong.
---
---     pytest tests/integration/test_ground_truth_discovery.py    # needs Docker
---     python tests/integration/test_ground_truth_discovery.py    # same checks, no pytest
+-- The "Pinned by ..." notes below name constants of the integration tests that pinned these counts
+-- on the Osnabrück example data. Those tests were removed with that data on 2026-10-28; the queries
+-- still work, the constants no longer exist.
 --
 -- HOW TO RUN THESE. From the repo root, on the host:
 --
@@ -138,16 +132,9 @@ WHERE conname = 'uq_company_managers_company_name';
 -- ================================================================================================
 -- 4. Industry columns 1 and 3 -- WHERE THE BUCKETS ACTUALLY LIVE.
 --
--- These do NOT come from the database. Column 1 (`technologiefeld`) and column 3 (`purpose_field`)
--- are computed by `scripts/run_combined_discovery.py` into two files under
--- `airflow/data/combined_discovery/`, and V20's view columns are still NULL. So the bucket counts
--- are read from the files, not from SQL:
---
---     python scripts/run_combined_discovery.py classify-report          # column 1, five outcomes
---     python scripts/run_combined_discovery.py classify-purpose-report  # column 3, seven outcomes
---
--- Pinned by BRANCH_OUTCOMES and PURPOSE_OUTCOMES in
--- tests/integration/test_ground_truth_columns.py, each summing to 14,443. `NONE` is the sentinel
+-- The buckets (why a company has no field) were computed by the old discovery CLI into files, and
+-- only the assigned fields reach the database. The Technologiefeld DAG that replaces it (issue #18)
+-- keeps the buckets in Postgres. `NONE` is the sentinel
 -- for "no field", not an empty string, and the four reasons for it must never be added together.
 --
 -- NOTE: `classify` now needs Postgres running. It takes its "does this company have a website

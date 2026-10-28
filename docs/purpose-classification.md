@@ -1,5 +1,10 @@
 # Column 3: what the register says the company was set up to do
 
+> **Status 2026-10-28.** Written on the Osnabrück example data, which has been removed. The rules
+> here still hold; the numbers were measured on that data and Berlin replaces them. The commands
+> of the old discovery CLI (`run_combined_discovery.py`) and the Ollama stages are gone; the code
+> lives in `airflow/dags/enrichment/`, and the DAGs that run it are being rebuilt (issue #18).
+
 Every company registered in Germany files a **Gegenstand des Unternehmens** — one or two sentences
 saying what the company is for. It is written by a notary, it describes what the company is
 *permitted* to do, and it is filed once, at registration, and rarely changed. It arrives here as

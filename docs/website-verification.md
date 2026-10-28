@@ -1,11 +1,15 @@
-# How combined discovery decides a page belongs to a company
+# How website discovery decides a page belongs to a company
+
+> **Status 2026-10-28.** Written on the Osnabrück example data, which has been removed. The rules
+> here still hold; the numbers were measured on that data and Berlin replaces them. The commands
+> of the old discovery CLI (`run_combined_discovery.py`) and the Ollama stages are gone; the code
+> lives in `airflow/dags/enrichment/`, and the DAGs that run it are being rebuilt (issue #18).
 
 Combined discovery guesses domains from a company's name, downloads what answers, and decides whether
 each page is that company's own website. This file is about the deciding — the part that turned out to
 matter far more than the finding.
 
-Everything here was measured on the same 1,000 Osnabrück companies on 2026-08-14. Read
-[running-discovery.md](running-discovery.md) first if you have never run it.
+Everything here was measured on the same 1,000 Osnabrück companies on 2026-08-14.
 
 Words used below, defined once:
 
@@ -117,7 +121,7 @@ The lesson generalises, and it is the first thing to check when a gate looks fre
   not a word anybody could guess. The other two are scored as the weak "this is a real business site"
   class that cannot lift the cap.
 - **JSON-LD**, the schema.org block search engines read, is parsed by
-  `combined_discovery/structured_data.py`. It is the only place a site states its own name as *data*,
+  `enrichment/structured_data.py`. It is the only place a site states its own name as *data*,
   which matters because own-site detection otherwise rests entirely on matching the domain string
   against the company name.
 
@@ -236,5 +240,5 @@ different product from the scraped `search.brave.com` that gets rate-limited her
 ## Not yet measured on real pages
 
 The phone/email/VAT evidence and the anchored postcode regex are covered by offline cases in
-`scripts/check_combined_discovery.py` but have not yet decided a run. Everything else on this page is
+`scripts/check_website_discovery.py` but have not yet decided a run. Everything else on this page is
 measured against the stored 1,000-company results and its cached pages.
