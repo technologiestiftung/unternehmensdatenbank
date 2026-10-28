@@ -38,6 +38,9 @@ _REGISTER_SEPARATORS = str.maketrans("", "", " .  ")
 
 #: The old name, kept because it reads as "the Handelsregister pattern" in older call sites.
 HRB_RE = REGISTER_RE
+#: A short run of digits right after an entry: the "28" of "HRB 794 28", 3pc's entry as printed (issue
+#: #30). At most three digits, so the five of a postcode after the entry are never glued on.
+_SPLIT_TAIL_RE = re.compile(r"[ \u00a0](\d{1,3})(?!\d|[.,]\d)")
 VAT_RE = re.compile(r"\bDE\s*(\d{9})\b")
 
 #: A German postcode in a German postal address: five digits followed by a place name.
@@ -182,8 +185,14 @@ def extract_register_numbers(text: str) -> list[str]:
         # that "HRB 222 442" and "HRB 222442" are the same entry. `confidence.register_digits` and
         # `scorer._reg_digits` both strip non-digits anyway; this keeps the stored string clean too.
         entry = f"{prefix} {match.group(2).translate(_REGISTER_SEPARATORS)}"
-        if entry not in found:
-            found.append(entry)
+        entries = [entry]
+        # Both readings, the plain one first: a page whose entry is really "HRB 794" keeps it, and one
+        # that wrote "HRB 794 28" can now match the company's 79428. Which one counts is decided where
+        # the page is compared with the register, against the company's own number.
+        tail = _SPLIT_TAIL_RE.match(text, match.end())
+        if tail:
+            entries.append(entry + tail.group(1))
+        found.extend(e for e in entries if e not in found)
     return found
 
 

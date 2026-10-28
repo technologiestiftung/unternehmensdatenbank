@@ -343,6 +343,35 @@ def host_stem(url_or_host: str) -> str:
     return normalize(stem).replace(" ", "")
 
 
+#: A brand may be one letter shorter than a guessed stem: it is the company's own short form, not a
+#: fragment cut out of a longer name.
+MIN_BRAND_LENGTH = 3
+
+
+def brand_stem(company_name: str) -> str:
+    """The name before a legal form that has more name after it, as a domain would write it.
+
+    "3pc GmbH Neue Kommunikation" is a brand, "3pc", followed by a description, and the brand is
+    the domain: 3pc.de (issue #30). The usual name ends with its legal form and has no brand of this
+    kind, so this returns "" for "Erika Muster GmbH" and "Muster GmbH & Co. KG".
+
+    The same filters as the `first_word` guess keep `bau.de` and `karl.de` out.
+    """
+    match = LEGAL_SUFFIX_RE.search(company_name)
+    if not match or not name_words(company_name[match.end():]):
+        return ""
+    words = name_words(company_name[:match.start()])
+    stem = "".join(words)
+    if (
+        len(stem) < MIN_BRAND_LENGTH
+        or len(stem) > MAX_LABEL_LENGTH
+        or any(is_low_signal(w) or w in GIVEN_NAMES for w in words)
+        or is_generic_stem(stem)
+    ):
+        return ""
+    return stem
+
+
 def is_generic_stem(stem: str, common: set[str] | frozenset[str] = frozenset()) -> bool:
     """Is this domain an industry rather than a company?
 
@@ -508,7 +537,13 @@ def generate_candidates(company_name: str, city: str | None = None) -> list[Cand
     # `muller.de` is a better guess than its own `mueller.com`.
     out: list[Candidate] = []
     seen_hosts: set[str] = set()
+    brand = brand_stem(company_name)
     for tld in TLDS:
+        # The brand first: when a name has one, it is the domain (3pc GmbH Neue Kommunikation -> 3pc.de).
+        if brand:
+            host = to_ascii_host(f"{brand}.{tld}")
+            seen_hosts.add(host)
+            out.append(Candidate(url=f"https://{host}", host=host, pattern="brand", rank=len(out)))
         for spelling, words in spellings:
             # An umlaut kept as itself is a `.de` registry feature. `muller.com` is reached by the
             # dropped spelling, so encoding umlauts for every TLD would only spend lookups.

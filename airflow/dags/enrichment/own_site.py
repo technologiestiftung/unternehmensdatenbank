@@ -264,6 +264,14 @@ def host_matches_company(url: str, company_name: str) -> bool:
     """
     from urllib.parse import urlparse
 
+    from enrichment.url_patterns import brand_stem
+
+    # The brand before an embedded legal form, as the WHOLE host stem only: 3pc.de for "3pc GmbH Neue
+    # Kommunikation" (issue #30). Its tokens are too short for the rules below, which need 4+ letters.
+    brand = brand_stem(company_name)
+    if brand and _host_stem_in_name_alphabet((urlparse(url).hostname or "").lower()).replace("-", "") == brand:
+        return True
+
     # Both spellings of an umlaut, and only here. A German business writing itself "Müller" may own
     # `mueller.de`, `muller.de` or `müller.de`, and DNS sees the third as `xn--mller-kva.de`.
     # Measured: 4,016 of the 14,443 companies (28%) have an umlaut in the name, and all three forms
