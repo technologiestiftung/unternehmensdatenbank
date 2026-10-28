@@ -128,7 +128,7 @@ cp .env.example .env
 ./scripts/dev-up.sh
 ```
 
-This starts Postgres, runs all Flyway migrations, builds the Airflow image, and brings up all Airflow services. Then open http://localhost:8082 (airflow / airflow), unpause the DAGs you want, and trigger them.
+This writes a fresh Airflow Fernet key into `.env` if the value there is empty (never overwriting one), starts Postgres, runs all Flyway migrations, builds the Airflow image, and brings up all Airflow services. Then open http://localhost:8082 (airflow / airflow), unpause the DAGs you want, and trigger them.
 
 For which DAGs to run and how to read what they found, see [docs/running-discovery.md](docs/running-discovery.md).
 
