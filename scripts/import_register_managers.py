@@ -2,9 +2,11 @@
 """The register's current Geschäftsführer as management names, from the OffeneRegister records.
 
 `import_offeneregister_records.py` keeps every officer in the company's source record. This script
-turns the current Geschäftsführer among them (167,140 for Berlin) into `ceo_name_or_contact`
-observations of the source `offeneregister`; `pipeline_coordinator` then publishes them like any
-other name. Before this, the app's management names came only from spaCy: 29 of them.
+turns the current Geschäftsführer among them into `ceo_name_or_contact` observations of the source
+`offeneregister`; `pipeline_coordinator` then publishes them like any other name. Measured on Berlin
+on 2026-10-28: the officers lists hold 167,140 current Geschäftsführer entries, and the script writes
+156,853 names for 111,368 companies, because a person listed twice at the same company is written
+once. Before this, the app's management names came only from spaCy: 29 of them.
 
 Current means the register gives no end date and does not mark the person as dismissed. That is
 current as of the snapshot, 2017–2019, so many of these people will have left since. The confidence
