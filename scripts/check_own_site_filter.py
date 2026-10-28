@@ -29,7 +29,7 @@ for candidate in (
         sys.path.insert(0, str(candidate))
         break
 
-from search_common import is_own_site_candidate  # noqa: E402
+from enrichment.own_site import is_own_site_candidate  # noqa: E402
 
 AUTO_ACCEPT_SCORE = 100
 

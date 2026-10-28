@@ -28,7 +28,7 @@ from collections import Counter
 from dataclasses import dataclass, field
 from typing import Any, Iterable
 
-from url_discovery.imprint_extractor import ceo_label_windows
+from enrichment.imprint_extractor import ceo_label_windows
 
 LABEL = "PER"
 

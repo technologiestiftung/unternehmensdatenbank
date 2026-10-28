@@ -34,7 +34,7 @@ DAGS_DIR = REPO_ROOT / "airflow" / "dags"
 if str(DAGS_DIR) not in sys.path:
     sys.path.insert(0, str(DAGS_DIR))
 
-from combined_discovery import name_frequency, osm_snapshot  # noqa: E402
+from enrichment import name_frequency, osm_snapshot  # noqa: E402
 
 
 @dataclass

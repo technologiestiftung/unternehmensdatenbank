@@ -9,78 +9,36 @@ Reads the tool-call JSON on stdin. Two steps:
 1. **ruff** on the edited file, for any `.py` inside the repo. Configured in `ruff.toml` at the repo
    root — the default rule set, no line-length check. About 0.1 s. A missing ruff is a failure, not
    a pass: a linter that silently does not run must not look like one that did.
-2. **The guards**, only when the edited file is part of the branch classification code. Exit 2 makes
-   the message on stderr into feedback Claude has to deal with before it can carry on, which is the
-   whole point: the guards fail in the same turn the breakage happened, not three edits later.
+2. **The guards**, only when the edited file is under a watched directory. Exit 2 makes the message
+   on stderr into feedback Claude has to deal with before it can carry on, which is the whole point:
+   the guards fail in the same turn the breakage happened, not three edits later.
 
-The guards are free — no API, no model, no database, no network — so this costs about four seconds.
+The guards are free — no API, no model, no database, no network — so this costs a few seconds.
 
-`run_checks_before_commit.py` imports `GUARDS`, `run_guard` and `ruff_check` from here so the two
-hooks cannot drift apart. Import the rule, never restate it (docs/guards-and-tests.md).
+**The guard list is read from `scripts/free_checks.sh`**, the one list CI, no-mistakes and the commit
+hook also run (decided 2026-10-28). Import the rule, never restate it (docs/guards-and-tests.md):
+a second list here would drift from it.
 """
 from __future__ import annotations
 
 import json
+import re
 import subprocess
 import sys
 from pathlib import Path
 from typing import Sequence
 
 REPO = Path(__file__).resolve().parents[2]
+FREE_CHECKS = REPO / "scripts" / "free_checks.sh"
 
-#: Written only by `classify`, which only the reference machine has run over the full table. The
-#: pinned-number tests describe that machine's copy of the example data and fail on any other.
-REFERENCE_MARKER = "branches.jsonl"
-#: Guards that pin numbers of the reference copy; skipped where it is absent.
-PINNED_GUARDS = ("tests/integration/test_ground_truth_columns.py",)
+#: Only these parts of the tree are guarded. An edit to a doc runs nothing.
+WATCHED = ("airflow/dags", "scripts", "tests")
 
 
-def reference_data_missing() -> str | None:
-    """None on the machine that holds the reference copy, else why it is absent.
-
-    The marker is a file `classify` writes, not the result folder: a `run` for a page cache creates
-    the folder on any machine. Nor the company count: a bug that deletes companies must still fail.
-    """
-    if str(REPO) not in sys.path:
-        sys.path.insert(0, str(REPO))
-    from tests.paths import artifacts  # the tests' own lookup, so both agree on "present"
-
-    try:
-        folder = artifacts()
-    except AssertionError as exc:
-        return str(exc)
-    if not (folder / REFERENCE_MARKER).is_file():
-        return f"no {REFERENCE_MARKER} in {folder}; `classify` writes it on the reference machine"
-    return None
-
-#: Only these parts of the tree are guarded. An edit to a doc or an unrelated DAG runs nothing.
-WATCHED = ("combined_discovery", "scripts", "tests")
-
-#: Free, and in the order the runbook says to run them. All five finish in about four seconds
-#: together, which matters: the hook's timeout is 60s and a guard that overruns it blocks the edit
-#: rather than reporting a failure. The first four check the RULES;
-#: `test_ground_truth_columns` checks the NUMBERS those rules last produced, and reads three
-#: artifacts off disk to do it (1.6s, measured; `check_osm_match` costs 0.3s).
-#:
-#: `test_ground_truth_discovery.py` is deliberately NOT here. It needs a running Postgres, and a
-#: guard that fails because Docker is down would block editing for a reason that has nothing to do
-#: with the edit. The pre-commit hook runs it instead, and there Docker down DOES block (decided
-#: 2026-09-24: every commit needs all 17 tests).
-#:
-#: Repo-relative paths, not bare filenames. They used to be resolved as REPO/"scripts"/<name>,
-#: which meant a guard that moved out of scripts/ was silently skipped by the `not exists` branch
-#: below -- the exact failure mode these guards exist to catch. The ground-truth tests moved to
-#: tests/integration/ and would have stopped running with no message at all.
-GUARDS = (
-    "scripts/check_branch_classifier.py",
-    "scripts/check_purpose_branch.py",
-    "scripts/check_combined_discovery.py",
-    "scripts/check_osm_match.py",
-    # The write path: which field names reach the database, at what confidence, and which of them no
-    # resolver may ever name. Free and AST-based like the rest, so it belongs in the hook.
-    "scripts/check_branch_observations.py",
-    "tests/integration/test_ground_truth_columns.py",
-)
+def guards() -> tuple[str, ...]:
+    """The `python scripts/check_*.py` lines of free_checks.sh, as repo-relative paths."""
+    text = FREE_CHECKS.read_text(encoding="utf-8") if FREE_CHECKS.is_file() else ""
+    return tuple(re.findall(r"(?m)^python (scripts/check_\w+\.py)\s*$", text))
 
 
 def run_guard(guard: str) -> str | None:
@@ -90,8 +48,8 @@ def run_guard(guard: str) -> str | None:
         # Loud on purpose. A guard that has been renamed, moved or deleted must not look like
         # a guard that passed.
         return (
-            f"guard {guard} is listed in {Path(__file__).name} but does not exist. "
-            f"Fix the path or drop it from GUARDS -- until then it is not running.\n"
+            f"guard {guard} is listed in scripts/free_checks.sh but does not exist. "
+            f"Fix the path or drop it from the list -- until then it is not running.\n"
         )
     result = subprocess.run(
         [sys.executable, str(script)], cwd=REPO, capture_output=True, text=True
@@ -162,10 +120,7 @@ def main() -> int:
     if not any(part in path for part in WATCHED):
         return 0
 
-    missing = reference_data_missing()
-    for guard in GUARDS:
-        if missing and guard in PINNED_GUARDS:
-            continue
+    for guard in guards():
         failure = run_guard(guard)
         if failure:
             sys.stderr.write(f"after editing {path}: {failure}")
