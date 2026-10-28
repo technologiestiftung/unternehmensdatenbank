@@ -118,6 +118,9 @@ class CompanyCandidate:
     wz_code: str | None = None
     business_purpose: str | None = None
     branch_description: str | None = None
+    #: The company's register officers as `imprint_extractor.person_key` comparison keys, for the
+    #: Geschäftsführer match. Personal data: loaded only where a page is verified, never stored.
+    officers: frozenset[str] = frozenset()
 
 
 @dataclass

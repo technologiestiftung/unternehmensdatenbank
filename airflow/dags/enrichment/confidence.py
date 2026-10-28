@@ -35,7 +35,7 @@ Same company, but the page has no Impressum and never names the company:
     ------------------------------------
     = 0.40, then capped to           0.34
 
-The cap fires because none of the evidence is *verifying* evidence — see `_VERIFYING_EVIDENCE`
+The cap fires because none of the evidence is *verifying* evidence — see `identifies_company`
 below. The page was downloaded, but it confirmed nothing: no Impressum, no register number, no
 postcode, and the company's name never appears. So the arithmetic reaching 0.40 is not enough.
 The result is 0.34, one notch under the 0.35 promotion bar, which means the URL is kept as a
@@ -59,20 +59,6 @@ Two rules override all arithmetic, because both have produced wrong data before:
 - A **register-number mismatch** is fatal. If the page prints HRB 12345 and the company is
   HRB 99999, this is a different company's site, however good the name match looked.
 
-## What the language model is and is not allowed to do
-
-A local model may read a downloaded page and say whether it thinks the page belongs to the
-company (see `llm_judge.py`). Its opinion arrives here as ordinary evidence — `llm_says_own_site`
-and friends — and is weighted like anything else. Three limits are deliberate:
-
-1. Its opinion is **not** in `_VERIFYING_EVIDENCE`. So a page with no Impressum, no postcode and
-   no company name stays capped at 0.34 no matter how sure the model sounds. The model can
-   strengthen a page that already proved something; it cannot be the proof.
-2. It cannot lift a **disqualifier**. A model calling a directory page a company's own site
-   changes nothing.
-3. It never produces a register-number *mismatch*. A mismatch is fatal, and a model misreading
-   one digit would kill a correct website. Only the regex extraction, which quotes the page
-   verbatim, may do that.
 """
 from __future__ import annotations
 
@@ -87,6 +73,10 @@ from dataclasses import dataclass, field
 
 REGISTER_MATCH = "register_number_match"
 REGISTER_MISMATCH = "register_number_mismatch"
+#: A Geschäftsführer named on the page's Impressum is one of this company's officers in the register.
+#: Identity evidence of the same kind as the register number: a fact about THIS company that a
+#: directory or another company's site has no reason to carry on its own Impressum.
+OFFICER_MATCH = "officer_name_on_imprint"
 POSTCODE_MATCH = "postcode_match"
 CITY_ON_PAGE = "city_on_page"
 NAME_ON_PAGE = "company_name_on_page"
@@ -125,19 +115,9 @@ DIRECTORY_HOST = "directory_host"
 HOST_NAME_MISMATCH = "host_name_mismatch"
 GENERIC_HOST = "host_is_an_industry_not_a_company"
 
-#: What a local language model concluded after reading the downloaded page. Three verdicts, and
-#: the middle one is the whole reason this exists: a page can print a company's name, address and
-#: register number and still belong to somebody else — a directory, a register extract, a news
-#: article. "Is this page ABOUT the company or IS it the company's" is the judgement the
-#: hand-written string matching cannot make.
-LLM_OWN_SITE = "llm_says_own_site"
-LLM_ABOUT_COMPANY = "llm_says_page_is_about_company"
-LLM_UNRELATED = "llm_says_unrelated"
-
 #: Methods, strongest first. The base is set by the strongest method that proposed the URL.
 METHOD_URL_PATTERN = "url_pattern"
 METHOD_OSM = "osm"
-METHOD_LOCAL_LLM = "local_llm"
 
 # ---------------------------------------------------------------------------------------
 # The weights. Every one of these is a judgement call, not a measurement. They are grouped so
@@ -149,10 +129,6 @@ METHOD_LOCAL_LLM = "local_llm"
 #: website into the map. Stronger than a name guess, weaker than a register number.
 BASE_OSM = float(os.getenv("COMBINED_BASE_OSM", "0.45"))
 
-#: A language model reading search snippets. Weakest: it has read text about the company, not
-#: the company's own page. Capped further down unless the page was actually fetched.
-BASE_LOCAL_LLM = float(os.getenv("COMBINED_BASE_LOCAL_LLM", "0.15"))
-
 #: URL pattern matching scales with how distinctive the name is, because that is exactly what
 #: decides whether the guess could have hit someone else's domain. "Zweirad Liebig" guessed
 #: right is worth more than "Nordbau" guessed right.
@@ -162,6 +138,9 @@ BASE_URL_PATTERN_RANGE = float(os.getenv("COMBINED_BASE_URL_PATTERN_RANGE", "0.2
 WEIGHTS: dict[str, float] = {
     # Hard proof: the page prints the company's own commercial-register number.
     REGISTER_MATCH: 0.45,
+    # Slightly below the register number: officers change and the register snapshot is 2017–2019,
+    # so a match is strong but a miss says little.
+    OFFICER_MATCH: float(os.getenv("COMBINED_W_OFFICER_MATCH", "0.40")),
     # Address agreement. The postcode is on the Impressum; the city may be anywhere on the page.
     POSTCODE_MATCH: 0.10,
     CITY_ON_PAGE: 0.04,
@@ -196,7 +175,7 @@ WEIGHTS: dict[str, float] = {
     PHONE_MATCHES_OSM: float(os.getenv("COMBINED_W_PHONE_MATCHES_OSM", "0.10")),
     # The last two are the "this is a real business site" class, the same class as IMPRINT_FOUND,
     # and they are priced like it. Neither says which company the site belongs to, so neither is in
-    # `_VERIFYING_EVIDENCE` and neither can carry a row past the cap on its own. They only ever
+    # `identifies_company` and neither can carry a row past the cap on its own. They only ever
     # refine a row that already has a fact naming the company.
     IMPRINT_EMAIL_ON_DOMAIN: float(os.getenv("COMBINED_W_IMPRINT_EMAIL_ON_DOMAIN", "0.06")),
     VAT_ID_FOUND: float(os.getenv("COMBINED_W_VAT_ID_FOUND", "0.04")),
@@ -207,18 +186,6 @@ WEIGHTS: dict[str, float] = {
     # because the methods share no inputs beyond the company name.
     AGREE_TWO: 0.12,
     AGREE_THREE: 0.20,
-    # A model read the page and said it belongs to this company. Deliberately worth less than
-    # NAME_ON_PAGE (0.10) and IMPRINT_FOUND (0.08) together: when the page itself carries facts,
-    # those facts outrank an opinion about them. Enough to lift a `low` row into `medium` when
-    # real evidence is already present, never enough to carry a row on its own — see
-    # `_VERIFYING_EVIDENCE`.
-    LLM_OWN_SITE: float(os.getenv("COMBINED_W_LLM_OWN_SITE", "0.12")),
-    # The model says the page is about the company without belonging to it. This is the failure
-    # mode that has produced wrong data in this repo more than any other, so it is a real penalty
-    # — but a penalty, not a disqualification. A model is not given the power to delete a row.
-    LLM_ABOUT_COMPANY: float(os.getenv("COMBINED_W_LLM_ABOUT_COMPANY", "-0.15")),
-    # The model says this is somebody else's business entirely.
-    LLM_UNRELATED: float(os.getenv("COMBINED_W_LLM_UNRELATED", "-0.20")),
 }
 
 #: The platform's existing bar for promoting a website observation to canonical.
@@ -227,66 +194,40 @@ WEBSITE_MIN_CONFIDENCE = float(os.getenv("COMBINED_WEBSITE_MIN_CONFIDENCE", "0.3
 #: A URL nobody downloaded cannot go above this. One notch below WEBSITE_MIN_CONFIDENCE.
 UNVERIFIED_CAP = float(os.getenv("COMBINED_UNVERIFIED_CAP", "0.34"))
 
-#: A page a model read and said belongs to somebody else cannot go above this either.
-#:
-#: Measured 2026-08-12 on 100 companies: **5 of the 11 promoted websites were pages the judge had
-#: explicitly rejected**, and every one of those rejections was right — a DomainMarket sales
-#: listing, a US haircare brand, a company in Ohio, a yacht charter, and a differently-owned
-#: winery. A -0.20 penalty moved them from `medium` to `low` and left them above the 0.35 bar, so
-#: the arithmetic quietly overruled the model.
-#:
-#: A cap rather than a disqualification, deliberately. The row keeps its evidence and stays in the
-#: CSV where somebody can argue with it; it just cannot become a company's website. That is the
-#: same shape as UNVERIFIED_CAP, and it holds the line that a model may refuse to vouch for a page
-#: without being able to delete it. The known failure mode is a model that is too strict — it
-#: called `bruecklyn.de` "unrelated" while the page printed the company's own register number — so
-#: `_JUDGE_SKIP_EVIDENCE` in `pipeline.py` never shows it a page that is already proven.
-NOT_OWN_SITE_CAP = float(os.getenv("COMBINED_NOT_OWN_SITE_CAP", "0.34"))
-
 #: Ceiling. Certainty is not on the menu.
 MAX_CONFIDENCE = 0.99
 
-#: Evidence that ties the downloaded page to THIS company. Nothing else can lift `UNVERIFIED_CAP`.
+#: What identifies the downloaded page as THIS company's. Only this lifts `UNVERIFIED_CAP`, so only
+#: this can make a page the company's website (rule agreed 2026-10-28, issue #18):
 #:
-#: Read the three that are here as one sentence: the page prints this company's register number,
-#: or its postcode, or its name. Each is a fact about *this* company that a page belonging to
-#: somebody else has no reason to carry.
+#:   - the page prints the company's own register number (`REGISTER_MATCH`), or
+#:   - a Geschäftsführer on its Impressum is a register officer of the company (`OFFICER_MATCH`), or
+#:   - the page names the company AND carries its postcode (name and place together).
 #:
-#: `IMPRINT_FOUND` used to be in this set and was removed on 2026-08-14, because it is not that kind
-#: of fact. Every German business website must publish an Impressum, so finding one says the page is
-#: *a* business — never *which* business. The cost was measurable: 190 candidate URLs reached the
-#: promotable band on `base + host_is_exact_name + imprint_found` alone, with nothing on the page
-#: naming the company, and the language model then had to read all 190 and throw them out one at a
-#: time. `flora.com`, `herten.de`, `selbstbau.com` and `hasekurier.de` were all in that set. Taking
-#: the cap-lift away refuses them for free, and re-scoring the stored 1,000-company run showed the
-#: promotable candidates unchanged at 49 with an identical `verified_by` breakdown — the winners
-#: were never resting on this.
+#: Name alone and postcode alone used to be enough each, and were not: checked against their
+#: Impressum, only 34 of 106 Berlin websites had a register number or an officer, and most of the
+#: rest rested on the company's name appearing on the page, which a reseller, a namesake or a group
+#: page also does. One name-like fact plus one place fact is far harder to meet by accident.
 #:
-#: `IMPRINT_FOUND` keeps its +0.08 weight. An Impressum is still mild evidence that a page is a real
-#: business site; it just cannot carry a row past the bar by itself.
-#:
-#: `LLM_OWN_SITE` is missing from this set on purpose, and that omission is load-bearing. A model
-#: reading a page technically means the page was downloaded — but "the model was convinced" is not
-#: the same kind of fact as "the page prints this postcode". Adding it here would let a page with
-#: no Impressum, no name and no address be promoted on the model's word alone, which is exactly
-#: the arrangement this pipeline is built to avoid. Set COMBINED_LLM_VERIFIES=true to change that
-#: once there are measured numbers saying the model deserves it.
-#: The two structured-data facts are here for the same reason as their page-text equivalents: they
-#: name this company. `jsonld_org_name_match` is the site declaring its own name, and
-#: `jsonld_postcode_match` its own postcode, in the block search engines read.
-_VERIFYING_EVIDENCE = frozenset(
-    {REGISTER_MATCH, POSTCODE_MATCH, NAME_ON_PAGE, JSONLD_NAME_MATCH, JSONLD_POSTCODE_MATCH}
-    | ({LLM_OWN_SITE} if os.getenv("COMBINED_LLM_VERIFIES", "false").lower() == "true" else set())
-)
+#: `IMPRINT_FOUND`, a VAT number and an email at the domain stay out for good: every German business
+#: site has all three, so they say the page is *a* business, never *which*. Letting `IMPRINT_FOUND`
+#: lift the cap once promoted 190 wrong websites.
+_PROOF_EVIDENCE = frozenset({REGISTER_MATCH, OFFICER_MATCH})
+_NAME_EVIDENCE = frozenset({NAME_ON_PAGE, JSONLD_NAME_MATCH})
+_PLACE_EVIDENCE = frozenset({POSTCODE_MATCH, JSONLD_POSTCODE_MATCH})
+
+
+def identifies_company(evidence: set[str] | frozenset[str]) -> bool:
+    """True when the evidence ties the page to THIS company (see the rule above)."""
+    evidence = set(evidence)
+    return bool(evidence & _PROOF_EVIDENCE) or bool(evidence & _NAME_EVIDENCE and evidence & _PLACE_EVIDENCE)
 
 
 def register_digits(text: str | None) -> str:
     """The number out of a commercial-register string. "Amtsgericht Osnabrück HRB 213220" -> "213220".
 
-    Lives here because this module owns what REGISTER_MATCH means, and two callers need to agree
-    on it exactly: the regex extraction in `pipeline.py` and the model transcription in
-    `llm_judge.py`. If those two ever disagreed about which digits count, the same page would
-    match for one and mismatch for the other.
+    Lives here because this module owns what REGISTER_MATCH means, so every caller agrees on which
+    digits count and the same page can never match for one and mismatch for another.
     """
     match = re.search(r"\d+", text or "")
     return match.group(0) if match else ""
@@ -315,9 +256,7 @@ def standing_disqualifiers(evidence: set[str] | list[str]) -> set[str]:
     """Which refusals in this evidence set actually still stand.
 
     A disqualifier can be lifted by other evidence in the same set — see `_LIFTED_BY` — so "is
-    `HOST_NAME_MISMATCH` present" is not the same question as "is this row refused". Public because
-    `pipeline` has to ask it too: a page whose refusal has been lifted is a page the judge should
-    still be shown, and a gate that read the raw evidence would silently skip it.
+    `HOST_NAME_MISMATCH` present" is not the same question as "is this row refused".
     """
     present = set(evidence)
     return {
@@ -330,10 +269,8 @@ def standing_disqualifiers(evidence: set[str] | list[str]) -> set[str]:
 def register_number_is_on_page(digits: str, text: str) -> bool:
     """Do these digits appear in the downloaded text as a number of their own?
 
-    Here for the same reason as `register_digits`, and now three callers depend on agreeing:
-    `pipeline.py` reads the register number off a page that has no findable Impressum,
-    `llm_judge.py` checks a number the model handed back, and this module decides what the
-    resulting evidence is worth. One shared answer to "is it on the page" keeps them consistent.
+    Here for the same reason as `register_digits`: `pipeline.py` reads the register number off a
+    page that has no findable Impressum, and this module decides what that evidence is worth.
 
     Word boundaries matter, and only digit boundaries count: "882" must not be found inside
     "172907" or a phone number, or a company with a short register number would match half the
@@ -342,9 +279,6 @@ def register_number_is_on_page(digits: str, text: str) -> bool:
     if not digits or not text:
         return False
     return re.search(rf"(?<!\d){re.escape(digits)}(?!\d)", text) is not None
-
-#: The model's two ways of saying "this page is not this company's". Both cap; neither disqualifies.
-_NOT_OWN_SITE = frozenset({LLM_UNRELATED, LLM_ABOUT_COMPANY})
 
 #: Evidence that ends the discussion.
 _DISQUALIFIERS = {
@@ -375,8 +309,7 @@ _DISQUALIFIERS = {
 #:
 #:    That last one shows the limit of it: a group's site naming a subsidiary is genuinely arguable,
 #:    and this lift does not settle it. Lifting the refusal only puts the row back in the running —
-#:    it still has to clear 0.35, and because `JSONLD_NAME_MATCH` is one of the judge's identity
-#:    markers the model gets to read the page and object. `pipeline._page_evidence` also refuses to
+#:    it still has to clear 0.35 and identify the company. `pipeline._page_evidence` also refuses to
 #:    emit this evidence for a page whose PATH looks like a directory listing, since a listing's
 #:    structured data names the company it is listing.
 #:
@@ -440,8 +373,6 @@ def base_for(method: str, name_uniqueness: float) -> float:
     """
     if method == METHOD_OSM:
         return BASE_OSM
-    if method == METHOD_LOCAL_LLM:
-        return BASE_LOCAL_LLM
     return BASE_URL_PATTERN_MIN + BASE_URL_PATTERN_RANGE * max(0.0, min(1.0, name_uniqueness))
 
 
@@ -449,6 +380,8 @@ def _verified_by(evidence: set[str], methods: list[str]) -> str:
     """Name the strongest reason to believe this URL."""
     if REGISTER_MATCH in evidence:
         return REGISTER_MATCH
+    if OFFICER_MATCH in evidence:
+        return "officer_match"
     if AGREE_THREE in evidence or AGREE_TWO in evidence:
         return "method_agreement"
     if POSTCODE_MATCH in evidence or NAME_ON_PAGE in evidence:
@@ -457,13 +390,6 @@ def _verified_by(evidence: set[str], methods: list[str]) -> str:
         return "osm_website_tag"
     if IMPRINT_FOUND in evidence:
         return "imprint_found"
-    # Below `page_content_match` and `imprint_found` on purpose: whenever the page itself supplies
-    # a reason, that reason is named instead. A row labelled `llm_judge` means the model's opinion
-    # really was the best thing we had, which is precisely the row a reviewer should look at.
-    if LLM_OWN_SITE in evidence:
-        return "llm_judge"
-    if METHOD_LOCAL_LLM in methods and METHOD_URL_PATTERN not in methods:
-        return "llm_snippet"
     return "url_pattern"
 
 
@@ -475,7 +401,7 @@ def score(
 ) -> Verdict:
     """Turn evidence into a confidence number.
 
-    `methods` — which of url_pattern / osm / local_llm proposed this URL. More than one is
+    `methods` — which of url_pattern / osm proposed this URL. More than one is
     what triggers the agreement bonus, and the caller must add AGREE_TWO / AGREE_THREE to the
     evidence itself; this function does not infer it, so that "agreement" always means what
     the pipeline decided it means.
@@ -484,29 +410,12 @@ def score(
     """
     evidence_set = set(evidence)
     ordered_methods = [
-        m for m in (METHOD_URL_PATTERN, METHOD_OSM, METHOD_LOCAL_LLM) if m in methods
+        m for m in (METHOD_URL_PATTERN, METHOD_OSM) if m in methods
     ]
-
-    # A register number is only proof of ownership when nothing says the page is merely quoting it.
-    # This is the oldest rule in this repo — a register number on a page proves the page is ABOUT a
-    # company, never that it IS that company's site — and until the judge existed, the only way to
-    # spot a quoting page was a hand-maintained list of directory hostnames. A model that has read
-    # the page and calls it a directory is the same claim, arrived at by reading.
-    #
-    # Measured: a hand-written FirmenWissen listing, correctly identified by the model, still scored
-    # 0.805 and landed in the `high` band, because +0.45 for the register match dwarfed the -0.15
-    # penalty. Suppressing the award drops it to `medium` and leaves it promotable on its other
-    # merits, which is the intended balance — the model demotes, it does not delete.
-    register_is_proof = REGISTER_MATCH in evidence_set and LLM_ABOUT_COMPANY not in evidence_set
 
     for name, reason in _DISQUALIFIERS.items():
         if name in evidence_set:
-            lifters = _LIFTED_BY.get(name, frozenset())
-            # A register match only lifts anything while it counts as proof — a number the page
-            # merely quotes answers nothing about whose page it is.
-            if REGISTER_MATCH in lifters and register_is_proof:
-                continue
-            if (lifters - {REGISTER_MATCH}) & evidence_set:
+            if _LIFTED_BY.get(name, frozenset()) & evidence_set:
                 continue
             return Verdict(
                 value=0.0,
@@ -518,14 +427,8 @@ def score(
                 disqualified_because=name,
             )
 
-    # The strongest method wins the base. OSM outranks a name guess; a name guess outranks a
-    # model reading snippets.
-    if METHOD_OSM in ordered_methods:
-        strongest = METHOD_OSM
-    elif METHOD_URL_PATTERN in ordered_methods:
-        strongest = METHOD_URL_PATTERN
-    else:
-        strongest = METHOD_LOCAL_LLM
+    # The strongest method wins the base: OSM outranks a name guess.
+    strongest = METHOD_OSM if METHOD_OSM in ordered_methods else METHOD_URL_PATTERN
 
     value = base_for(strongest, name_uniqueness)
     parts = [f"base {strongest} {value:.2f}"]
@@ -535,16 +438,6 @@ def score(
     if AGREE_THREE in applicable:
         applicable.discard(AGREE_TWO)
 
-    # The evidence LIST still reports the register match, because it really was on the page and
-    # hiding that would make the row impossible to argue with. It just does not earn anything.
-    quoted_note = ""
-    if REGISTER_MATCH in applicable and not register_is_proof:
-        applicable.discard(REGISTER_MATCH)
-        quoted_note = (
-            " (the register number on the page is not counted: a model that read the page says the"
-            " page only quotes it)"
-        )
-
     for name in sorted(applicable):
         weight = WEIGHTS.get(name)
         if not weight:
@@ -553,24 +446,16 @@ def score(
         parts.append(f"{'+' if weight > 0 else '-'} {name} {abs(weight):.2f}")
 
     capped_note = ""
-    if not (evidence_set & _VERIFYING_EVIDENCE) and value > UNVERIFIED_CAP:
+    if not identifies_company(evidence_set) and value > UNVERIFIED_CAP:
         value = UNVERIFIED_CAP
-        capped_note = f" -> capped at {UNVERIFIED_CAP} (nothing was downloaded and checked)"
-    if evidence_set & _NOT_OWN_SITE and value > NOT_OWN_SITE_CAP:
-        value = NOT_OWN_SITE_CAP
-        capped_note = (
-            f" -> capped at {NOT_OWN_SITE_CAP} (a model read the page and said it belongs to"
-            " somebody else)"
-        )
+        capped_note = f" -> capped at {UNVERIFIED_CAP} (nothing on the page identifies the company)"
 
     value = round(max(0.0, min(MAX_CONFIDENCE, value)), 4)
     return Verdict(
         value=value,
         band=band_for(value),
-        # `applicable`, not `evidence_set`: a suppressed register match must not be named as the
-        # thing that proved the row, or the CSV would credit proof the number never received.
         verified_by=_verified_by(applicable, ordered_methods),
         evidence=sorted(evidence_set),
         methods=ordered_methods,
-        why=" ".join(parts) + f" = {value}{capped_note}{quoted_note}",
+        why=" ".join(parts) + f" = {value}{capped_note}",
     )

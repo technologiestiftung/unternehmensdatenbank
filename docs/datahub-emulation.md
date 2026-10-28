@@ -73,13 +73,17 @@ Airflow and Hasura point at prod by default. To point them at staging, set
 ## Hasura
 
 `hasura/metadata/` is applied on every Hasura start (the `cli-migrations-v3` image), so the GraphQL
-API is defined in git. Three objects are exposed, all to the role `user`:
+API is defined in git. Five objects are exposed, all to the role `user`:
 
-- `companies` — `v_company_profile`, read-only, with the relations `comments` and `fundings`
+- `companies` — `v_company_profile`, read-only, with the relations `comments`, `fundings`,
+  `feedback` and `provenance`
 - `comments` — `company_comments`: select all; insert with `company_id` and `body` only. Hasura
   sets `author_id` from the token's `sub`. A client that sends `author_id` gets a validation error.
   There is no update and no delete.
 - `fundings` — `v_company_fundings`, read-only
+- `feedback` — `extraction_feedback`: votes and corrections on any shown field; a user may change
+  only their own
+- `provenance` — `v_field_provenance`, read-only: where each shown value came from
 
 Requests without a token are refused. Tokens come from Keycloak. Every realm role becomes a Hasura
 role, and the default role is `user`.

@@ -131,6 +131,25 @@ def _apply_canonical(
     )
     n_winners = cur.rowcount
 
+    # A company whose published value no longer has any qualifying observation loses it. Without
+    # this, a re-score that drops a website below the bar (or any value whose confidence falls) left
+    # the old value published for good, because this function only ever wrote winners. Only the
+    # pointer goes: the observation stays, un-canonicalised, as every observation does.
+    cur.execute(
+        f"""
+        WITH stale AS (
+          DELETE FROM public.company_canonical_field_sources c
+          WHERE c.field_name = %s
+            AND NOT EXISTS (SELECT 1 FROM {_TMP_TABLE} w WHERE w.company_id = c.company_id)
+          RETURNING c.company_field_observation_id
+        )
+        UPDATE public.company_field_observations o
+        SET is_canonical = false, updated_at = now()
+        WHERE o.id IN (SELECT company_field_observation_id FROM stale) AND o.is_canonical
+        """,
+        (logical_field,),
+    )
+
     if n_winners == 0:
         return 0
 
@@ -237,45 +256,53 @@ def resolve_employee_count(cur: Any) -> int:
 
 
 def resolve_ceo_contact(cur: Any) -> int:
-    """Upsert best ceo_name_or_contact observation into company_managers.
+    """Upsert every ceo_name_or_contact name above the bar into company_managers, with its provenance.
 
-    Idempotent since the unique key on `(company_id, full_name)`, and it was not before. The `ON CONFLICT` below has always been here, but
-    with no target it could only suppress a conflict on a unique constraint that existed — and the
-    only one was the primary key on `id`, defaulted to `gen_random_uuid()`, which never collides. So
-    every run appended a fresh copy of every name: 9,195 rows for 1,047 distinct
-    `(company_id, full_name)` pairs by the time it was fixed, 21 copies at worst.
+    **Every name, not one per company.** A company often has two or three Geschäftsführer; taking only
+    the best name per company kept 37 of the 67 names spaCy read on the Berlin sample. Each distinct
+    `(company, name)` is written once, from the best observation of it: lowest source priority, then
+    highest confidence, then the newest.
 
-    That key is `uq_company_managers_company_name`, and the clause below names it. Naming rather
-    than relying on inference means a migration that drops the constraint breaks this statement
-    loudly instead of quietly restoring the duplication.
+    **Each name keeps where it came from**: `company_field_observation_id` and `source_id` (V3), so
+    the app can say which source read it, when, and from which Impressum. On a repeat run the pointer
+    moves to whichever observation is now best.
 
-    Two things this still does not do, both deliberate for now and both worth knowing:
+    Idempotent through `uq_company_managers_company_name` on `(company_id, full_name)`, which the
+    clause below names. Naming it rather than relying on inference means a migration that drops the
+    constraint breaks this statement loudly. Before that key existed, every run appended a fresh
+    copy of every name (9,195 rows for 1,047 names at worst).
 
-    - No batch and no changed-companies filter. It re-runs over every company with a qualifying
-      observation, which is cheap now that repeats collapse, but means `rowcount` counts inserts
-      only and reads as 0 on a run that changed nothing.
-    - It records no reference to the observation a name came from, so a name read off an Impressum
-      cannot be told from one a model guessed. Read the observations directly for that.
+    Still deliberate: no batch and no changed-companies filter. It re-runs over every qualifying
+    observation, which is cheap now that repeats collapse, so `rowcount` counts inserts and updates.
     """
     cur.execute(
         """
         WITH best AS (
-          SELECT DISTINCT ON (o.company_id)
+          SELECT DISTINCT ON (o.company_id, o.value_text)
             o.company_id,
-            o.value_text AS full_name
+            o.value_text AS full_name,
+            o.id AS observation_id,
+            o.source_id
           FROM public.company_field_observations o
           JOIN public.sources s ON s.id = o.source_id
           WHERE o.field_name = 'ceo_name_or_contact'
             AND o.value_text IS NOT NULL
             AND trim(o.value_text) <> ''
             AND COALESCE(o.confidence, 0) >= %s
-          ORDER BY o.company_id, s.priority ASC, o.confidence DESC NULLS LAST
+          ORDER BY o.company_id, o.value_text, s.priority ASC, o.confidence DESC NULLS LAST, o.observed_at DESC
         )
         INSERT INTO public.company_managers
-          (company_id, full_name, role, is_current, metadata, created_at, updated_at)
-        SELECT b.company_id, b.full_name, 'Geschäftsführer', true, '{}'::jsonb, now(), now()
+          (company_id, full_name, role, is_current, metadata, company_field_observation_id, source_id,
+           created_at, updated_at)
+        SELECT b.company_id, b.full_name, 'Geschäftsführer', true, '{}'::jsonb, b.observation_id,
+               b.source_id, now(), now()
         FROM best b
-        ON CONFLICT ON CONSTRAINT uq_company_managers_company_name DO NOTHING
+        ON CONFLICT ON CONSTRAINT uq_company_managers_company_name DO UPDATE SET
+          company_field_observation_id = EXCLUDED.company_field_observation_id,
+          source_id = EXCLUDED.source_id,
+          updated_at = now()
+        WHERE public.company_managers.company_field_observation_id
+              IS DISTINCT FROM EXCLUDED.company_field_observation_id
         """,
         (_FIELD_MIN_CONF,),
     )

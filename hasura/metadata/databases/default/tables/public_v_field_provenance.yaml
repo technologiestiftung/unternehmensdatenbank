@@ -1,0 +1,22 @@
+table:
+  name: v_field_provenance
+  schema: public
+configuration:
+  custom_name: provenance
+# Read-only: where every shown value came from (V3). No personal data beyond the shown value.
+select_permissions:
+  - role: user
+    permission:
+      columns:
+        - company_id
+        - field_name
+        - value
+        - source_key
+        - source_name
+        - method
+        - confidence
+        - evidence
+        - link
+        - observed_at
+        - selected_at
+      filter: {}

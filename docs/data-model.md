@@ -336,6 +336,58 @@ The most important groups are:
 - Add new schema changes under `db/migrations` as `V{N}__description.sql`.
 - Run Flyway before Airflow workers interact with changed schema.
 
+## Feedback and provenance (V3)
+
+**Every field the app shows can be voted on** (`extraction_feedback`), under the app's column keys:
+name, address, legal form, register status, WZ code, founding date, employees, revenue, each grant
+(by its FKZ), cluster, Technologiefeld, website, each manager name, business purpose, DeepTech,
+isAI, Amazon-Effekt. A vote on an EMPTY field has `value = ''` and must be `wrong` with the missing
+value as its correction. Today only the website, Technologiefeld and manager pipelines learn from
+votes; the rest are stored as labels.
+
+**`v_field_provenance` says where each shown value came from**: source, method (`verified_by`,
+`decided_by`, the model version, or `register`), confidence, evidence, a link (the Impressum it was
+checked against) and dates. Register facts carry the date the register was read (2017–2019 for
+OffeneRegister). It exposes nothing personal beyond the shown value.
+
+**Every manager name keeps its provenance** (`company_managers.company_field_observation_id`,
+`source_id`), and the coordinator now writes every name above the bar, not one per company: on the
+Berlin sample that is 67 names for 37 companies instead of 37.
+
+## Grant links (V4)
+
+Which company a grant belongs to is stored in `company_funding_links`, not computed on every read.
+`v_company_fundings` used to match all companies by name and city on each query (2.2 s), and the
+company list asked it once per company: 71 s for a page of 50. `refresh_company_funding_links()`
+recomputes the links (same rule: normalised name and city match exactly one company); the
+Förderkatalog DAG and the OffeneRegister import call it after they load. A list page now takes
+0.65 s.
+
+## The stored company profile (V5)
+
+`v_company_profile`, which the app and Hasura read, is now a stored copy (`company_profile_mv`) of
+the live definition (`v_company_profile_live`), plus `source_keys`: which sources the company's shown
+values came from (from `v_company_sources`). A selective filter used to make Postgres compute the
+profile of company after company: 5 to 45 seconds to filter by source. Now every list filter takes
+under 10 ms. `refresh_company_profile()` rebuilds it in about 3 seconds and refreshes the planner's
+statistics; the coordinator calls it at the end of every run, the Förderkatalog DAG and the
+OffeneRegister import after they load. Between refreshes the list shows the last resolved state.
+
+## Berlin grants (V6)
+
+`company_fundings` now holds a second source: the Land Berlin's Zuwendungsdatenbank (DAG
+`berlin_zuwendungen`, monthly). Each grant has a `source` (`foerderkatalog` or `berlin_zuwendungen`).
+Berlin grants also keep the recipient's register entry (`recipient_register`, e.g. `HRB 84522`) and
+policy area. Only grants to an HRA/HRB entry are loaded: 22,354 of the 55,454 on 2026-10-28.
+The others went to associations, public bodies and recipients without a register entry.
+
+`refresh_company_funding_links()` links a grant that names a register entry **by that entry only**
+(`match_method = 'register_number'`). A grant without one is linked by name and city, as before. A register
+number that matches none of our companies stays unlinked, whatever the name says. Measured
+2026-10-28: 18,427 Berlin grants linked to 3,861 companies (6.6 bn €), 3,927 unlinked. Companies
+with any grant: 1,691 → 5,179. The unlinked ones are most likely companies registered after the
+OffeneRegister snapshot (2017–2019); not checked.
+
 ## Identifiers and matching (V2)
 
 How a record from any source finds its company. In this order:

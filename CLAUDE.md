@@ -82,7 +82,7 @@ Multi-source canonical resolution, detail in [data-model](docs/data-model.md):
 ## DAGs
 
 [airflow/dags/README.md](airflow/dags/README.md): `pipeline_coordinator`, `manager_ner_extract` /
-`manager_ner_train` (spaCy, retrained from the app's votes), `foerderkatalog` (`@monthly`), and the
+`manager_ner_train` (spaCy, retrained from the app's votes), `foerderkatalog` and `berlin_zuwendungen` (grants, `@monthly`), and the
 library `enrichment/`. `berlin_gewerbedaten` was removed on 2026-10-28: Berlin's open trade data is
 anonymised (no name, no street, no register number), so it cannot be linked to a company. Website discovery and the Technologiefeld have no DAG yet; they are rebuilt on
 the library next (#18).
@@ -102,9 +102,10 @@ Read [website-verification](docs/website-verification.md) before touching `confi
   `own_site.is_own_site_candidate` is the single predicate for that call; a looser one anywhere else
   is the recurring bug.
 - **"A real business site" is not "THAT company's site."** Every German business site has an
-  Impressum, a VAT number and a contact email at its own domain. That evidence may add score but must
-  stay out of `confidence._VERIFYING_EVIDENCE`, or it lifts the 0.34 cap and promotes pages naming
-  nobody — how 190 wrong websites got promoted once.
+  Impressum, a VAT number and a contact email at its own domain. That evidence may add score but
+  never makes a page the company's website: only `confidence.identifies_company` does, and it asks
+  for the own register number, a Geschäftsführer who is a register officer, or name AND postcode
+  together. Letting the Impressum alone count once promoted 190 wrong websites.
 - **Never grow a list of bad domains or words.** Genericness is *measured*:
   `name_frequency.common_words` counts company names, `common_email_domains` counts mapped businesses.
 - **`enrichment/observations.py` is the write path for discovery results.** Its `evidence` set must be
@@ -147,6 +148,13 @@ the app's initContainer from the migration image ([release](docs/release.md)).
   score second, and records `match_method`/`match_confidence` on its source record. Merging never
   deletes (`companies.merged_into`).
 - **Pipeline state** goes into `pipeline_state`, never a file: the hub's pods share no disk.
+- **The company profile is stored (V5).** `v_company_profile` reads `company_profile_mv`; anything
+  that changes companies or their published values must end with `refresh_company_profile()`
+  (the coordinator does). A filter on the live view took up to 45 s.
+- **Grant links (V4)** are a table, refreshed by `refresh_company_funding_links()` after grants or
+  companies load. Never link grants on read again: it made the company list take 71 s.
+- **Feedback and provenance (V3):** users can vote on every shown field, and `v_field_provenance`
+  says where every shown value came from. A new shown field needs its key in both.
 
 **The observation upsert key is a partial unique index (`uq_obs_company_field_source_value`), and
 `insert_text_observation` in `source_enrichment_common.py` repeats its predicate verbatim in its

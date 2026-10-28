@@ -347,6 +347,22 @@ def extract_ceo_names(text: str) -> list[str]:
     return deduped
 
 
+_ACADEMIC_TITLE = re.compile(r"^(dr\.?|prof\.?|dipl\.[-\w.]*)\s+", re.IGNORECASE)
+
+
+def person_key(name: str) -> str:
+    """The comparison key for a person's name: lower case, no academic title, single spaces.
+
+    The one definition of "the same person", used where an Impressum name is compared with a
+    register officer (`pipeline._page_evidence`) and where spaCy's names are deduplicated
+    (`manager_ner.ner.normalize`).
+    """
+    name = re.sub(r"\s+", " ", name.strip(" ,.;:").lower())
+    while _ACADEMIC_TITLE.match(name):
+        name = _ACADEMIC_TITLE.sub("", name)
+    return name
+
+
 def page_text(html: str) -> str:
     """Turn an Impressum page into plain text, keeping one line per HTML element.
 

@@ -172,6 +172,12 @@ def main() -> int:
         """, (source_id,))
         conflicts = cur.fetchone()[0]
 
+        # Cities may have been filled in, which changes which grants find their company.
+        cur.execute("SELECT public.refresh_company_funding_links()")
+        linked_grants = cur.fetchone()[0]
+        # The app reads a stored copy of every profile (V5).
+        cur.execute("SELECT public.refresh_company_profile()")
+
         cur.execute("""
             UPDATE public.companies c
             SET city = r.source_payload #>> '{register,registered_office}'
@@ -183,7 +189,7 @@ def main() -> int:
 
     print(json.dumps({"source_records": len(rows), "identifiers": len(identifiers),
                       "identifier_conflicts": conflicts, "not_in_companies": missing,
-                      "cities_filled_from_seat": cities}, indent=2))
+                      "cities_filled_from_seat": cities, "grants_linked": linked_grants}, indent=2))
     return 0
 
 

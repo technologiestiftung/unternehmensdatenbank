@@ -2,3 +2,5 @@
 - "!include public_company_comments.yaml"
 - "!include public_v_company_fundings.yaml"
 - "!include public_extraction_feedback.yaml"
+- "!include public_v_field_provenance.yaml"
+- "!include public_sources.yaml"

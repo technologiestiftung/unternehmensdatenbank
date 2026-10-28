@@ -1,0 +1,12 @@
+table:
+  name: sources
+  schema: public
+# Read-only, for the app's source filter: which sources exist and what they are called.
+select_permissions:
+  - role: user
+    permission:
+      columns:
+        - key
+        - name
+        - source_type
+      filter: {}
