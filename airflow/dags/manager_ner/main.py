@@ -78,13 +78,16 @@ def load_model(version: str | None) -> Any:
     return spacy.load(MODEL_DIR / version if version else BASE_MODEL)
 
 
-def read_impressum(website: str) -> str:
-    """The company's Impressum as plain text, or "" when none is found."""
+def read_impressum(website: str) -> tuple[str, str | None]:
+    """The company's Impressum as plain text and the URL it was read from; ("", None) when none is found.
+
+    The URL goes on every name as `imprint_url`, so the app can show where a name was read.
+    """
     from enrichment.http_client import fetch_impressum
     from enrichment.imprint_extractor import page_text
 
     found = fetch_impressum(website)
-    return page_text(found[0]) if found else ""
+    return (page_text(found[0]), found[1]) if found else ("", None)
 
 
 # --- extract --------------------------------------------------------------------------------
@@ -126,8 +129,10 @@ def run_extract() -> None:
         seen = names_written = failed = 0
         for company_id, company_name, website in companies:
             seen += 1
+            imprint_url = None
             try:
-                names = extract_names(nlp, window_text(read_impressum(website)))
+                text, imprint_url = read_impressum(website)
+                names = extract_names(nlp, window_text(text))
             except Exception as exc:  # noqa: BLE001  one unreachable site must not stop the batch
                 log.warning("Impressum not readable for %s: %s", company_id, type(exc).__name__)
                 names, failed = [], failed + 1
@@ -142,7 +147,8 @@ def run_extract() -> None:
                     insert_text_observation(
                         cur, company_id=company_id, source_record_id=record_id, source_id=source_id,
                         sync_run_id=sync_run_id, field_name="ceo_name_or_contact", value_text=name,
-                        confidence=CONFIDENCE, metadata={"model_version": version or BASE_MODEL},
+                        confidence=CONFIDENCE,
+                        metadata={"model_version": version or BASE_MODEL, "imprint_url": imprint_url},
                     )
                     names_written += 1
 
@@ -201,7 +207,7 @@ def run_train() -> None:
         if not labels:
             continue
         try:
-            page = read_impressum(website)
+            page, _ = read_impressum(website)
         except Exception as exc:  # noqa: BLE001
             log.warning("Impressum not readable for %s: %s", company_id, type(exc).__name__)
             continue

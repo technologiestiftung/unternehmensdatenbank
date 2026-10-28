@@ -28,6 +28,14 @@ array_relationships:
           schema: public
         column_mapping:
           id: company_id
+  - name: provenance
+    using:
+      manual_configuration:
+        remote_table:
+          name: v_field_provenance
+          schema: public
+        column_mapping:
+          id: company_id
 select_permissions:
   - role: user
     permission:

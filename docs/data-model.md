@@ -336,6 +336,24 @@ The most important groups are:
 - Add new schema changes under `db/migrations` as `V{N}__description.sql`.
 - Run Flyway before Airflow workers interact with changed schema.
 
+## Feedback and provenance (V3)
+
+**Every field the app shows can be voted on** (`extraction_feedback`), under the app's column keys:
+name, address, legal form, register status, WZ code, founding date, employees, revenue, each grant
+(by its FKZ), cluster, Technologiefeld, website, each manager name, business purpose, DeepTech,
+isAI, Amazon-Effekt. A vote on an EMPTY field has `value = ''` and must be `wrong` with the missing
+value as its correction. Today only the website, Technologiefeld and manager pipelines learn from
+votes; the rest are stored as labels.
+
+**`v_field_provenance` says where each shown value came from**: source, method (`verified_by`,
+`decided_by`, the model version, or `register`), confidence, evidence, a link (the Impressum it was
+checked against) and dates. Register facts carry the date the register was read (2017–2019 for
+OffeneRegister). It exposes nothing personal beyond the shown value.
+
+**Every manager name keeps its provenance** (`company_managers.company_field_observation_id`,
+`source_id`), and the coordinator now writes every name above the bar, not one per company: on the
+Berlin sample that is 67 names for 37 companies instead of 37.
+
 ## Identifiers and matching (V2)
 
 How a record from any source finds its company. In this order:

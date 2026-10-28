@@ -147,6 +147,8 @@ the app's initContainer from the migration image ([release](docs/release.md)).
   score second, and records `match_method`/`match_confidence` on its source record. Merging never
   deletes (`companies.merged_into`).
 - **Pipeline state** goes into `pipeline_state`, never a file: the hub's pods share no disk.
+- **Feedback and provenance (V3):** users can vote on every shown field, and `v_field_provenance`
+  says where every shown value came from. A new shown field needs its key in both.
 
 **The observation upsert key is a partial unique index (`uq_obs_company_field_source_value`), and
 `insert_text_observation` in `source_enrichment_common.py` repeats its predicate verbatim in its
