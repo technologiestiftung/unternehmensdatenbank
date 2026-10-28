@@ -1,0 +1,11 @@
+table:
+  name: v_source_fields
+  schema: public
+configuration:
+  custom_name: source_fields
+# Read-only, for the app's sources page: per source and field, values stored and shown. Counts only.
+select_permissions:
+  - role: user
+    permission:
+      columns: "*"
+      filter: {}

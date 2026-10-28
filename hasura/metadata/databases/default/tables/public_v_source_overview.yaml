@@ -1,0 +1,20 @@
+table:
+  name: v_source_overview
+  schema: public
+configuration:
+  custom_name: source_overview
+# Read-only, for the app's sources page: one row per source, counts and its latest run. No values.
+array_relationships:
+  - name: fields
+    using:
+      manual_configuration:
+        remote_table:
+          name: v_source_fields
+          schema: public
+        column_mapping:
+          source_key: source_key
+select_permissions:
+  - role: user
+    permission:
+      columns: "*"
+      filter: {}

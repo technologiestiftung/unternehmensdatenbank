@@ -356,6 +356,26 @@ The most important groups are:
 - Add new schema changes under `db/migrations` as `V{N}__description.sql`.
 - Run Flyway before Airflow workers interact with changed schema.
 
+## Source overview (`V2__source_overview.sql`, after the squash)
+
+What each source has collected, for the app's sources page. **Counts only, never a value**, so a
+field the app may not show yet (`email`, `phone`) can still be counted: "87 stored, 0 shown".
+
+- `v_source_overview`: one row per source with records, companies covered (source records and linked
+  grants), companies it created, and its **latest run read live** from `source_sync_runs`. A run
+  still `running` while a newer one exists is shown as `interrupted` (a restarted worker leaves its
+  row behind); the history itself is not changed.
+- `v_source_fields`: per source and field, values stored, companies, and `companies_shown`, the
+  companies whose shown value came from this source (the coordinator's winner, or a manager name).
+  Grants count as the field `fundings`.
+- The counts are stored (`source_stats_mv`, `source_field_stats_mv`) and refreshed by
+  `refresh_company_profile()`, so they are exactly as fresh as the profile. Measured 2026-10-28: 2.2 s
+  of a 12 s refresh; one grouped pass replaced a count per source that took 5.9 s.
+- Hasura exposes both read-only to the app (`source_overview` with its `fields`, `source_fields`).
+
+Not to be confused with "Identifiers and matching (V2)" below: that heading keeps the number its
+migration had before the squash.
+
 ## Feedback and provenance (V3)
 
 **Every field the app shows can be voted on** (`extraction_feedback`), under the app's column keys:

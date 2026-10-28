@@ -169,6 +169,8 @@ the app's initContainer from the migration image ([release](docs/release.md)).
   (the coordinator does). A filter on the live view took up to 45 s.
 - **Grant links** are a table, refreshed by `refresh_company_funding_links()` after grants or
   companies load. Never link grants on read again: it made the company list take 71 s.
+- **The sources page reads stored counts (`V2__source_overview.sql`)**, refreshed by
+  `refresh_company_profile()` too. Counts only: a value a source may not show yet stays unexposed.
 - **A new profile column means rebuilding `company_profile_mv`.** It froze `p.*` when it was
   created, so `CREATE OR REPLACE` on `v_company_profile_live` alone never reaches the app. The
   activity-keywords migration (`V8__activity_keywords.sql` in git history, before the squash) shows how.
