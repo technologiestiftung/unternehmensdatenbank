@@ -2,11 +2,14 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 
 from urllib.parse import urljoin
 
 import requests
 from bs4 import BeautifulSoup
+
+from enrichment.imprint_extractor import page_text
 
 log = logging.getLogger(__name__)
 
@@ -30,12 +33,23 @@ IMPRESSUM_PATHS = [
     "/",
 ]
 
-_IMPRINT_KEYWORDS = {"handelsregister", "hrb", "hra", "impressum", "umsatzsteuer", "ust-id"}
+# `hra`/`hrb` only as whole words: as substrings they hit `data-heightwidthratio` in image tags,
+# which made a homepage of news posts "the Impressum" of rustlerschriever.com, and spaCy read 16
+# names off it where the real Impressum names 2.
+_REGISTER_RE = re.compile(
+    r"handelsregister|registergericht|umsatzsteuer|ust-id|(?<![a-zäöüß])hr[ab](?![a-zäöüß])", re.I
+)
+_IMPRINT_WORD_RE = re.compile(r"(?<![a-zäöüß])(?:impressum|imprint)(?![a-zäöüß])", re.I)
 
 
-def _has_imprint_content(text: str) -> bool:
-    lower = text.lower()
-    return any(kw in lower for kw in _IMPRINT_KEYWORDS)
+def _has_imprint_content(html: str, *, imprint_url: bool = True) -> bool:
+    """Whether the page's VISIBLE text reads like an Impressum, never its markup.
+
+    The word "Impressum" counts only on a page we reached as the Impressum (a link or a guessed
+    path): on a homepage or a contact page it is the footer link, which every German site has.
+    """
+    text = page_text(html)
+    return bool(_REGISTER_RE.search(text) or (imprint_url and _IMPRINT_WORD_RE.search(text)))
 
 
 def verify_url(url: str) -> dict | None:
@@ -136,16 +150,18 @@ def fetch_impressum(base_url: str, homepage: str | None = None) -> tuple[str, st
             content = fetch_page(impressum_link)
             if content and _has_imprint_content(content):
                 return content, impressum_link
-        if _has_imprint_content(homepage):
-            return homepage, base_url
 
     # Guessed paths hang off the SITE, not off whatever deep page was handed in. `/impressum`
     # appended to `/planen/service/kontakt` is a 404 every time — the same concatenation bug as
-    # in `_find_impressum_link`, one function further down.
+    # in `_find_impressum_link`, one function further down. A real `/impressum` beats the
+    # homepage: a homepage that merely mentions a register is the weaker page.
     for path in IMPRESSUM_PATHS[:-1]:
         url = urljoin(base_url, path)
         content = fetch_page(url)
-        if content and _has_imprint_content(content):
+        if content and _has_imprint_content(content, imprint_url="impr" in path):
             return content, url
+
+    if homepage and _has_imprint_content(homepage, imprint_url=False):
+        return homepage, base_url
 
     return None
