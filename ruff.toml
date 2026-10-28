@@ -10,9 +10,8 @@
 line-length = 120
 target-version = "py312"
 
-# scripts/archive holds eight trial scripts kept for their numbers, not for running; each has a known
-# broken parents[2] path (scripts/archive/README.md). airflow/data and output hold artifacts, not code.
-extend-exclude = ["scripts/archive", "airflow/logs", "airflow/data", "output", ".claude/worktrees"]
+# airflow/data and output hold artifacts, not code.
+extend-exclude = ["airflow/logs", "airflow/data", "output", ".claude/worktrees"]
 # The hooks pass file paths explicitly; without this, an explicit path overrides the exclusion above.
 force-exclude = true
 

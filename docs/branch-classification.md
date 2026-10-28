@@ -358,6 +358,6 @@ here disagrees with one above, this one is current.
   older); only `classify-labels-report` reports precision. Excel on a German locale saves that
   worksheet with semicolons; the reader sniffs the delimiter, so a round trip is safe. Still not one
   row is hand-checked; the model's `llm_reason` per row is the cheap proxy and reads well.
-- **Both columns are written to Postgres** since 2026-09 via `scripts/import_branch_classification.py`
-  and `enrichment/branch_observations.py`, so the "Nothing is written to Postgres" paragraph
-  above describes the state before that.
+- **Both columns are written to Postgres** since 2026-09 via `enrichment/branch_observations.py`
+  (the import script that called it was removed with the old CLI on 2026-10-28), so the "Nothing
+  is written to Postgres" paragraph above describes the state before that.

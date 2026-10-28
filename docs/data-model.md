@@ -309,8 +309,8 @@ looked at.
 January 2019. It is closer to the target than Osnabrück (it is Berlin) but it is still example data:
 6–9 years old, so companies founded since are missing and "active" means active in 2018.
 
-It goes into its **own database**, `unternehmensdatenbank_berlin`, so the Osnabrück database and the
-numbers pinned to it are untouched. Loaded on 2026-10-27:
+It goes into its **own database**, `unternehmensdatenbank_berlin` (at first so the Osnabrück
+database, removed since, stayed untouched). Loaded on 2026-10-27:
 
 | | |
 |---|---|

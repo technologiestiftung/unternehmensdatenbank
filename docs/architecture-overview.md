@@ -338,7 +338,7 @@ flowchart LR
 |---|---|---|
 | Geschäftsführung (names) | named-entity recognition (persons) next to labels like "Geschäftsführer" | built: `manager_ner_extract` and `manager_ner_train` |
 | Kontakt (person, role) | named-entity recognition plus rules for roles | after names work |
-| Technologiefeld (gaps) | text classification, seeded by the keyword results and corrected by app votes | built: `scripts/train_branch_textcat.py`, `classify --textcat` |
+| Technologiefeld (gaps) | text classification, seeded by the keyword results and corrected by app votes | library built (`enrichment/branch_textcat.py`); its trainer and `classify --textcat` were removed with the old CLI, the Technologiefeld DAG replaces them (#18) |
 | Cluster, DeepTech, isAI | text classification on website text and register purpose, same pattern | needs labels first; Cluster may be a lookup from the Technologiefeld |
 | Technologiefeld | lemmatising for the keyword matching (inflected forms) | optional improvement; does not split German compounds |
 | Matching grants to companies | organisation names (ORG) as a fallback to exact name match | idea |
@@ -398,8 +398,9 @@ How votes become training data, per company:
 - Corrections do not change the shown value. Whether they should become a source of their own, at
   which priority, is an open decision.
 
-The Technologiefeld text classifier follows the same loop, run by hand with
-`scripts/train_branch_textcat.py`:
+The Technologiefeld text classifier follows the same loop. It was run by hand with
+`scripts/train_branch_textcat.py`, which was removed with the old CLI on 2026-10-28; the
+Technologiefeld DAG replaces it (#18):
 
 ```mermaid
 flowchart LR

@@ -66,8 +66,8 @@ Nothing gets faster now except by making fewer judge calls or using a faster mod
 
 `results.jsonl` stores each candidate's `methods` and `evidence`, which is everything
 `confidence.score` reads. So **a scoring change can be re-measured in seconds** with no network, no
-model and no database — `scripts/replay_judge_gate.py` does it, and prints whether re-scoring still
-reproduces every stored value so you can tell how far the code has moved from the run being replayed.
+model and no database. `scripts/replay_judge_gate.py` did it, and printed whether re-scoring still
+reproduced every stored value; it was removed with the old CLI on 2026-10-28.
 
 **An extraction change cannot** be replayed from `results.jsonl` — that needs the pages themselves,
 which is what the page cache is for. Scores are frozen at write time and `report`/`csv` read the
@@ -110,7 +110,7 @@ model had been paid 190 times to clean up a scoring bug.** It keeps its +0.08 we
 cap-lift is gone.
 
 The lesson generalises, and it is the first thing to check when a gate looks free: counting only lost
-*discoveries* hides lost *rejections*. `replay_judge_gate.py` fails on either.
+*discoveries* hides lost *rejections*. `replay_judge_gate.py` failed on either.
 
 ## Do not ask the model what a regex can answer
 
