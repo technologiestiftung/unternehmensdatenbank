@@ -28,9 +28,9 @@ IMPRESSUM_PATHS = [
     "/impressum/",
     "/imprint",
     "/imprint.html",
+    "/",
     "/kontakt",
     "/contact",
-    "/",
 ]
 
 # `hra`/`hrb` only as whole words: as substrings they hit `data-heightwidthratio` in image tags,
@@ -154,14 +154,15 @@ def fetch_impressum(base_url: str, homepage: str | None = None) -> tuple[str, st
     # Guessed paths hang off the SITE, not off whatever deep page was handed in. `/impressum`
     # appended to `/planen/service/kontakt` is a 404 every time — the same concatenation bug as
     # in `_find_impressum_link`, one function further down. A real `/impressum` beats the
-    # homepage: a homepage that merely mentions a register is the weaker page.
-    for path in IMPRESSUM_PATHS[:-1]:
-        url = urljoin(base_url, path)
-        content = fetch_page(url)
+    # homepage: a homepage that merely mentions a register is the weaker page. The homepage in
+    # turn beats a contact page, where a VAT number alone would pass.
+    for path in IMPRESSUM_PATHS:
+        if path == "/":
+            content, url = homepage, base_url
+        else:
+            url = urljoin(base_url, path)
+            content = fetch_page(url)
         if content and _has_imprint_content(content, imprint_url="impr" in path):
             return content, url
-
-    if homepage and _has_imprint_content(homepage, imprint_url=False):
-        return homepage, base_url
 
     return None

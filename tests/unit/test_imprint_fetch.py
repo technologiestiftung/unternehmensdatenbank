@@ -43,6 +43,13 @@ def test_a_homepage_with_a_register_is_the_last_resort(monkeypatch: pytest.Monke
     assert fetch_impressum("https://a.de") == (one_pager, "https://a.de")
 
 
+def test_a_homepage_with_a_register_beats_a_contact_page(monkeypatch: pytest.MonkeyPatch) -> None:
+    one_pager = "<p>Amtsgericht Charlottenburg HRB 12345 B</p>"
+    contact = "<p>USt-IdNr.: DE123456789</p>"
+    _site({"https://a.de": one_pager, "https://a.de/kontakt": contact}, monkeypatch)
+    assert fetch_impressum("https://a.de") == (one_pager, "https://a.de")
+
+
 def test_no_impressum_anywhere_is_none(monkeypatch: pytest.MonkeyPatch) -> None:
     _site({"https://a.de": NEWS_HOMEPAGE}, monkeypatch)
     assert fetch_impressum("https://a.de") is None

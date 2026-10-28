@@ -4,10 +4,9 @@ Thin wrapper over `url_discovery.http_client` + `url_discovery.imprint_extractor
 search-provider DAGs. It exists because of one measured shortfall, not because main's
 extraction is wrong — `extract_from_html` and `score_candidate` are reused untouched.
 
-`url_discovery.http_client.fetch_impressum()` short-circuits: it tests
-`_has_imprint_content()` against the **raw HTML**, where the navigation word "Impressum" makes
-almost every homepage pass, and returns the homepage before trying `IMPRESSUM_PATHS`. Measured
-over 8 company sites with known-good Impressum pages:
+`enrichment.http_client.fetch_impressum()` accepts the first page that looks like an Impressum,
+and that page need not carry the register number. When it was written (it then accepted almost
+every homepage, since fixed), measured over 8 company sites with known-good Impressum pages:
 
     register number found  --  fetch_impressum 0/8  --  explicit path probe 3/8
 
