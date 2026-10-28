@@ -40,3 +40,10 @@ update_permissions:
       check:
         author_id:
           _eq: x-hasura-User-Id
+delete_permissions:
+  # Only your own vote: the app's "take back my vote" (click the active ✓ or ✗ again).
+  - role: user
+    permission:
+      filter:
+        author_id:
+          _eq: x-hasura-User-Id
