@@ -11,9 +11,10 @@ if [[ ! -f .env ]]; then
 fi
 
 # Airflow's Fernet key (32 random bytes, URL-safe base64), one per developer and never in git.
-if grep -q '^AIRFLOW__CORE__FERNET_KEY=$' .env; then
+cr=$'\r'
+if grep -q "^AIRFLOW__CORE__FERNET_KEY=${cr}\{0,1\}$" .env; then
   key=$(openssl rand -base64 32 | tr '+/' '-_')
-  sed -i.bak "s|^AIRFLOW__CORE__FERNET_KEY=$|AIRFLOW__CORE__FERNET_KEY=${key}|" .env && rm .env.bak
+  sed -i.bak "s|^AIRFLOW__CORE__FERNET_KEY=\(${cr}\{0,1\}\)$|AIRFLOW__CORE__FERNET_KEY=${key}\1|" .env && rm .env.bak
   echo "Generated a new Airflow Fernet key in .env"
 fi
 
