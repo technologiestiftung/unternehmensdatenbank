@@ -1,4 +1,4 @@
--- Queries that work against the schema as it stands (V24).
+-- Queries that work against the schema as it stands (V1__baseline + V2).
 --
 -- WHY THIS FILE CARRIES NO EXPECTED OUTPUT. Every number in this repo's documentation has gone
 -- stale at least once, and a comment saying "should return 3,529" is a number nobody re-measures.
@@ -239,7 +239,7 @@ SELECT
     WHERE NOT o.is_canonical)                                     AS pointer_to_noncanonical_row;
 
 -- The register status split, because it changes how every other number should be read: over half
--- the table is dissolved. Pinned nowhere -- it comes straight from the import via V13.
+-- the table is dissolved. Pinned nowhere -- it comes straight from the import.
 
 SELECT coalesce(register_status, '(null)') AS register_status, count(*)
 FROM public.companies

@@ -66,7 +66,7 @@ data are listed in section 8, not here.
 ```mermaid
 flowchart TB
   subgraph R1["Repo: technologiestiftung/unternehmensdatenbank"]
-    MIG["db/migrations<br/>Flyway V1 to V24"]
+    MIG["db/migrations<br/>Flyway V1 baseline + V2"]
     DAGS["airflow/dags<br/>pipelines"]
     SCR["scripts<br/>imports and measurements"]
     HMETA["hasura/metadata<br/>API and permissions"]
@@ -100,7 +100,7 @@ flowchart TB
 
 | Piece | Lives in | Runs on |
 |---|---|---|
-| Database schema (migrations V1 to V24) | data repo, `db/migrations/` | hub Postgres, once per environment |
+| Database schema (migrations V1 baseline + V2) | data repo, `db/migrations/` | hub Postgres, once per environment |
 | Pipelines (Airflow DAGs, scripts) | data repo, `airflow/dags/`, `scripts/` | hub Airflow |
 | GraphQL API and permissions | data repo, `hasura/metadata/` | hub Hasura |
 | Login realm (local reference) | data repo, `keycloak/` | hub Keycloak |
