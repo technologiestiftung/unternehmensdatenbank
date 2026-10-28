@@ -351,8 +351,12 @@ checked against) and dates. Register facts carry the date the register was read 
 OffeneRegister). It exposes nothing personal beyond the shown value.
 
 **Every manager name keeps its provenance** (`company_managers.company_field_observation_id`,
-`source_id`), and the coordinator now writes every name above the bar, not one per company: on the
-Berlin sample that is 67 names for 37 companies instead of 37.
+`source_id`), and the coordinator now writes every name above the bar, not one per company. A name
+whose observation is gone is deleted by the coordinator: spaCy deletes what it read off a website
+the company no longer has. Since V7 the management part of `v_field_provenance` carries the
+observation's evidence: `["register_officer"]` when the name is one of the company's register
+officers, `[]` when it is not; which officer matched is never stored. On the local Berlin data on
+2026-10-28 that left 29 names (67 before), 7 of them confirmed by the register.
 
 ## Grant links (V4)
 
