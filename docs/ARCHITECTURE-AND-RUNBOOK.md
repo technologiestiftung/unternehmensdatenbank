@@ -328,7 +328,8 @@ cp .env.example .env          # first time only
 
 `dev-up.sh`'s closing banner prints **port 8080, which is wrong** — see §6.6.
 
-Manual equivalent:
+Manual equivalent. It skips the one thing `dev-up.sh` does to `.env`: when
+`AIRFLOW__CORE__FERNET_KEY` is empty there, run `dev-up.sh` once or fill it in yourself.
 
 ```powershell
 docker compose up -d postgres
