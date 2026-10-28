@@ -82,7 +82,7 @@ Multi-source canonical resolution, detail in [data-model](docs/data-model.md):
 ## DAGs
 
 [airflow/dags/README.md](airflow/dags/README.md): `pipeline_coordinator`, `manager_ner_extract` /
-`manager_ner_train` (spaCy, retrained from the app's votes), `foerderkatalog` (`@monthly`), and the
+`manager_ner_train` (spaCy, retrained from the app's votes), `foerderkatalog` and `berlin_zuwendungen` (grants, `@monthly`), and the
 library `enrichment/`. `berlin_gewerbedaten` was removed on 2026-10-28: Berlin's open trade data is
 anonymised (no name, no street, no register number), so it cannot be linked to a company. Website discovery and the Technologiefeld have no DAG yet; they are rebuilt on
 the library next (#18).

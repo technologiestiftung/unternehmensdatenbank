@@ -20,7 +20,7 @@ values are right — not one row of any classification column has been hand-chec
 | 1 | Name | `name` | yes, required (register name) | — | yes (Northdata import) |
 | 2 | Mitarbeiter | `employee_count` | yes, if published in the Bundesanzeiger; earlier years optional | fill gaps | the coordinator resolves it, but no source writes a number; `berlin_gewerbedaten` writes only a range (`employee_count_range`) |
 | 3 | Umsatz | `revenue` | yes, if the company must publish; earlier years optional | fill gaps | the coordinator resolves it, but no source writes it |
-| 4 | Förderungen | `funding_count`, `funding_total_eur`, and the `fundings` relation | **no** | `foerderkatalog` DAG (Förderkatalog des Bundes). Land Berlin's own grants (daten.berlin.de Recherchetool) are **not** in yet | yes: 19,533 grants, 3,003 recipients, measured 2026-10-27 |
+| 4 | Förderungen | `funding_count`, `funding_total_eur`, and the `fundings` relation | **no** | `foerderkatalog` DAG (Förderkatalog des Bundes, by name and city) and `berlin_zuwendungen` DAG (Land Berlin, by register number, 18,427 grants to 3,861 companies on 2026-10-28) | yes: 19,533 grants, 3,003 recipients, measured 2026-10-27 |
 | 5 | WZ-Nummer | `wz_code` | yes, required — **AI-derived** | cross-check against the register | yes (Northdata import) |
 | 6 | Gründungsdatum | `established_at` | yes, required | — | yes (Northdata import) |
 | 7 | Adresse | `address`, `postcode`, `city` | yes, required | — | yes |

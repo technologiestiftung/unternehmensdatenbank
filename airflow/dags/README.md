@@ -8,6 +8,7 @@ on the library (issue #18); until then the library's only Airflow caller is `man
 | `pipeline_coordinator/` | `pipeline_coordinator` | triggered | — | the ONLY thing that decides which observation wins a field |
 | `manager_ner/` | `manager_ner_extract` | triggered | `ENABLE_MANAGER_NER` | spaCy reads the Impressum of companies with a website and writes Geschäftsführer names (source `spacy_ner`) |
 | | `manager_ner_train` | `@weekly` | `ENABLE_MANAGER_NER` | turns the app's votes into training examples; promotes a model only if it beats the current one on a held-out fifth |
+| `berlin_zuwendungen/` | `berlin_zuwendungen` | `@monthly` | `ENABLE_BERLIN_ZUWENDUNGEN` | the Land Berlin's own grants (Zuwendungsdatenbank) to HRA/HRB recipients into `company_fundings`, linked by register number (V6) |
 | `foerderkatalog/` | `foerderkatalog` | `@monthly` | `ENABLE_FOERDERKATALOG` | every Berlin grant from the Förderkatalog des Bundes into `company_fundings`; linked to companies on read (`v_company_fundings`) |
 | `enrichment/` | — | — | — | the library: URL patterns, OSM matching, Impressum regex, confidence, industry classification. Its `__init__.py` is the map |
 
