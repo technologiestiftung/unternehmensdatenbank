@@ -23,14 +23,14 @@ them would have passed: below `MIN_CORPUS` companies nothing is published.
 What a candidate must look like is a shape, not a word list: 1 to 4 words, 3 to 60 characters, at
 least one letter, no address, not a sentence ("Rufen Sie uns an:", "Was ist ...?"), and never
 anything shaped like a person's name (`imprint_extractor.looks_like_person_name`, with or without
-"Dr." or "Frau" in front). That last rule also drops some real keywords ("Erneuerbare Energien"),
+"Dr." or "Frau" in front, in capitals, or next to a label or role: "Kontakt: Erika Muster",
+"Erika Muster – Inhaberin"). That last rule also drops some real keywords ("Erneuerbare Energien"),
 which is the price of never publishing a name.
 
 Nothing here has been hand-checked; the quality of a published keyword is unmeasured.
 """
 from __future__ import annotations
 
-import os
 import re
 from collections.abc import Iterable
 
@@ -44,14 +44,14 @@ from enrichment.imprint_extractor import looks_like_person_name
 OFFER_CATEGORIES = ("leistungen", "produkte")
 
 #: A term on more than this share of companies is generic. 2%: on 1,000 companies, 20 of them.
-GENERIC_SHARE = float(os.getenv("ACTIVITY_KEYWORDS_GENERIC_SHARE", "0.02"))
+GENERIC_SHARE = 0.02
 #: ... and on more than this many. Without the floor, 30 companies make every pair a "trade".
-GENERIC_MIN_COMPANIES = int(os.getenv("ACTIVITY_KEYWORDS_GENERIC_MIN_COMPANIES", "3"))
+GENERIC_MIN_COMPANIES = 3
 #: Fewer companies read than this, and frequency means nothing; nothing is published. 500 is a
 #: guess, not a measurement: at 2% it takes 11 companies to call a heading generic.
-MIN_CORPUS = int(os.getenv("ACTIVITY_KEYWORDS_MIN_CORPUS", "500"))
+MIN_CORPUS = 500
 #: Keywords per company, in the order the site lists them.
-MAX_KEYWORDS = int(os.getenv("ACTIVITY_KEYWORDS_MAX", "12"))
+MAX_KEYWORDS = 12
 #: Candidates kept per company before genericness is known. Bounds the stored payload.
 MAX_CANDIDATES = 40
 
@@ -60,6 +60,9 @@ _MIN_CHARS, _MAX_CHARS = 3, 60
 _PERSON_PREFIX = re.compile(r"^(?:dr|prof|herr|frau|mr|mrs|ms)\b\.?", re.IGNORECASE)
 #: A question, an exclamation, or a heading that leads into what follows ("Rufen Sie uns an:").
 _SENTENCE = re.compile(r"[?!]|[.:]\s*$")
+#: What sets a label or a role apart from a name in one heading: "Kontakt: Erika Muster",
+#: "Erika Muster – Inhaberin", "Erika Muster (Inhaberin)".
+_PART_SEPARATOR = re.compile(r"[,;:()\[\]|/–—]|\s-\s")
 
 
 def term_key(term: str) -> str:
@@ -78,11 +81,16 @@ def is_candidate(term: str, company_name: str = "") -> bool:
         return False
     if _SENTENCE.search(term):
         return False
-    bare = _PERSON_PREFIX.sub("", term.strip()).strip()
-    if _PERSON_PREFIX.match(key) or looks_like_person_name(bare):
+    if _PERSON_PREFIX.match(key) or any(_is_name(part) for part in _PART_SEPARATOR.split(term)):
         return False
     # The company's own name as a heading is not a keyword for it.
     return not (company_name and key in company_name.lower())
+
+
+def _is_name(part: str) -> bool:
+    """Is this part of a heading a person's name, with or without "Dr." in front or in capitals?"""
+    bare = _PERSON_PREFIX.sub("", part.strip()).strip()
+    return looks_like_person_name(bare.title() if bare.isupper() else bare)
 
 
 def meta_keywords(html: str) -> list[str]:

@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from enrichment import activity_keywords as ak
+from source_enrichment_common import failed_read_payload
 from website_keywords.main import CONFIDENCE, planned_write
 
 HOMEPAGE = '<html><head><meta name="Keywords" content="Kältetechnik, Klimaanlagen; Wartung"></head></html>'
@@ -22,11 +23,13 @@ def test_candidates_come_from_meta_keywords_and_offer_headings() -> None:
 
 def test_names_and_sentences_are_never_keywords() -> None:
     for heading in ("Susanne Beispiel", "Dr. Erika Muster", "Frau Beispiel", "Rufen Sie uns an:",
-                    "Was ist ein Kältemittel?"):
+                    "Was ist ein Kältemittel?", "Erika Muster – Inhaberin", "Erika Muster, Geschäftsführerin",
+                    "Erika Muster (Inhaberin)", "Kontakt: Erika Muster", "ERIKA MUSTER"):
         assert not ak.is_candidate(heading), heading
     # The price of that rule, kept visible: a capitalised two-word phrase reads as a name too.
     assert not ak.is_candidate("Erneuerbare Energien")
     assert ak.is_candidate("Kältetechnik") and ak.is_candidate("erneuerbare Energien")
+    assert ak.is_candidate("KÄLTETECHNIK") and ak.is_candidate("Heizung / Sanitär")
 
 
 def test_no_meta_tag_and_no_headings_give_nothing() -> None:
@@ -58,3 +61,9 @@ def test_publish_inserts_updates_and_drops() -> None:
     assert planned_write(["Wartung"], {"wartung"}, ("Wartung", CONFIDENCE)) == ("drop", [])
     assert planned_write(["Wartung"], {"wartung"}, ("Wartung", 0.0)) is None
     assert planned_write([], set(), None) is None
+
+
+def test_a_failed_read_is_marked_and_counted() -> None:
+    first = failed_read_payload({"candidates": [], "pages": []}, 0)
+    assert first == {"candidates": [], "pages": [], "failed": True, "attempts": 1}
+    assert failed_read_payload(first, first["attempts"])["attempts"] == 2

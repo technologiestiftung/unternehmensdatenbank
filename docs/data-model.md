@@ -409,6 +409,11 @@ Two DAGs read more from a website `website_discovery` has already proven to be t
   observation per company ("Kältetechnik; Wärmepumpen"). V8 adds that column to
   `v_company_profile` and `activity_keywords` as a feedback key. Nothing is published before 500
   companies are read, because below that no heading is common enough to be measured as generic.
+  A company whose published website is no longer the one that was read loses its keywords.
+
+Both read each company once. A read that failed (the homepage did not load; for contacts, no
+Impressum was found) is stored with `failed: true` and an `attempts` count in its source record and
+tried again on later runs, 3 times at most. A failed read counts for nothing, including the 500.
 
 V8 also shows how to add a profile column: `v_company_profile_live` gains it at the end, and
 `company_profile_mv` and `v_company_profile` are dropped and rebuilt, since the stored copy froze its

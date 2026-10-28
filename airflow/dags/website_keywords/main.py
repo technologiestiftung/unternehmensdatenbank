@@ -5,13 +5,15 @@ counts as a keyword lives in `enrichment.activity_keywords`; this file runs it. 
 things, then lets `pipeline_coordinator` publish the result:
 
 1. **read.** One batch of companies with a published website that this source has not read yet:
-   the homepage, and the services, products and solutions pages it links to. Every keyword-shaped
-   term goes into the company's source record (`source_payload.candidates`). Nothing is published
-   here, because whether a term is generic is not known from one company.
+   the homepage, and the services and products pages it links to. Every keyword-shaped term goes
+   into the company's source record (`source_payload.candidates`). Nothing is published here,
+   because whether a term is generic is not known from one company. A site whose homepage did not
+   load is marked `failed` and tried again on a later run, at most `MAX_READ_ATTEMPTS` times.
 2. **publish.** No downloads. Counts every stored company's candidates, drops the terms too common
    to say anything (`activity_keywords.generic_terms`), and writes one `activity_keywords`
    observation per company: the keywords joined by "; ", the list itself in `metadata.keywords`.
-   Re-run every time, so a term that becomes generic as more companies are read leaves the
+   Failed reads count for nothing, and a company whose published website is no longer the one we
+   read gets no keywords. Re-run every time, so a term that becomes generic as more companies are read leaves the
    companies read before it too. A company left with no keywords drops to confidence 0 and the
    coordinator un-publishes it.
 
@@ -31,7 +33,9 @@ from psycopg2.extras import Json
 
 from enrichment import activity_keywords as ak
 from source_enrichment_common import (
+    companies_with_website_to_read,
     ensure_source,
+    failed_read_payload,
     finish_sync_run,
     get_connection,
     insert_text_observation,
@@ -83,25 +87,6 @@ def read_site(website: str, company_name: str) -> dict[str, Any]:
     }
 
 
-def _companies_to_read(cur: Any) -> list[tuple[str, str, str]]:
-    cur.execute(
-        """
-        SELECT e.id, e.company_name, e.website_url
-        FROM public.v_companies_enriched e
-        WHERE e.website_url IS NOT NULL
-          AND NOT EXISTS (
-            SELECT 1 FROM public.company_source_records r
-            JOIN public.sources s ON s.id = r.source_id
-            WHERE r.company_id = e.id AND s.key = %s
-          )
-        ORDER BY e.id
-        LIMIT %s
-        """,
-        (SOURCE_KEY, BATCH_SIZE),
-    )
-    return cur.fetchall()
-
-
 def run_read() -> None:
     _require_enabled()
     connection = get_connection()
@@ -109,18 +94,20 @@ def run_read() -> None:
         with connection, connection.cursor() as cur:
             source_id = _source_id(cur)
             sync_run_id = start_sync_run(cur, source_id=source_id)
-            companies = _companies_to_read(cur)
+            companies = companies_with_website_to_read(cur, source_id=source_id, limit=BATCH_SIZE)
 
         with_terms = failed = 0
-        for company_id, company_name, website in companies:
+        for company_id, company_name, website, attempts in companies:
             try:
                 payload = read_site(website, company_name)
             except Exception as exc:  # noqa: BLE001  one unreachable site must not stop the batch
                 log.warning("Website not readable for %s: %s", company_id, type(exc).__name__)
-                payload, failed = {"candidates": [], "pages": [], "error": type(exc).__name__}, failed + 1
+                payload = {"candidates": [], "pages": [], "error": type(exc).__name__}
+            if not payload.get("homepage_loaded"):
+                payload, failed = failed_read_payload(payload, attempts), failed + 1
             with_terms += bool(payload["candidates"])
             with connection, connection.cursor() as cur:
-                # Written even with no candidates, so the company counts as read.
+                # Written even with no candidates, so the company counts as read (unless `failed`).
                 upsert_source_record(
                     cur, company_id=company_id, source_id=source_id,
                     external_id=f"{SOURCE_KEY}:{company_id}", external_url=website,
@@ -171,9 +158,12 @@ def run_publish() -> None:
                 """
                 SELECT r.company_id::text, r.id, r.external_url,
                        COALESCE(r.source_payload -> 'candidates', '[]'::jsonb),
-                       COALESCE(r.source_payload -> 'pages', '[]'::jsonb)
+                       COALESCE(r.source_payload -> 'pages', '[]'::jsonb),
+                       e.website_url IS NOT DISTINCT FROM r.external_url
                 FROM public.company_source_records r
+                LEFT JOIN public.v_companies_enriched e ON e.id = r.company_id
                 WHERE r.source_id = %s
+                  AND r.source_payload ->> 'failed' IS DISTINCT FROM 'true'
                 """,
                 (source_id,),
             )
@@ -188,7 +178,7 @@ def run_publish() -> None:
             )
             existing = {row[0]: (row[1], row[2], float(row[3])) for row in cur.fetchall()}
 
-            generic = ak.generic_terms(terms for _, _, _, terms, _ in records)
+            generic = ak.generic_terms(terms for _, _, _, terms, _, _ in records)
             if len(records) < ak.MIN_CORPUS:
                 log.info("Only %d companies read; %d needed to measure genericness. Nothing published.",
                          len(records), ak.MIN_CORPUS)
@@ -197,9 +187,9 @@ def run_publish() -> None:
                 return
 
             counts = {"insert": 0, "update": 0, "drop": 0}
-            for company_id, record_id, website, terms, pages in records:
+            for company_id, record_id, website, terms, pages, still_published in records:
                 stored = existing.get(company_id)
-                plan = planned_write(terms, generic, stored[1:] if stored else None)
+                plan = planned_write(terms if still_published else [], generic, stored[1:] if stored else None)
                 if plan is None:
                     continue
                 action, found = plan

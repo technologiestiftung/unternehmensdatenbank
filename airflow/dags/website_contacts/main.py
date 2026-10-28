@@ -24,7 +24,9 @@ are resolved by nothing in `pipeline_coordinator` and reach neither the app nor
 `v_field_provenance`: the observations wait in Postgres until a review clears them.
 
 Each company is read once, like `manager_ner`: `email` and `phone` have no upsert key, so reading
-again would append a second copy. A company whose website changes keeps the contacts read from the
+again would append a second copy. A read that failed (the site did not answer, or no Impressum was
+found) does not count: it is marked `failed` and tried again on a later run, at most
+`MAX_READ_ATTEMPTS` times. A company whose website changes keeps the contacts read from the
 old one until that key exists (a migration plus `insert_text_observation`, same commit).
 """
 from __future__ import annotations
@@ -33,11 +35,12 @@ import logging
 import os
 import re
 from datetime import datetime, timezone
-from typing import Any
 from urllib.parse import urlparse
 
 from source_enrichment_common import (
+    companies_with_website_to_read,
     ensure_source,
+    failed_read_payload,
     finish_sync_run,
     get_connection,
     insert_text_observation,
@@ -127,25 +130,6 @@ def read_impressum(website: str) -> tuple[str, str | None]:
     return (page_text(found[0]), found[1]) if found else ("", None)
 
 
-def _companies_to_read(cur: Any) -> list[tuple[str, str, str]]:
-    cur.execute(
-        """
-        SELECT e.id, e.company_name, e.website_url
-        FROM public.v_companies_enriched e
-        WHERE e.website_url IS NOT NULL
-          AND NOT EXISTS (
-            SELECT 1 FROM public.company_source_records r
-            JOIN public.sources s ON s.id = r.source_id
-            WHERE r.company_id = e.id AND s.key = %s
-          )
-        ORDER BY e.id
-        LIMIT %s
-        """,
-        (SOURCE_KEY, BATCH_SIZE),
-    )
-    return cur.fetchall()
-
-
 def run_read() -> None:
     _require_enabled()
     connection = get_connection()
@@ -156,24 +140,26 @@ def run_read() -> None:
                 metadata={"dag_id": DAG_ID, "rule": RULE},
             )
             sync_run_id = start_sync_run(cur, source_id=source_id)
-            companies = _companies_to_read(cur)
+            companies = companies_with_website_to_read(cur, source_id=source_id, limit=BATCH_SIZE)
 
         written = failed = 0
-        for company_id, company_name, website in companies:
-            imprint_url = None
+        for company_id, company_name, website, attempts in companies:
+            text, imprint_url = "", None
             try:
                 text, imprint_url = read_impressum(website)
                 found = contacts_from_impressum(text, website) if text else {}
             except Exception as exc:  # noqa: BLE001  one unreachable site must not stop the batch
                 log.warning("Impressum not readable for %s: %s", company_id, type(exc).__name__)
-                found, failed = {}, failed + 1
+                text, found = "", {}
+            payload = {"rule": RULE, "imprint_url": imprint_url, "found": sorted(found)}
+            if not text:
+                payload, failed = failed_read_payload(payload, attempts), failed + 1
             with connection, connection.cursor() as cur:
-                # Written even when nothing was found, so the company counts as read.
+                # Written even when nothing was found, so the company counts as read (unless `failed`).
                 record_id, _ = upsert_source_record(
                     cur, company_id=company_id, source_id=source_id,
                     external_id=f"{SOURCE_KEY}:{company_id}", external_url=website,
-                    source_company_name=company_name,
-                    source_payload={"rule": RULE, "imprint_url": imprint_url, "found": sorted(found)},
+                    source_company_name=company_name, source_payload=payload,
                 )
                 for field_name, value in found.items():
                     insert_text_observation(
