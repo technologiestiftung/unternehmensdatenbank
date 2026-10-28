@@ -81,3 +81,11 @@ def test_only_a_full_batch_starts_the_next_run(monkeypatch) -> None:
     assert not main.is_full_batch(499)
     assert not main.is_full_batch(0)
     assert not main.is_full_batch(None)
+
+
+def test_only_a_clean_recheck_retires_websites_it_did_not_find_again() -> None:
+    from enrichment.observations import retires_unconfirmed
+
+    assert retires_unconfirmed({"website": None, "errors": []})
+    assert retires_unconfirmed({"website": None})
+    assert not retires_unconfirmed({"website": None, "errors": ["url_patterns: ConnectionError: ..."]})
