@@ -24,6 +24,7 @@ from __future__ import annotations
 import dataclasses
 import logging
 import os
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timezone
 from typing import Any
 
@@ -47,6 +48,9 @@ BATCH_SIZE = int(os.getenv("WEBSITE_DISCOVERY_BATCH_SIZE", "50"))
 #: OpenStreetMap found 3 websites in 1,000 active Berlin companies and needs a city snapshot on
 #: disk, which a hub pod does not keep. Off unless asked for.
 USE_OSM = os.getenv("WEBSITE_DISCOVERY_OSM", "false").strip().lower() in {"1", "true", "yes"}
+#: Companies checked at once. One company is ~11 s, almost all of it waiting on other servers, so
+#: threads help; each company's domains are different hosts, so no one server sees more traffic.
+WORKERS = int(os.getenv("WEBSITE_DISCOVERY_WORKERS", "8"))
 RULE = "identity-2026-10-28"
 
 
@@ -141,15 +145,19 @@ def run_discover() -> None:
         stages = {"url"} | ({"osm"} if USE_OSM else set())
         skip = {} if USE_OSM else {"osm": "WEBSITE_DISCOVERY_OSM is off"}
         found = errors = 0
-        for company in companies:
-            company = dataclasses.replace(company, officers=officers.get(company.id, frozenset()))
-            result = pipeline.discover(company, use_osm=USE_OSM, common_words=common)
-            found += bool(result.website)
-            errors += bool(result.errors)
-            with connection, connection.cursor() as cur:
-                write_company_result(cur, company=company, result=dataclasses.asdict(result),
-                                     source_id=source_id, sync_run_id=sync_run_id,
-                                     stages_run=stages, skip_reasons=skip)
+        prepared = [dataclasses.replace(c, officers=officers.get(c.id, frozenset())) for c in companies]
+        # Pages are fetched in threads; every write stays on this thread and its one connection.
+        with ThreadPoolExecutor(max_workers=WORKERS) as pool:
+            jobs = {pool.submit(pipeline.discover, c, use_osm=USE_OSM, common_words=common): c
+                    for c in prepared}
+            for job in as_completed(jobs):
+                company, result = jobs[job], job.result()
+                found += bool(result.website)
+                errors += bool(result.errors)
+                with connection, connection.cursor() as cur:
+                    write_company_result(cur, company=company, result=dataclasses.asdict(result),
+                                         source_id=source_id, sync_run_id=sync_run_id,
+                                         stages_run=stages, skip_reasons=skip)
 
         with connection, connection.cursor() as cur:
             finish_sync_run(cur, sync_run_id=sync_run_id, records_seen=len(companies),
