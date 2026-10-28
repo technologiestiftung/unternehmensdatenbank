@@ -177,6 +177,8 @@ def extract_register_numbers(text: str) -> list[str]:
     and then its parent's. Measured over 1,000 companies: of 91 candidates rejected for printing "a
     different company's register number", 2 were printing ours as well — Felix Schoeller's page
     carries `16630` and `5121`, and only the second was being read.
+
+    An entry printed with a space, `HRB 794 28`, yields both `HRB 794` and `HRB 79428` (issue #30).
     """
     found: list[str] = []
     for match in REGISTER_RE.finditer(text):
