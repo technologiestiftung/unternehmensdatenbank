@@ -44,9 +44,8 @@ cp .env.example .env
 Postgres, runs the migrations (staging first, then prod), and starts Airflow. Then open
 http://localhost:8082 (airflow / airflow).
 
-To load the Berlin companies into their own database, `unternehmensdatenbank_berlin`, follow
-"Loading the OffeneRegister Berlin set" in [docs/data-model.md](docs/data-model.md), then set
-`APP_DB_NAME=unternehmensdatenbank_berlin` in `.env` and recreate Airflow and Hasura.
+To load the Berlin companies, follow "Loading the OffeneRegister Berlin set" in
+[docs/data-model.md](docs/data-model.md).
 
 ## Common commands
 
@@ -56,7 +55,6 @@ docker compose build                                    # after Dockerfile or re
 docker compose --profile debug run --rm airflow-cli bash
 docker compose --profile datahub up -d                  # Keycloak, Hasura, S3
 docker compose --profile geo up -d overpass             # optional: local Overpass for Berlin
-docker compose --profile geocoding up -d nominatim      # optional: local Nominatim
 docker compose down                                     # add -v to destroy all data
 ```
 
@@ -66,11 +64,11 @@ docker compose down                                     # add -v to destroy all 
 |---|---|---|
 | Airflow | http://localhost:8082 | airflow / airflow |
 | pgAdmin | http://localhost:5051 | admin@example.com / admin |
-| Postgres | localhost:**5433** | app / app (owner), writer / writer (DAGs), reader / reader (Hasura). Databases: `unternehmensdatenbank`, `unternehmensdatenbank_staging`, `unternehmensdatenbank_berlin` |
+| Postgres | localhost:**5433** | app / app (owner), writer / writer (DAGs), reader / reader (Hasura). Databases: `unternehmensdatenbank` (the Berlin example data), `unternehmensdatenbank_staging` (empty) |
 | Hasura | http://localhost:8090/console | admin secret `local-admin-secret` |
 | Keycloak | http://localhost:8180/admin | admin / admin · app user dev / dev |
 | S3 (RustFS) | http://localhost:9001 | localaccess / localsecret |
-| Overpass / Nominatim (optional) | http://localhost:12345/api/interpreter · http://localhost:8081/reverse | — |
+| Overpass (optional) | http://localhost:12345/api/interpreter | — |
 
 All are local defaults; the hub issues its own.
 

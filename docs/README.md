@@ -18,6 +18,5 @@ rules apply unchanged; the numbers in these files were measured on that data and
 - [guards-and-tests.md](guards-and-tests.md): the free checks, what each defends, and where they run
 - [datahub-emulation.md](datahub-emulation.md): the Berlin Data Hub, locally
 - [release.md](release.md): the migration image and the release button
-- [geospatial.md](geospatial.md): optional local Overpass and Nominatim for Berlin
-- [berlin-gewerbedaten-pipeline.md](berlin-gewerbedaten-pipeline.md): the Berlin Gewerbedaten DAG
+- [geospatial.md](geospatial.md): optional local Overpass for Berlin
 - [architecture-overview.md](architecture-overview.md): the whole setup on one page, for Notion

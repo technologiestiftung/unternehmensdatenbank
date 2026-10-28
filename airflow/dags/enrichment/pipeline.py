@@ -171,13 +171,10 @@ def _page_evidence(
     extracted: dict[str, Any] | None,
     redirected_off_host: bool = False,
     common: set[str] | frozenset[str] = frozenset(),
-) -> tuple[set[str], str | None, str]:
+) -> tuple[set[str], str | None]:
     """Everything the page itself says about whether it belongs to this company.
 
-    Returns (evidence names, the register number seen on the page, the page's readable text).
-
-    The text is returned even for a page that was disqualified on its host name: what to do with a
-    disqualified page is the caller's decision, not this function's.
+    Returns (evidence names, the register number seen on the page).
 
     `own_site_verdict` is the platform's single predicate for "is this the company's own site
     or a page about it". It is used here unchanged and on purpose: every past instance of a
@@ -189,7 +186,7 @@ def _page_evidence(
     verdict = own_site_verdict(url, company.company_name)
     if verdict == "directory_host":
         evidence.add(conf.DIRECTORY_HOST)
-        return evidence, None, page_text
+        return evidence, None
     if verdict != "own_site":
         evidence.add(conf.HOST_NAME_MISMATCH)
         # A company's website does not have to have the company's name in it. That refusal exists
@@ -208,7 +205,7 @@ def _page_evidence(
                     lifted = True
                     break
         if not lifted:
-            return evidence, None, page_text
+            return evidence, None
         # The refusal is lifted, so keep reading. Returning here instead would leave the row scored on
         # its base and the structured data alone, while the register number that settles it sits
         # unread further down the same page — `thebigbash.de` and `gmh-gruppe.de` both print the
@@ -341,7 +338,7 @@ def _page_evidence(
         if company.postcode and company.postcode in structured_data.postcodes(html):
             evidence.add(conf.JSONLD_POSTCODE_MATCH)
 
-    return evidence, seen_register, page_text
+    return evidence, seen_register
 
 
 #: How much of the company's name has to appear on the page before it counts. Not all of it:
@@ -399,10 +396,10 @@ def _imprint_for(
     return html, imprint_url, extracted
 
 
-def _fetch_and_read(url: str) -> tuple[str, dict[str, Any] | None, str | None, str]:
+def _fetch_and_read(url: str) -> tuple[str, dict[str, Any] | None, str | None]:
     """Download a page and its Impressum.
 
-    Returns (page html, extracted fields, imprint url, imprint html).
+    Returns (page html, extracted fields, imprint url).
 
     Used for URLs that a method proposed without downloading them — an OSM `website` tag or a
     mapped business's email domain. Downloading is what lets those be verified rather than
@@ -410,12 +407,12 @@ def _fetch_and_read(url: str) -> tuple[str, dict[str, Any] | None, str | None, s
     """
     probe = url_patterns.probe(url)
     if not probe or probe.status_code == 0 or probe.status_code >= 400 or probe.parked:
-        return "", None, None, ""
+        return "", None, None
     got = _imprint_for(probe.final_url, homepage=probe.html)
     if not got:
-        return probe.html, None, None, ""
-    imprint_html, imprint_url, extracted = got
-    return probe.html, extracted, imprint_url, imprint_html
+        return probe.html, None, None
+    _, imprint_url, extracted = got
+    return probe.html, extracted, imprint_url
 
 
 def _remember_phone(entry: UrlAnswer, extracted: dict[str, Any] | None) -> None:
@@ -484,8 +481,7 @@ def discover(
                 got = _imprint_for(probe.final_url, homepage=probe.html)
                 extracted = got[2] if got else None
                 imprint_url = got[1] if got else None
-                imprint_html = got[0] if got else ""
-                evidence, register_seen, page_text = _page_evidence(
+                evidence, register_seen = _page_evidence(
                     probe.final_url,
                     company,
                     html=probe.html,
@@ -526,8 +522,8 @@ def discover(
                 known = origin in answers
                 if not known:
                     # Not seen by the guesser, so nothing has downloaded it yet.
-                    html, extracted, imprint_url, imprint_html = _fetch_and_read(match.website)
-                    evidence, register_seen, page_text = _page_evidence(
+                    html, extracted, imprint_url = _fetch_and_read(match.website)
+                    evidence, register_seen = _page_evidence(
                         match.website, company, html=html, extracted=extracted, common=common
                     )
                     entry = answer_for(match.website)
@@ -558,8 +554,8 @@ def discover(
                 else:
                     email_site = f"https://{result.osm_email_domain}"
                     if origin_url(email_site) not in answers:
-                        html, extracted, imprint_url, imprint_html = _fetch_and_read(email_site)
-                        evidence, register_seen, page_text = _page_evidence(
+                        html, extracted, imprint_url = _fetch_and_read(email_site)
+                        evidence, register_seen = _page_evidence(
                             email_site, company, html=html, extracted=extracted, common=common
                         )
                         entry = answer_for(email_site)

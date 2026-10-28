@@ -324,6 +324,44 @@ check("the promotion bar is the platform's 0.35", conf.WEBSITE_MIN_CONFIDENCE, 0
 check_true("the unverified cap sits below it", conf.UNVERIFIED_CAP < conf.WEBSITE_MIN_CONFIDENCE)
 
 # ---------------------------------------------------------------------------------------
+# Soft evidence never promotes a page
+# ---------------------------------------------------------------------------------------
+# Every German business site has an Impressum, a VAT number and an email at its own domain, so none
+# of these says WHICH company a page belongs to. If any of them could reach the promotable band
+# without a fact naming the company, a wrong website gets through — which is exactly what happened
+# while IMPRINT_FOUND was still treated as verification (190 wrong websites). With the model check
+# removed, this rule is the only thing that stops it.
+for _soft in (conf.IMPRINT_FOUND, conf.HOST_EXACT, conf.VAT_ID_FOUND, conf.IMPRINT_EMAIL_ON_DOMAIN):
+    check_true(
+        f"{_soft} cannot promote a page on its own",
+        not conf.score(
+            methods=[conf.METHOD_URL_PATTERN], evidence={_soft}, name_uniqueness=1.0
+        ).promotable,
+    )
+check_true(
+    "not even all of them together can",
+    not conf.score(
+        methods=[conf.METHOD_OSM],
+        evidence={
+            conf.IMPRINT_FOUND,
+            conf.HOST_EXACT,
+            conf.VAT_ID_FOUND,
+            conf.IMPRINT_EMAIL_ON_DOMAIN,
+            conf.OSM_STRONG_MATCH,
+        },
+        name_uniqueness=1.0,
+    ).promotable,
+)
+check_true(
+    "one fact naming the company changes that",
+    conf.score(
+        methods=[conf.METHOD_OSM],
+        evidence={conf.IMPRINT_FOUND, conf.HOST_EXACT, conf.OSM_STRONG_MATCH, conf.NAME_ON_PAGE},
+        name_uniqueness=1.0,
+    ).promotable,
+)
+
+# ---------------------------------------------------------------------------------------
 # A domain that names an industry cannot identify one company
 #
 # Every case below was a real row in a 100-company run: a page that downloaded fine, printed
@@ -865,7 +903,7 @@ _OWN_HOST = "https://zweirad-liebig.de"
 
 
 def _evidence(html: str, extracted: dict | None = None) -> set[str]:
-    got, _seen, _text = pl._page_evidence(_OWN_HOST, _PageCompany(), html=html, extracted=extracted)
+    got, _seen = pl._page_evidence(_OWN_HOST, _PageCompany(), html=html, extracted=extracted)
     return got
 
 
@@ -892,14 +930,14 @@ check_true("and is not overturned by the page text", conf.REGISTER_MATCH not in 
 # A register number proves a page is ABOUT a company, never that it IS that company's site. What
 # makes reading it off the page safe is that `_page_evidence` returns early unless the HOST carries
 # the company's name. This is the repo's most repeated bug, so it is checked rather than trusted.
-_directory, _, _ = pl._page_evidence(
+_directory, _ = pl._page_evidence(
     "https://www.northdata.de/Zweirad+Liebig,+Osnabrück/HRB+213220",
     _PageCompany(),
     html="<html>Zweirad Liebig GmbH, Osnabrück, HRB 213220</html>",
     extracted=None,
 )
 check("a directory gets no evidence beyond being a directory", _directory, {conf.DIRECTORY_HOST})
-_other_host, _, _ = pl._page_evidence(
+_other_host, _ = pl._page_evidence(
     "https://irgendwas-anderes.de",
     _PageCompany(),
     html="<html>Zweirad Liebig GmbH, Osnabrück, HRB 213220</html>",
@@ -1001,7 +1039,7 @@ class _RegCompany(_PageCompany):
 
 
 def _reg_evidence(register: str, extracted: dict) -> set[str]:
-    got, _seen, _t = pl._page_evidence(_OWN_HOST, _RegCompany(register), html="<html>x</html>", extracted=extracted)
+    got, _seen = pl._page_evidence(_OWN_HOST, _RegCompany(register), html="<html>x</html>", extracted=extracted)
     return got
 
 
@@ -1068,7 +1106,7 @@ check_true(
 
 _ORG = _LD % '{"@type":"Organization","name":"Zweirad Liebig GmbH","telephone":"+49 541 1"}'
 
-_lifted, _, _ = pl._page_evidence("https://ganz-anderer-name.de", _PageCompany(), html=_ORG, extracted=None)
+_lifted, _ = pl._page_evidence("https://ganz-anderer-name.de", _PageCompany(), html=_ORG, extracted=None)
 check_true("the domain is still recorded as not carrying the name", conf.HOST_NAME_MISMATCH in _lifted)
 check_true("but the structured data is read anyway", conf.JSONLD_NAME_MATCH in _lifted)
 check("and the refusal no longer stands", conf.standing_disqualifiers(_lifted), set())
@@ -1076,13 +1114,13 @@ check("so the row is not disqualified", conf.score(methods=[conf.METHOD_OSM], ev
 
 # A listing page's structured data names the company it is listing. This is the repo's oldest trap
 # wearing a new hat, so the evidence is never emitted there.
-_listing, _, _ = pl._page_evidence(
+_listing, _ = pl._page_evidence(
     "https://irgendein-portal.de/firma/zweirad-liebig", _PageCompany(), html=_ORG, extracted=None
 )
 check_true("a listing page gets no structured-data credit", conf.JSONLD_NAME_MATCH not in _listing)
 check("so its refusal stands", conf.standing_disqualifiers(_listing), {conf.HOST_NAME_MISMATCH})
 # A known directory host returns before any of this and stays refused.
-_dir, _, _ = pl._page_evidence(
+_dir, _ = pl._page_evidence(
     "https://www.northdata.de/Zweirad+Liebig", _PageCompany(), html=_ORG, extracted=None
 )
 check("a directory host is untouched by structured data", _dir, {conf.DIRECTORY_HOST})

@@ -42,7 +42,7 @@ import unicodedata
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
-DEFAULT_OUT = REPO_ROOT / "airflow" / "dags" / "combined_discovery" / "branch_taxonomy.yaml"
+DEFAULT_OUT = REPO_ROOT / "airflow" / "dags" / "enrichment" / "branch_taxonomy.yaml"
 
 #: The sheet's own column headings. Missing ones stop the run rather than writing an empty file: a
 #: taxonomy that silently lost its keywords classifies nothing and looks like a scoring bug.

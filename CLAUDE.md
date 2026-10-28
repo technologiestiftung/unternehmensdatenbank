@@ -25,7 +25,7 @@ A Postgres database of **Berlin** companies, filled from several sources, every 
 Airflow orchestrates, Flyway owns all schema, Python writes with psycopg2. It runs on the Berlin Data
 Hub (CIVITAS/CORE); this repo emulates the hub locally ([datahub-emulation](docs/datahub-emulation.md)).
 
-**The data is example data.** `unternehmensdatenbank_berlin` holds 296,486 companies registered in
+**The data is example data.** `unternehmensdatenbank` holds 296,486 companies registered in
 Berlin from OffeneRegister (a Handelsregister snapshot from 2017–2019; 142,571 active then). The final
 source is Fusionbase (not delivered yet). The Osnabrück example data was removed on 2026-10-28; the
 rules in the docs still apply, the numbers measured on it do not.
@@ -44,11 +44,11 @@ scripts/free_checks.sh                              # every free check, as CI ru
 
 - Airflow UI **http://localhost:8082** (`airflow`/`airflow`). **Not 8080**: another Airflow on the
   developer's machine owns that port, and logging in there gives "invalid login".
-- Postgres `localhost:5433`, user `app`/`app`. Databases: `unternehmensdatenbank` (prod, emulated),
-  `unternehmensdatenbank_staging`, `unternehmensdatenbank_berlin` (the example data). Airflow and
-  Hasura use the one named by `APP_DB_NAME` in `.env`. **Port 5432 on this machine is a different
+- Postgres `localhost:5433`, user `app`/`app`. Databases: `unternehmensdatenbank` (the Berlin example
+  data) and `unternehmensdatenbank_staging` (empty). Airflow and Hasura use the one named by
+  `APP_DB_NAME` in `.env`. **Port 5432 on this machine is a different
   Postgres** — a tool pointed there sees an empty or foreign database.
-- Optional profiles: `geo` (Overpass), `geocoding` (Nominatim), `debug`, `datahub` (Keycloak, Hasura, S3).
+- Optional profiles: `geo` (local Overpass for OSM matching), `debug`, `datahub` (Keycloak, Hasura, S3).
 
 **Three DB roles, as on the hub:** `app` owns the schema (Flyway, host scripts), DAGs run as `writer`
 (rows only, no DDL), Hasura as `reader`. A DAG that needs DDL is wrong, not the grant.
@@ -82,9 +82,9 @@ Multi-source canonical resolution, detail in [data-model](docs/data-model.md):
 ## DAGs
 
 [airflow/dags/README.md](airflow/dags/README.md): `pipeline_coordinator`, `manager_ner_extract` /
-`manager_ner_train` (spaCy, retrained from the app's votes), `foerderkatalog` (`@monthly`),
-`berlin_gewerbedaten_to_json` (**`@daily`** — runs by itself once flagged and unpaused), and the
-library `enrichment/`. Website discovery and the Technologiefeld have no DAG yet; they are rebuilt on
+`manager_ner_train` (spaCy, retrained from the app's votes), `foerderkatalog` (`@monthly`), and the
+library `enrichment/`. `berlin_gewerbedaten` was removed on 2026-10-28: Berlin's open trade data is
+anonymised (no name, no street, no register number), so it cannot be linked to a company. Website discovery and the Technologiefeld have no DAG yet; they are rebuilt on
 the library next (#18).
 
 - DAG packages import their own modules **by package name** (`from enrichment.confidence import …`).

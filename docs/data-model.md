@@ -109,7 +109,7 @@ This is the address book of upstream systems.
 Examples:
 
 - `handelsregister`
-- `berlin_gewerbedaten`
+- `offeneregister`
 - `northdata`
 - `manual_import`
 
@@ -153,7 +153,7 @@ Exactly one current row per `(source_id, external_id)`.
 
 This is the raw company row from one source.
 
-If `berlin_gewerbedaten` has company `12345`, that source row lives here.
+If `offeneregister` has company `F1103R_HRB12345`, that source row lives here.
 
 It keeps:
 
@@ -182,7 +182,7 @@ Examples:
 
 - company X, field `website_url`, value `https://example.com`, source `handelsregister`
 - company X, field `employee_count`, value `18`, source `manual_import`
-- company X, field `address`, value `Berlin, ...`, source `berlin_gewerbedaten`
+- company X, field `address`, value `Berlin, ...`, source `offeneregister`
 
 Each row stores:
 
@@ -309,8 +309,8 @@ looked at.
 January 2019. It is closer to the target than Osnabrück (it is Berlin) but it is still example data:
 6–9 years old, so companies founded since are missing and "active" means active in 2018.
 
-It goes into its **own database**, `unternehmensdatenbank_berlin` (at first so the Osnabrück
-database, removed since, stayed untouched). Loaded on 2026-10-27:
+It is the content of `unternehmensdatenbank` since 2026-10-28 (loaded into a database of its own on
+2026-10-27, which then replaced the Osnabrück one). Loaded:
 
 | | |
 |---|---|
@@ -330,13 +330,11 @@ dropped too, person or company alike: **10,423** of the 116,527 addresses had on
 postcode, only parts with a digit (house number, building, postcode) are kept, so a name split by a
 comma ("Muster, Erika") goes as well. Street, postcode and city stay.
 
+Into an empty, migrated database (`./scripts/dev-up.sh` creates and migrates `unternehmensdatenbank`):
+
 ```bash
 python scripts/prepare_offeneregister_import.py openregister.db berlin.csv
-docker compose exec -T postgres psql -U postgres -c "CREATE DATABASE unternehmensdatenbank_berlin OWNER app"
-docker compose exec -T postgres psql -U postgres -d unternehmensdatenbank_berlin \
-  -c "CREATE EXTENSION IF NOT EXISTS postgis; CREATE EXTENSION IF NOT EXISTS vector;"
-APP_DB_NAME=unternehmensdatenbank_berlin docker compose --profile tools run --rm flyway
-docker compose exec -T postgres psql -U app -d unternehmensdatenbank_berlin -c "\copy public.companies \
+docker compose exec -T postgres psql -U app -d unternehmensdatenbank -c "\copy public.companies \
   (company_name, normalized_name, registration_number, legal_form, business_purpose, wz_code, address, \
   established_at, postcode, city, register_status, metadata) FROM STDIN WITH (FORMAT csv, HEADER true)" < berlin.csv
 ```
@@ -348,12 +346,8 @@ seat, status, the seven document flags, **former names (32,170 companies)**, **r
 none (179,959 rows), so every company has a city. Run it after the CSV load; it is safe to re-run.
 
 ```bash
-PG_DSN="host=localhost port=5433 dbname=unternehmensdatenbank_berlin user=app password=app" \
-  python scripts/import_offeneregister_records.py openregister.db
+python scripts/import_offeneregister_records.py openregister.db
 ```
-
-To point Airflow and Hasura at it, set `APP_DB_NAME=unternehmensdatenbank_berlin` in `.env` and
-recreate those containers.
 
 ## Resolution lifecycle
 

@@ -1,6 +1,6 @@
 # DAGs
 
-Four DAG packages and one library. The website-discovery and Technologiefeld DAGs are being rebuilt
+Three DAG packages and one library. The website-discovery and Technologiefeld DAGs are being rebuilt
 on the library (issue #18); until then the library's only Airflow caller is `manager_ner`.
 
 | package | DAG id | schedule | flag | what it does |
@@ -9,13 +9,12 @@ on the library (issue #18); until then the library's only Airflow caller is `man
 | `manager_ner/` | `manager_ner_extract` | triggered | `ENABLE_MANAGER_NER` | spaCy reads the Impressum of companies with a website and writes Geschäftsführer names (source `spacy_ner`) |
 | | `manager_ner_train` | `@weekly` | `ENABLE_MANAGER_NER` | turns the app's votes into training examples; promotes a model only if it beats the current one on a held-out fifth |
 | `foerderkatalog/` | `foerderkatalog` | `@monthly` | `ENABLE_FOERDERKATALOG` | every Berlin grant from the Förderkatalog des Bundes into `company_fundings`; linked to companies on read (`v_company_fundings`) |
-| `berlin_gewerbedaten/` | `berlin_gewerbedaten_to_json` | **`@daily`** | `ENABLE_BERLIN_GEWERBEDATEN_DAG` | Berlin's open trade-register data via WFS, matched to addresses and OSM |
 | `enrichment/` | — | — | — | the library: URL patterns, OSM matching, Impressum regex, confidence, industry classification. Its `__init__.py` is the map |
 
 Two locks stop a DAG running: its `ENABLE_*` flag must be `true` **and** it must be unpaused in
 Airflow. The flag is checked when the task runs, not when the file is parsed, so a disabled DAG
-still shows in the UI and fails with a clear message. `berlin_gewerbedaten` is the one that then
-runs by itself every day.
+still shows in the UI and fails with a clear message. `foerderkatalog` and `manager_ner_train` then
+run on their schedule by themselves.
 
 Two words you need first:
 

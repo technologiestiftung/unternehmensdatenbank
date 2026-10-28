@@ -45,9 +45,10 @@ The register says whether a company still exists, and for this table it mostly s
 | purpose-column model answers (567) | 335 | 232 | — |
 
 So **56.4% of every URL guess, page download, judge call and tie-break went to a company that no
-longer trades**, and returned 4.0% of the websites. `DISCOVERY_ACTIVE_ONLY=1` skips them; it is off by
-default because it changes which companies a limited run selects (see `SAMPLE_SQL`), so the numbers
-above are the *unfiltered* baseline and a filtered run is only comparable to another filtered run.
+longer trades**, and returned 4.0% of the websites. `DISCOVERY_ACTIVE_ONLY=1` skips them. For Berlin it
+is on (`.env.example` and docker-compose); the code default stays off. It changes which companies a
+limited run selects, so the numbers above are the *unfiltered* baseline and a filtered run is only
+comparable to another filtered run.
 
 Two things worth noticing beyond the runtime. First, the hit rate on `in Liquidation` companies is the
 same as on live ones — all 7 of their websites are `high` — which is what you would expect of a

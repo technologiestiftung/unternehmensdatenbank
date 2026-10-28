@@ -52,32 +52,13 @@ x-airflow-common: &airflow-common
     AIRFLOW__SCHEDULER__ENABLE_HEALTH_CHECK: "true"
     AIRFLOW_CONFIG: /opt/airflow/config/airflow.cfg
     AIRFLOW_DATA_DIR: /opt/airflow/data
-    OUTPUT_FILE: /opt/airflow/data/gewerbedaten.jsonl
-    CHECKPOINT_FILE: /opt/airflow/data/gewerbedaten_checkpoint.json
-    RESET_CHECKPOINT: ${RESET_CHECKPOINT:-false}
-    ADRESSEN_CACHE_FILE: /opt/airflow/data/adressen_cache.json
     # The writer role, like a DAG on the Data Hub: read/write rows, no DDL. Host scripts still
     # default to the owner `app`; see docs/datahub-emulation.md.
     PG_DSN: host=postgres port=5432 dbname=${APP_DB_NAME:-unternehmensdatenbank} user=${APP_DB_WRITER_USER:-writer} password=${APP_DB_WRITER_PASSWORD:-writer}
-    MAX_RECORDS: ${MAX_RECORDS:-0}
-    WFS_PAGE_SIZE: ${WFS_PAGE_SIZE:-2000}
-    WFS_START_INDEX: ${WFS_START_INDEX:-0}
-    SKIP_GEOCODE: ${SKIP_GEOCODE:-false}
-    SKIP_NAME_LOOKUP: ${SKIP_NAME_LOOKUP:-true}
-    ADRESSEN_MAX_DIST_M: ${ADRESSEN_MAX_DIST_M:-60}
-    OVERPASS_URL: ${OVERPASS_URL:-http://overpass/api/interpreter}
-    ALLOW_PUBLIC_OVERPASS_FALLBACK: ${ALLOW_PUBLIC_OVERPASS_FALLBACK:-false}
-    OVERPASS_RADIUS: ${OVERPASS_RADIUS:-80}
-    OVERPASS_DELAY_S: ${OVERPASS_DELAY_S:-1.5}
-    OVERPASS_WORKERS: ${OVERPASS_WORKERS:-6}
-    NAME_MATCH_MIN_SCORE: ${NAME_MATCH_MIN_SCORE:-35}
-    NOMINATIM_URL: ${NOMINATIM_URL:-https://nominatim.openstreetmap.org/reverse}
-    NOMINATIM_DELAY_S: ${NOMINATIM_DELAY_S:-2.0}
-    DB_COMMIT_BATCH_SIZE: ${DB_COMMIT_BATCH_SIZE:-250}
     SOURCE_ENRICHMENT_BATCH_SIZE: ${SOURCE_ENRICHMENT_BATCH_SIZE:-50}
     # Skip companies whose register_status is not 'aktiv' (153,915 of the 296,486 Berlin companies).
     # See source_enrichment_common.ACTIVE_ONLY.
-    DISCOVERY_ACTIVE_ONLY: ${DISCOVERY_ACTIVE_ONLY:-false}
+    DISCOVERY_ACTIVE_ONLY: ${DISCOVERY_ACTIVE_ONLY:-true}
     DISCOVERY_SKIP_RESOLVED_WEBSITE: ${DISCOVERY_SKIP_RESOLVED_WEBSITE:-false}
     ENABLE_FOERDERKATALOG: ${ENABLE_FOERDERKATALOG:-false}
     ENABLE_MANAGER_NER: ${ENABLE_MANAGER_NER:-false}
@@ -190,21 +171,6 @@ services:
       OVERPASS_PLANET_PREPROCESS: "osmium cat /db/planet.osm.bz2 -F pbf -f osm.bz2 -o /tmp/planet_converted.osm.bz2 && mv /tmp/planet_converted.osm.bz2 /db/planet.osm.bz2 && chmod o+x /db"
     volumes:
       - overpass-db:/db
-
-  nominatim:
-    image: mediagis/nominatim:4.4
-    profiles:
-      - geocoding
-    restart: unless-stopped
-    ports:
-      - "${NOMINATIM_PORT:-8081}:8080"
-    environment:
-      PBF_URL: ${OVERPASS_PLANET_URL:-https://download.geofabrik.de/europe/germany/berlin-latest.osm.pbf}
-      REPLICATION_URL: ${OVERPASS_DIFF_URL:-https://download.geofabrik.de/europe/germany/berlin-updates/}
-      NOMINATIM_PASSWORD: ${NOMINATIM_PASSWORD:-nominatim}
-    volumes:
-      - nominatim-db:/var/lib/postgresql/14/main
-    shm_size: "1gb"
 
   airflow-init:
     <<: *airflow-common
@@ -403,4 +369,3 @@ volumes:
   s3-data:
   pgadmin-data:
   overpass-db:
-  nominatim-db:
