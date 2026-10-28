@@ -62,7 +62,7 @@ ORDER BY 2 DESC;
 -- 2. The view an application should query, and the four industry-ish columns side by side.
 --
 -- `public.v_companies_enriched` resolves every enriched field through the canonical table.
--- `website_url` is a VIEW column here -- V9 dropped it from `companies` and it is never coming back.
+-- `website_url` is a VIEW column here -- it is not a column of `companies` and never will be.
 --
 -- THE FOUR COLUMNS BELOW ANSWER FOUR DIFFERENT QUESTIONS AND MUST NEVER BE MERGED OR COALESCED:
 --   cluster          free text an LLM produced, no controlled vocabulary
@@ -71,9 +71,8 @@ ORDER BY 2 DESC;
 --   technologiefeld  ONE of Berlin's 77 taxonomy fields. Requires a website somebody fetched.
 --   purpose_field    ONE of the same 77, from the register purpose, with NO website requirement
 --
--- `technologiefeld` and `purpose_field` were reserved by V20 and read NULL on all 14,443 rows: the
--- write path lands after the Berlin import. Pinned by V20_VIEW_COLUMNS and
--- test_v20_columns_exist_and_are_empty. See docs/branch-classification.md.
+-- `technologiefeld` and `purpose_field` are filled by the classification write path
+-- (`enrichment/branch_observations.py`). See docs/branch-classification.md.
 -- ================================================================================================
 
 SELECT
@@ -107,7 +106,7 @@ FROM public.v_companies_enriched;
 -- ================================================================================================
 -- 3. `company_managers` -- the duplicate check, and the constraint that makes it hold.
 --
--- V19 fixed a bug worth understanding before you trust this table. `resolve_ceo_contact` ended in
+-- A bug fixed before the baseline squash, worth understanding before you trust this table. `resolve_ceo_contact` ended in
 -- `ON CONFLICT DO NOTHING` with no target, which can only suppress a conflict on a constraint that
 -- exists -- and the only one was the primary key on a `gen_random_uuid()` column, which never
 -- collides. So every `pipeline_coordinator` run appended a full copy of every name it could

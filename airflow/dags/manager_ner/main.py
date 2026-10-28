@@ -3,7 +3,7 @@
 manager_ner_extract  The current model reads the Impressum of companies that have a website and
                      have not been read yet, and writes each name as a `ceo_name_or_contact`
                      observation of the source `spacy_ner`. Then the coordinator runs.
-manager_ner_train    Votes and corrections from the app (`extraction_feedback`, V23/V24) become
+manager_ner_train    Votes and corrections from the app (`extraction_feedback`) become
                      training examples. The current model is trained further, scored on a held-out
                      fifth of the companies against itself and the regex extractor, and promoted
                      only if it beats the current model.

@@ -1,6 +1,0 @@
-ALTER TABLE public.companies
-ADD COLUMN IF NOT EXISTS lat DOUBLE PRECISION,
-ADD COLUMN IF NOT EXISTS lon DOUBLE PRECISION;
-
-CREATE INDEX IF NOT EXISTS companies_lat_lon_idx
-  ON public.companies (lat, lon);

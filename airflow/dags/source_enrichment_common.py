@@ -54,16 +54,6 @@ _ACTIVE_ONLY_SQL = "AND c.register_status = 'aktiv'" if ACTIVE_ONLY else ""
 #: is load-bearing: an observation is a CLAIM, and a company can hold half a dozen rejected ones.
 #: Only a canonical row means the resolver actually settled on a website for this company.
 #:
-#: **Two ways a website can already be known, and the flag now covers both.** The second is
-#: `northdata_export.website` — 3,283 URLs the register export shipped. Once
-#: the (since removed) Northdata website import had run and `pipeline_coordinator` has resolved them, the
-#: canonical check above already covers every one of those companies and the export predicate skips
-#: nobody: measured 2026-09-03, the two together leave the same **3,109** active companies as the
-#: canonical check alone. Its whole value is the window before that — a Berlin export sitting in the
-#: table unimported, where a paid provider would bill for URLs already on disk. The export predicate
-#: alone is strictly WORSE than the canonical one (3,271 companies, because 228 canonical websites
-#: came from discovery and are in no export), so it is an addition and never a replacement.
-#:
 #: Leave it OFF while measuring which provider is best on equal terms, and turn it ON for
 #: production runs, where re-finding a known website is pure cost.
 SKIP_RESOLVED_WEBSITE = os.getenv("DISCOVERY_SKIP_RESOLVED_WEBSITE", "").strip().lower() in {
@@ -74,22 +64,12 @@ SKIP_RESOLVED_WEBSITE = os.getenv("DISCOVERY_SKIP_RESOLVED_WEBSITE", "").strip()
 
 #: Interpolated, not bound — see the note on `_ACTIVE_ONLY_SQL`, which applies here word for word.
 #:
-#: **`NOT EXISTS`, and it may never become `NOT IN`.** `northdata_export.company_id` is nullable and
-#: 13 rows are NULL today — export rows that matched no company. `x NOT IN (SELECT col …)` evaluates
-#: to UNKNOWN for every row the moment that subquery yields a single NULL, so the predicate would
-#: return **zero companies**, in all six candidate queries at once, with nothing logged. The
-#: `website IS NOT NULL` filter excludes all 13 today, so `NOT IN` would work here and then break on
-#: the first export matched by a different key. Same silent-total-filter failure that
-#: the old discovery CLI had to raise `SystemExit` over for `DISCOVERY_ACTIVE_ONLY`;
-#: `NOT EXISTS` is simply immune to it.
+#: `NOT EXISTS` rather than `NOT IN`: `x NOT IN (SELECT col ...)` is UNKNOWN for every row as soon as
+#: the subquery yields one NULL, which would silently filter out every company at once.
 _SKIP_RESOLVED_WEBSITE_SQL = (
     """AND NOT EXISTS (
                     SELECT 1 FROM public.company_canonical_field_sources ccfs
                     WHERE ccfs.company_id = c.id AND ccfs.field_name = 'website'
-                  )
-                  AND NOT EXISTS (
-                    SELECT 1 FROM public.northdata_export nde
-                    WHERE nde.company_id = c.id AND nde.website IS NOT NULL
                   )"""
     if SKIP_RESOLVED_WEBSITE
     else ""
@@ -449,18 +429,16 @@ def insert_text_observation(
 
     An append for most fields. Ten of them — the six discovery ones (`website`, `candidate_url`,
     `directory_url`, `discovery_tier`, `search_query`, `osm_id`) and the four classification ones
-    (`technologiefeld`, `purpose_field` and their `_withheld` variants) — have a unique key (V17,
-    widened by V18 and again by V20) so a re-run updates rather than writing a second copy. Without
+    (`technologiefeld`, `purpose_field` and their `_withheld` variants) — have a unique key (a partial
+    unique index, widened twice before the baseline squash) so a re-run updates rather than writing a second copy. Without
     that, a source re-writing what it already wrote had to DELETE first, and
     `company_canonical_field_sources` cascades off these rows — which un-published 558 websites for
     four days on 2026-09-03.
 
-    The predicate below must stay identical to the index predicate in V20. Widen one and you widen
+    The predicate below must stay identical to the index predicate of `uq_obs_company_field_source_value`
+    in the baseline migration. Widen one and you widen
     the other, in the same commit — Postgres infers the partial index from this predicate, so a
     field name present in one and absent from the other cannot be upserted at all.
-
-    The last four names have no writer yet: V20 is schema only and the classification write path
-    lands after the Berlin import. They are listed now so that path cannot arrive without its key.
 
     **Newest write wins**, unconditionally. Not highest-confidence-wins: a re-score has to be able to
     DEMOTE, and this repo has already been bitten by a change that could only ever promote

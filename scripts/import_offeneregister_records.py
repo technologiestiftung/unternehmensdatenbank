@@ -23,8 +23,10 @@ dates) are personal data under the GDPR. They stay in `company_source_records`, 
 not expose, and a privacy review is needed before any of it leaves local development (hub, app,
 export). The data is a 2017–2019 snapshot, so much of it is out of date.
 
-Matches companies by `registration_number`, so run it after the CSV load. Safe to re-run: the
-record is upserted on (source, external_id).
+Matches companies by `registration_number`, so run it after the CSV load. The match is recorded on
+the source record (`match_method = 'identifier'`, confidence 1.0), and the register number and the
+OpenCorporates number become the company's `company_identifiers`. Safe to re-run: the record is
+upserted on (source, external_id), an identifier on (scheme, value).
 
 Usage:
     python scripts/import_offeneregister_records.py openregister.db     # PG_DSN to override the target
@@ -127,27 +129,48 @@ def main() -> int:
         cur.execute("SELECT registration_number, id FROM public.companies WHERE registration_number IS NOT NULL")
         company_ids = dict(cur.fetchall())
 
-        rows, missing = [], 0
+        rows, identifiers, missing = [], [], 0
         for company in lite.execute("SELECT * FROM company WHERE federal_state = ? AND name <> ''", (FEDERAL_STATE,)):
             company_id = company_ids.get(f"Amtsgericht {company['native_company_number']}")
             if company_id is None:
                 missing += 1
                 continue
             number = company["company_number"]
+            identifiers += [(company_id, "register", company["native_company_number"], source_id),
+                            (company_id, "opencorporates", number, source_id)]
             rows.append((company_id, source_id, number, company["name"],
                          Json(payload(company, names.get(number, []), registrations.get(number, []),
                                       officers.get(number, [])))))
 
         execute_values(cur, """
-            INSERT INTO public.company_source_records (company_id, source_id, external_id, source_company_name, source_payload)
+            INSERT INTO public.company_source_records
+              (company_id, source_id, external_id, source_company_name, source_payload,
+               match_method, match_confidence, matched_at)
             VALUES %s
             ON CONFLICT (source_id, external_id) DO UPDATE SET
               company_id = EXCLUDED.company_id,
               source_company_name = EXCLUDED.source_company_name,
               source_payload = EXCLUDED.source_payload,
+              match_method = EXCLUDED.match_method,
+              match_confidence = EXCLUDED.match_confidence,
+              matched_at = EXCLUDED.matched_at,
               last_seen_at = now(),
               last_synced_at = now()
-        """, rows, page_size=2000)
+        """, rows, template="(%s, %s, %s, %s, %s, 'identifier', 1.0, now())", page_size=2000)
+
+        # Matched by register number, so both numbers become identifiers of that company. An
+        # identifier already held by ANOTHER company is a conflict to look at, never overwritten.
+        execute_values(cur, """
+            INSERT INTO public.company_identifiers (company_id, scheme, value, source_id)
+            VALUES %s
+            ON CONFLICT (scheme, value) DO NOTHING
+        """, identifiers, page_size=5000)
+        cur.execute("""
+            SELECT count(*) FROM public.company_identifiers i
+            JOIN public.company_source_records r ON r.external_id = i.value AND r.source_id = %s
+            WHERE i.scheme = 'opencorporates' AND i.company_id <> r.company_id
+        """, (source_id,))
+        conflicts = cur.fetchone()[0]
 
         cur.execute("""
             UPDATE public.companies c
@@ -158,7 +181,8 @@ def main() -> int:
         """, (source_id,))
         cities = cur.rowcount
 
-    print(json.dumps({"source_records": len(rows), "not_in_companies": missing,
+    print(json.dumps({"source_records": len(rows), "identifiers": len(identifiers),
+                      "identifier_conflicts": conflicts, "not_in_companies": missing,
                       "cities_filled_from_seat": cities}, indent=2))
     return 0
 

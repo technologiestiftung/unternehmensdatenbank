@@ -6,7 +6,7 @@ This module only turns its rows into table rows and upserts them by Förderkennz
 
 Fundings are NOT observations and do not go through `pipeline_coordinator`: a company has many
 grants, not one winning value. Linking a grant to a company happens on read, in
-`v_company_fundings` (V22), because the Förderkatalog carries no register number to link by.
+`v_company_fundings`, because the Förderkatalog carries no register number to link by.
 """
 from __future__ import annotations
 

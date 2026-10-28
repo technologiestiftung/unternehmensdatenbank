@@ -33,8 +33,8 @@ and this file files them under `directory_url` as well. Two independent guards, 
 
 ## Two rows every company gets, whatever happened
 
-- `search_query` — an "we looked at this company" marker. `v_discovery_results.processed_by`
-  and `v_discovery_scorecard.companies_tried` are both built by counting these, so a source
+- `search_query` — a "we looked at this company" marker. Counting these is how a report tells
+  "looked and found nothing" from "never looked", so a source
   that does not write one is invisible in the platform's own reporting. `url_discovery` does
   not write one, which is why it is missing from the scorecard despite having found more
   websites than any other source.

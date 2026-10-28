@@ -34,7 +34,7 @@ a running Postgres. They were removed with that data.
 |---|---|
 | `check_branch_classifier.py` | the compound rule and the hyphen knob, keyword weights, the WZ lookup, the services-page choice |
 | `check_purpose_branch.py` | column 3: outcomes stay disjoint, the website gate, WZ code and register status cannot get in, the 40-character floor, `DISCOVERY_ACTIVE_ONLY` is a constant SQL fragment |
-| `check_branch_observations.py` | the classification write path: every field the emitter writes is covered by V20's index predicate *and* `insert_text_observation`'s `ON CONFLICT`; no `resolve_*` names a `_withheld` field |
+| `check_branch_observations.py` | the classification write path: every field the emitter writes is covered by the upsert index predicate *and* `insert_text_observation`'s `ON CONFLICT`; no `resolve_*` names a `_withheld` field |
 | `check_website_discovery.py` | URL guessing, the confidence ladder, what `_page_evidence` takes from a page, JSON-LD, postcodes, register numbers |
 | `check_own_site_filter.py` | real URLs guarding `own_site.is_own_site_candidate` — directories, registers and portals are never a company's own site |
 | `check_imprint_owner_extraction.py` | real Impressum layouts guarding the Geschäftsführer regex |

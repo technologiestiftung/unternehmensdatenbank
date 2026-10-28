@@ -135,15 +135,22 @@ purpose, so for Berlin only the Technologiefeld can be filled today.
    the keywords on companies people have voted on.
 7. **No row of any column is hand-checked yet.** Agreement is not correctness.
 
-## Migrations — currently V1–V24
+## Migrations — V1 baseline, V2 identifiers
 
-`db/migrations/V{N}__description.sql`, forward-only. Flyway is a one-shot service under
-`--profile tools` and does **not** run with `docker compose up`. On the hub it runs as the app's
-initContainer from the migration image ([release](docs/release.md)). **Nothing is deployed yet**, so
-the history is squashed into one baseline together with the schema change in #18.
+`V1__baseline.sql` is the whole schema as of 2026-10-28 (24 earlier migrations squashed while nothing
+was deployed); `V2` adds identifiers, matching and pipeline state ([data-model](docs/data-model.md)).
+From here on forward-only: never edit a migration that has run anywhere shared. Flyway is a one-shot
+service under `--profile tools` and does **not** run with `docker compose up`. On the hub it runs as
+the app's initContainer from the migration image ([release](docs/release.md)).
 
-**V20 widened the observation upsert key, and `insert_text_observation` in
-`source_enrichment_common.py` repeats that predicate verbatim in its `ON CONFLICT (...) WHERE`.
+- **Matching:** a source record finds its company through `company_identifiers` first, a fuzzy
+  score second, and records `match_method`/`match_confidence` on its source record. Merging never
+  deletes (`companies.merged_into`).
+- **Pipeline state** goes into `pipeline_state`, never a file: the hub's pods share no disk.
+
+**The observation upsert key is a partial unique index (`uq_obs_company_field_source_value`), and
+`insert_text_observation` in `source_enrichment_common.py` repeats its predicate verbatim in its
+`ON CONFLICT (...) WHERE`.
 The two must stay identical** — Postgres infers the partial index from the predicate. Widen one,
 widen the other, same commit.
 

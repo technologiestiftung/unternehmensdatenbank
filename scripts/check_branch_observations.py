@@ -10,11 +10,11 @@ a wrong write is a wrong column in `v_companies_enriched` for thousands of compa
 
 Four things, each with the cost that earns it:
 
-1. **A field name the upsert key does not cover.** V20's partial index and
+1. **A field name the upsert key does not cover.** The partial upsert index and
    `insert_text_observation`'s `ON CONFLICT ... WHERE` clause list the same ten names, and Postgres
    infers the partial index FROM that predicate — so a name in one and not the other cannot be
-   upserted at all. It does not error; the second run just appends a duplicate, and V17 and V18 both
-   exist because of that. This compares all three lists.
+   upserted at all. It does not error; the second run just appends a duplicate, and two migrations
+   before the baseline squash existed only to clean that up. This compares all three lists.
 
 2. **A confidence policy value at or below the resolver's bar.** `model_direct` sat at exactly
    `_FIELD_MIN_CONF = 0.50` and promoted only because the filter reads `>=`. Three ordinary edits
@@ -128,14 +128,21 @@ def main() -> int:
     check("the emitter can write exactly the four names",
           sorted(emitted), sorted(CLASSIFICATION_FIELDS))
 
-    migration = REPO / "db" / "migrations" / "V20__add_branch_classifier_fields.sql"
-    sql_text = migration.read_text(encoding="utf-8")
-    index_block = sql_text[sql_text.index("CREATE UNIQUE INDEX uq_obs_company_field_source_value"):]
+    # The newest migration that (re)creates the upsert index holds the predicate in force. Found by
+    # content, not by file name, so a squash or a later widening cannot leave this guard reading a
+    # stale file.
+    index_sql = "UNIQUE INDEX uq_obs_company_field_source_value"
+    defining = [m for m in sorted((REPO / "db" / "migrations").glob("V*__*.sql"),
+                                  key=lambda m: int(m.name[1:].split("__")[0]))
+                if index_sql in m.read_text(encoding="utf-8")]
+    check("a migration creates the observation upsert index", bool(defining), True)
+    sql_text = defining[-1].read_text(encoding="utf-8") if defining else index_sql + " ;"
+    index_block = sql_text[sql_text.index(index_sql):]
     index_block = index_block[: index_block.index(";")]
     index_names = {p.strip() for p in index_block.split("'") if p.strip() and "," not in p.strip()
                    and " " not in p.strip()}
     for field in CLASSIFICATION_FIELDS:
-        check(f"V20's index predicate covers {field}", field in index_names, True)
+        check(f"the upsert index predicate covers {field}", field in index_names, True)
 
     conflict_names = _on_conflict_names()
     for field in CLASSIFICATION_FIELDS:

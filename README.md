@@ -80,9 +80,9 @@ still shows up and fails with a clear message instead of hiding.
 
 ## Migrations
 
-`db/migrations/V{N}__description.sql`, currently V1–V24, forward-only. Flyway runs as a one-shot
-service (`--profile tools`), not with `docker compose up`. Nothing is deployed yet, so the history
-will be squashed into one baseline together with the schema change in issue #18.
+`db/migrations/`: `V1__baseline.sql` is the whole schema as of 2026-10-28 (the earlier history squashed
+before anything was deployed), `V2` adds identifiers, matching and pipeline state. Forward-only from
+here. Flyway runs as a one-shot service (`--profile tools`), not with `docker compose up`.
 
 ## Checks
 
