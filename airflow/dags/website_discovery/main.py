@@ -29,7 +29,7 @@ from typing import Any
 
 from enrichment import confidence as conf
 from enrichment import name_frequency, pipeline
-from enrichment.imprint_extractor import person_key
+from enrichment.officers import load_officers
 from enrichment.observations import SOURCE_KEY, SOURCE_NAME, WEBSITE_SOURCE_KEYS, write_company_result
 from source_enrichment_common import (
     fetch_companies_without_source,
@@ -117,35 +117,6 @@ def run_rescore() -> None:
 # --- discover -------------------------------------------------------------------------------
 
 
-def officer_keys(officers: list[dict[str, Any]] | None) -> frozenset[str]:
-    """The register officers of one company as `person_key` comparison keys (people only)."""
-    keys: set[str] = set()
-    for officer in officers or []:
-        if (officer.get("type") or "person") != "person":
-            continue
-        full = " ".join(x for x in (officer.get("firstname"), officer.get("lastname")) if x)
-        for name in (full, officer.get("name")):
-            if name and name.strip():
-                keys.add(person_key(name))
-    return frozenset(keys)
-
-
-def _load_officers(cur: Any, company_ids: list[str]) -> dict[str, frozenset[str]]:
-    cur.execute(
-        """
-        SELECT r.company_id::text, r.source_payload -> 'officers'
-        FROM public.company_source_records r
-        JOIN public.sources s ON s.id = r.source_id AND s.source_type = 'register'
-        WHERE r.company_id = ANY(%s::uuid[])
-        """,
-        (company_ids,),
-    )
-    found: dict[str, frozenset[str]] = {}
-    for company_id, officers in cur.fetchall():
-        found[company_id] = found.get(company_id, frozenset()) | officer_keys(officers)
-    return found
-
-
 def _common_words(cur: Any) -> set[str]:
     """Name words too common to identify a company, measured over the whole table."""
     cur.execute("SELECT company_name FROM public.companies")
@@ -164,7 +135,7 @@ def run_discover() -> None:
             source_id = ensure_source(cur, key=SOURCE_KEY, name=SOURCE_NAME, source_type="discovery",
                                       metadata={"dag_id": DAG_ID, "rule": RULE})
             sync_run_id = start_sync_run(cur, source_id=source_id)
-            officers = _load_officers(cur, [c.id for c in companies])
+            officers = load_officers(cur, [c.id for c in companies])
             common = _common_words(cur)
 
         stages = {"url"} | ({"osm"} if USE_OSM else set())

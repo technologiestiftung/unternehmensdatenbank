@@ -16,6 +16,15 @@ On the Data Hub that directory needs a persistent volume or S3; Airflow there ha
 Each company is read once, like every other source DAG here: `ceo_name_or_contact` has no upsert
 key, so reading it again would append a second copy. Re-reading everyone with a better model needs
 that key first (a migration plus `insert_text_observation`, same commit).
+
+**A read belongs to the website it was read from.** When discovery demotes or replaces a company's
+website, the names read off the old one are deleted with their source record, and the company is
+read again once it has a website. On 2026-10-28 that was 22 names at 17 companies.
+
+**Names the register confirms carry the evidence `register_officer`.** Officers are compared in
+memory and never written (`enrichment.officers`). A company whose names are all unconfirmed while
+the register lists officers is the case to look at: the homepage of rustlerschriever.com gave 16
+names from news posts, none of them an officer.
 """
 from __future__ import annotations
 
@@ -27,6 +36,9 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from psycopg2.extras import Json
+
+from enrichment.officers import load_officers
 from manager_ner.ner import (
     Labels,
     Score,
@@ -34,6 +46,7 @@ from manager_ner.ner import (
     extract_names,
     is_holdout,
     labels_from_votes,
+    normalize,
     train,
     window_text,
 )
@@ -112,6 +125,42 @@ def _companies_to_read(cur: Any) -> list[tuple[str, str, str]]:
     return cur.fetchall()
 
 
+def _forget_reads_of_old_websites(cur: Any) -> int:
+    """Delete this source's records read from a website the company no longer has; names cascade."""
+    cur.execute(
+        """
+        DELETE FROM public.company_source_records r
+        USING public.sources s, public.v_companies_enriched e
+        WHERE s.id = r.source_id AND s.key = %s AND e.id = r.company_id
+          AND r.external_url IS DISTINCT FROM e.website_url
+        """,
+        (SOURCE_KEY,),
+    )
+    return cur.rowcount
+
+
+def _mark_register_officers(cur: Any) -> int:
+    """Give every name not yet checked its evidence: `["register_officer"]` or `[]`."""
+    cur.execute(
+        """
+        SELECT o.id, o.company_id::text, o.value_text
+        FROM public.company_field_observations o
+        JOIN public.sources s ON s.id = o.source_id AND s.key = %s
+        WHERE o.field_name = 'ceo_name_or_contact' AND NOT o.metadata ? 'evidence'
+        """,
+        (SOURCE_KEY,),
+    )
+    rows = cur.fetchall()
+    officers = load_officers(cur, list({company_id for _, company_id, _ in rows}))
+    for observation_id, company_id, name in rows:
+        evidence = ["register_officer"] if normalize(name) in officers.get(company_id, ()) else []
+        cur.execute(
+            "UPDATE public.company_field_observations SET metadata = metadata || %s WHERE id = %s",
+            (Json({"evidence": evidence}), observation_id),
+        )
+    return len(rows)
+
+
 def run_extract() -> None:
     _require_enabled()
     version = current_version()
@@ -124,6 +173,7 @@ def run_extract() -> None:
                 metadata={"dag_id": "manager_ner_extract"},
             )
             sync_run_id = start_sync_run(cur, source_id=source_id)
+            forgotten = _forget_reads_of_old_websites(cur)
             companies = _companies_to_read(cur)
 
         seen = names_written = failed = 0
@@ -153,10 +203,12 @@ def run_extract() -> None:
                     names_written += 1
 
         with connection, connection.cursor() as cur:
+            marked = _mark_register_officers(cur)
             finish_sync_run(cur, sync_run_id=sync_run_id, records_seen=seen, records_created=names_written,
                             records_updated=0, records_failed=failed)
-        log.info("Read %d companies with model %s: %d names, %d unreadable.",
-                 seen, version or BASE_MODEL, names_written, failed)
+        log.info("Read %d companies with model %s: %d names, %d unreadable. %d reads of old websites "
+                 "forgotten, %d names checked against the register.",
+                 seen, version or BASE_MODEL, names_written, failed, forgotten, marked)
     finally:
         connection.close()
 
