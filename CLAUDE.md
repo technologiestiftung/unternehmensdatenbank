@@ -147,11 +147,12 @@ purpose, so for Berlin only the Technologiefeld can be filled today.
    the keywords on companies people have voted on.
 7. **No row of any column is hand-checked yet.** Agreement is not correctness.
 
-## Migrations — V1 baseline, V2 identifiers
+## Migrations — one baseline, V1
 
-`V1__baseline.sql` is the whole schema as of 2026-10-28 (24 earlier migrations squashed while nothing
-was deployed); `V2` adds identifiers, matching and pipeline state ([data-model](docs/data-model.md)).
-From here on forward-only: never edit a migration that has run anywhere shared. Flyway is a one-shot
+`V1__baseline.sql` is the whole schema as of 2026-10-29: everything before it was squashed twice while
+nothing was deployed, and a database built from it matches one built from the old files exactly
+(schema, grants, seed rows). A local database migrated before the squash needs its Flyway history
+reset once ([data-model](docs/data-model.md), "Migration strategy"). From here on forward-only: never edit a migration that has run anywhere shared. Flyway is a one-shot
 service under `--profile tools` and does **not** run with `docker compose up`. On the hub it runs as
 the app's initContainer from the migration image ([release](docs/release.md)).
 
@@ -159,14 +160,15 @@ the app's initContainer from the migration image ([release](docs/release.md)).
   score second, and records `match_method`/`match_confidence` on its source record. Merging never
   deletes (`companies.merged_into`).
 - **Pipeline state** goes into `pipeline_state`, never a file: the hub's pods share no disk.
-- **The company profile is stored (V5).** `v_company_profile` reads `company_profile_mv`; anything
+- **The company profile is stored.** `v_company_profile` reads `company_profile_mv`; anything
   that changes companies or their published values must end with `refresh_company_profile()`
   (the coordinator does). A filter on the live view took up to 45 s.
-- **Grant links (V4)** are a table, refreshed by `refresh_company_funding_links()` after grants or
+- **Grant links** are a table, refreshed by `refresh_company_funding_links()` after grants or
   companies load. Never link grants on read again: it made the company list take 71 s.
-- **A new profile column means rebuilding `company_profile_mv` (V8).** It froze `p.*` when it was
-  created, so `CREATE OR REPLACE` on `v_company_profile_live` alone never reaches the app. V8 shows how.
-- **Feedback and provenance (V3):** users can vote on every shown field, and `v_field_provenance`
+- **A new profile column means rebuilding `company_profile_mv`.** It froze `p.*` when it was
+  created, so `CREATE OR REPLACE` on `v_company_profile_live` alone never reaches the app. The
+  activity-keywords migration (`V8__activity_keywords.sql` in git history, before the squash) shows how.
+- **Feedback and provenance:** users can vote on every shown field, and `v_field_provenance`
   says where every shown value came from. A new shown field needs its key in both.
 
 **The observation upsert key is a partial unique index (`uq_obs_company_field_source_value`), and

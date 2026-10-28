@@ -91,10 +91,10 @@ def run_foerderkatalog() -> None:
     try:
         with connection, connection.cursor() as cur:
             execute_values(cur, _UPSERT_SQL, rows, page_size=1000)
-            # Grants are linked to companies once here, not on every read (V4).
+            # Grants are linked to companies once here, not on every read (`company_funding_links`).
             cur.execute("SELECT public.refresh_company_funding_links()")
             linked = cur.fetchone()[0]
-            # The grant counts in the app's company list come from the stored profile (V5).
+            # The grant counts in the app's company list come from the stored profile (`company_profile_mv`).
             cur.execute("SELECT public.refresh_company_profile()")
     finally:
         connection.close()

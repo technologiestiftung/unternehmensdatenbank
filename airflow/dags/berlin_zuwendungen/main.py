@@ -5,7 +5,7 @@ file (55,454 rows on 2026-10-28): recipient, giver, kind, year, address, policy 
 amount and `empfaengerid`, the recipient's register entry (`hrb_084522`, `vr_027417`, ...).
 
 Only grants to a commercial-register entry (HRA/HRB) are loaded: those are the companies this
-database holds, and they are linked by register number, exactly (V6). The rest are associations,
+database holds, and they are linked by register number, exactly (`refresh_company_funding_links`). The rest are associations,
 public bodies and recipients without a register entry, which we cannot link and do not need.
 
 Like the Förderkatalog, grants are NOT observations: a company has many grants, not one winning
