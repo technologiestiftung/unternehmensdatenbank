@@ -82,7 +82,7 @@ API is defined in git. Five objects are exposed, all to the role `user`:
   There is no update and no delete.
 - `fundings` — `v_company_fundings`, read-only
 - `feedback` — `extraction_feedback`: votes and corrections on any shown field; a user may change
-  only their own
+  or delete only their own
 - `provenance` — `v_field_provenance`, read-only: where each shown value came from
 
 Requests without a token are refused. Tokens come from Keycloak. Every realm role becomes a Hasura
