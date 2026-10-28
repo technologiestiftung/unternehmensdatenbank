@@ -364,7 +364,9 @@ field the app may not show yet (`email`, `phone`) can still be counted: "87 stor
 - `v_source_overview`: one row per source with records, companies covered (source records and linked
   grants), companies it created, and its **latest run read live** from `source_sync_runs`. Its
   status is the newest run's stored status, so a run killed by a restart can show `running` until
-  the next run starts.
+  the next run starts. `runs_interrupted` counts the runs left `running` although a newer run has
+  started since (a restarted worker leaves its row behind; 11 for `website_discovery` on 2026-10-28).
+  The history itself is not changed.
 - `v_source_fields`: per source and field, values stored, companies, and `companies_shown`, the
   companies whose shown value came from this source (the coordinator's winner, or a manager name).
   Grants count as the field `fundings`.

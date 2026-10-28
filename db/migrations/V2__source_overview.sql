@@ -76,7 +76,9 @@ WITH DATA;
 CREATE UNIQUE INDEX source_field_stats_mv_key ON public.source_field_stats_mv (source_key, field_name);
 
 -- 3. What the app reads. last_run_status is the newest run's stored status, so a run killed by a
---    restart can show `running` until the next run starts.
+--    restart can show `running` until the next run starts. runs_interrupted counts the runs still
+--    `running` although a newer run has started since: a worker or container restart leaves its row
+--    behind (11 for website_discovery on 2026-10-28). The history itself is not changed.
 CREATE VIEW public.v_source_overview AS
 SELECT
     s.key AS source_key,
@@ -94,6 +96,10 @@ SELECT
     run.records_updated AS last_run_updated,
     run.records_failed AS last_run_failed,
     (SELECT count(*) FROM public.source_sync_runs r WHERE r.source_id = s.id) AS runs,
+    (SELECT count(*) FROM public.source_sync_runs r
+      WHERE r.source_id = s.id AND r.status = 'running'
+        AND EXISTS (SELECT 1 FROM public.source_sync_runs n
+                    WHERE n.source_id = r.source_id AND n.started_at > r.started_at)) AS runs_interrupted,
     st.computed_at AS counts_as_of
 FROM public.sources s
 LEFT JOIN public.source_stats_mv st ON st.source_key = s.key
