@@ -225,29 +225,7 @@ Three things to get right when it is built:
 
 ## Commands
 
-```powershell
-python scripts/check_purpose_branch.py                          # free, first. 154 checks
-python scripts/run_combined_discovery.py classify-purpose       # 13 s, no network, no model
-python scripts/run_combined_discovery.py classify-purpose-report
-
-$env:OLLAMA_MODEL = "qwen3.5:4b"
-# Tier A, the 3-way tie-break: 17 calls, about 3 minutes
-python scripts/run_combined_discovery.py classify-purpose --llm
-
-# Tier B, the 77-way ask, bounded. ~10 s a call, so 200 calls is about 35 minutes.
-# Re-run to continue: cached answers are free and do not count against the budget.
-python scripts/run_combined_discovery.py classify-purpose --llm --tier tiebreak,semantic --llm-limit 200
-```
-
-`--tier` takes `tiebreak` (the default), `semantic`, or both comma-separated. `--llm` alone does
-nothing without a tier, and an unknown tier name is refused rather than ignored.
-
-`--limit N` writes the first N companies by id. Keyword weights are **always** measured over the whole
-table, so a limit changes what is written, not what is counted — which is what makes `--limit 50` a
-true prefix of the full run rather than a different sample.
-
-Output: `airflow/data/combined_discovery/purpose_branches.jsonl`, one row per company, plus seven
-`purpose_*` columns in the handover CSV.
+The commands were removed with the old CLI; the Technologiefeld DAG replaces them (issue #18).
 
 ---
 

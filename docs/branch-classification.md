@@ -297,18 +297,9 @@ or an activity everybody does? Settle the hyphen question first, because it move
 
 ## Running it
 
-Step-by-step, with what each command prints:
-the old runbook (removed 2026-10-28). The short version:
+The commands were removed with the old CLI; the Technologiefeld DAG replaces them (issue #18).
 
-```powershell
-python scripts/check_branch_classifier.py                               # free, must pass first
-python scripts/run_combined_discovery.py fetch-content                  # once: 1,567 pages
-python scripts/run_combined_discovery.py classify --source page,purpose  # 2 min, no network
-python scripts/run_combined_discovery.py classify-report
-python scripts/run_combined_discovery.py csv
-```
-
-`--source wz` is **refused**: the Technologiefeld is filled only from text the company published. The
+A WZ code is **never** a source: the Technologiefeld is filled only from text the company published. The
 WZ cluster is attached to every row regardless, whether or not any text was read.
 
 ## What is not known yet

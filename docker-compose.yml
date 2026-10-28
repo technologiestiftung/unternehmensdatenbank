@@ -314,6 +314,9 @@ services:
       - -connectRetries=60
       - migrate
 
+  # --- Data Hub emulation: the platform services the hub runs for us ---------------------------
+  # Profile `datahub`. Versions follow what the hub runs where known; see docs/datahub-emulation.md.
+
   keycloak:
     image: quay.io/keycloak/keycloak:26.8.1
     profiles:

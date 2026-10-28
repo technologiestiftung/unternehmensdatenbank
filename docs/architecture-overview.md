@@ -504,7 +504,7 @@ flowchart LR
 | Gate | What it does | Where |
 |---|---|---|
 | Claude Code hooks | lint after each edit; checks before each commit; asks before new files, commits and pushes; short commit messages | both repos, `.claude/` |
-| Guards and tests | five rule guards, unit tests, and tests that pin the numbers of one reference copy of the example data | data repo |
+| Guards and tests | seven rule guards and unit tests, no database (`scripts/free_checks.sh`) | data repo |
 | CI | lint, typecheck, tests, build on every pull request | app repo |
 | no-mistakes (optional) | review, tests, docs, lint, push, pull request, CI in one run | both repos, only where it is installed |
 
