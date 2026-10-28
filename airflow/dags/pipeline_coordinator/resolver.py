@@ -15,6 +15,10 @@ Logical field names → observation field_name aliases:
   employee_count ← employee_count, number_of_employees
   technologiefeld← technologiefeld        (Berlin's 77 fields, website-gated)
   purpose_field  ← purpose_field          (the same 77, from the register purpose)
+  activity_keywords ← activity_keywords   (product/service words from the website)
+
+`email` and `phone` (the `website_contacts` DAG) are resolved by nothing until a privacy review
+clears them: a resolved value reaches the app and `v_field_provenance`.
 
 Two field names are resolved by NOTHING and must stay that way: `technologiefeld_withheld` and
 `purpose_field_withheld`, which hold the fields the website rule and the length floor refused to
@@ -350,6 +354,17 @@ def resolve_purpose_field(cur: Any) -> int:
         cur,
         logical_field="purpose_field",
         obs_field_names=["purpose_field"],
+        value_col="value_text",
+        min_confidence=_FIELD_MIN_CONF,
+    )
+
+
+def resolve_activity_keywords(cur: Any) -> int:
+    """Product and service keywords the company's own website states (`website_keywords`)."""
+    return _apply_canonical(
+        cur,
+        logical_field="activity_keywords",
+        obs_field_names=["activity_keywords"],
         value_col="value_text",
         min_confidence=_FIELD_MIN_CONF,
     )

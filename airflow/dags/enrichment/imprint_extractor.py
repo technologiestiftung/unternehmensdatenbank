@@ -241,15 +241,30 @@ def extract_phone(text: str) -> str | None:
     return raw if len(raw) >= 6 else None
 
 
+def extract_emails(text: str) -> list[str]:
+    """Every email address on the page, lowercased, in order, placeholders left out.
+
+    All of them, because the first is often not the company's: an Impressum names the web agency,
+    the data-protection officer or a personal mailbox before or after `info@`.
+    """
+    found: list[str] = []
+    for match in EMAIL_RE.finditer(text):
+        addr = match.group(0).lower()
+        # skip generic/placeholder addresses
+        if any(skip in addr for skip in ("example.", "mustermann", "placeholder", "noreply", "no-reply")):
+            continue
+        if addr not in found:
+            found.append(addr)
+    return found
+
+
 def extract_email(text: str) -> str | None:
+    """The first email address, or None. `extract_emails` is the better question."""
     m = EMAIL_RE.search(text)
     if not m:
         return None
-    addr = m.group(0).lower()
-    # skip generic/placeholder addresses
-    if any(skip in addr for skip in ("example.", "mustermann", "placeholder", "noreply", "no-reply")):
-        return None
-    return addr
+    found = extract_emails(m.group(0))
+    return found[0] if found else None
 
 
 def _leading_name(part: str) -> str | None:
@@ -299,6 +314,16 @@ def _leading_name(part: str) -> str | None:
         return None
     name = " ".join(taken).strip(" ,;.")
     return name if 5 <= len(name) <= 60 else None
+
+
+def looks_like_person_name(text: str) -> bool:
+    """Is this whole text, and nothing more, shaped like a person's name ("Erika Muster")?
+
+    Errs towards yes: "Erneuerbare Energien" is capitalised the same way and also answers yes.
+    Callers that must never publish a name (`activity_keywords`) want exactly that.
+    """
+    name = _leading_name(text.strip())
+    return name is not None and len(name.split()) == len(text.split())
 
 
 def ceo_label_windows(text: str) -> list[list[str]]:

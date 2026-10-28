@@ -218,7 +218,8 @@ flowchart TD
 flowchart LR
   FB["Fusionbase API<br/>base record"]
   subgraph DAGS["Our Airflow DAGs"]
-    DISC["Website discovery<br/>enrichment library, DAG being rebuilt"]
+    DISC["website_discovery"]
+    WEB["website_contacts<br/>website_keywords"]
     BC["branch_classifier"]
     NER["manager_ner<br/>spaCy"]
     FKD["foerderkatalog"]
@@ -240,6 +241,8 @@ flowchart LR
   FB --> F18["Timestamp"]
   DISC -->|"checks and fills gaps"| F11
   NER -->|"fills gaps"| F12
+  WEB -->|"email, phone: stored, not shown"| F12
+  WEB -->|"keywords"| F13
   BC --> F10["Technologiefeld"]
   FKD --> F4["Förderungen"]
   CLS --> F9["Cluster (5)"]
@@ -257,7 +260,7 @@ flowchart LR
 | 1 | Name | `name` | register name | none | from the example data |
 | 2 | Mitarbeiter | `employee_count` | if published in the Bundesanzeiger, with history | fill gaps later | empty |
 | 3 | Umsatz | `revenue` | if the company must publish, with history | fill gaps later | empty |
-| 4 | Förderungen | `funding_count`, `funding_total_eur` | not delivered | `foerderkatalog` DAG; Land Berlin grants to add | 19,533 federal grants for 3,003 recipients |
+| 4 | Förderungen | `funding_count`, `funding_total_eur` | not delivered | `foerderkatalog` and `berlin_zuwendungen` DAGs | 19,533 federal grants for 3,003 recipients |
 | 5 | WZ-Nummer | `wz_code` | produced by Fusionbase's AI | check against the register purpose | from the example data |
 | 6 | Gründungsdatum | `established_at` | yes | none | from the example data |
 | 7 | Adresse | `address` | yes | none | from the example data |
@@ -265,8 +268,8 @@ flowchart LR
 | 9 | Cluster (n=5) | `cluster` | not delivered | classifier to build | empty in the target; the example values are free text from the search experiments (section 8) |
 | 10 | Technologiefeld | `technologiefeld` | not delivered | `branch_classifier` keywords; a text classifier fills rows without a keyword (opt-in) | 403 of 14,443 |
 | 11 | Website | `website` | yes | discovery DAGs verify it and fill gaps | 3,529 |
-| 12 | Geschäftsführung / Kontakt | `management` | contact optional | `manager_ner` (spaCy) on the Impressum, trained on app votes | names from register and Impressum |
-| 13 | Tätigkeitsbeschreibung | `business_purpose` | written by Fusionbase's AI, plus keywords | register purpose as a check | register purpose |
+| 12 | Geschäftsführung / Kontakt | `management` | contact optional | `manager_ner` (spaCy) on the Impressum, trained on app votes; `website_contacts` for email and phone | names from register and Impressum; email and phone stored, not shown, until a privacy review |
+| 13 | Tätigkeitsbeschreibung | `business_purpose`, `activity_keywords` | written by Fusionbase's AI, plus keywords | register purpose as a check; `website_keywords` for keywords the website states | register purpose; keywords once 500 companies are read |
 | 14 | Kommentar | `comments` | not delivered | app users | live |
 | 15 | DeepTech Klassifikation | `deeptech_class` | not delivered | classifier to build | empty |
 | 16 | Konfidenz der Klassifikation | `deeptech_confidence` | not delivered | from the same classifier | empty |
@@ -285,10 +288,13 @@ output from the vendor and are checked like our own.
 |---|---|---|---|---|---|
 | Fusionbase import | Fusionbase API | DAG, quarterly, to build | high, proposed | contract | none yet |
 | OffeneRegister import | Handelsregister snapshot 2017–2019 | scripts, once | register facts | free | 296,486 Berlin companies, full record per company |
-| Website discovery: URL patterns, OSM, Impressum and register check | company websites | DAG to rebuild on `enrichment/` (#18) | 100 | free | 552 websites on example data; 106 of 1,000 active Berlin companies |
+| Website discovery: URL patterns, OSM, Impressum and register check | company websites | DAG `website_discovery` | 100 | free | 552 websites on example data; 106 of 1,000 active Berlin companies |
 | `branch_classifier`: 77 technology fields | company websites, register purpose | DAG to rebuild on `enrichment/` (#18) | 100 | free | 27 of 106 Berlin companies with a website |
 | `manager_ner`: names from the Impressum | Impressum pages, app votes | DAGs | 100 | free | measured on 222 Impressum pages (section 9) |
+| `website_contacts`: email and phone | Impressum of the proven website | DAG | 100 | free | 27 emails, 25 phones from 37 websites; not shown |
+| `website_keywords`: products and services | services/products pages of the proven website | DAG | 100 | free | 22 of 37 websites gave candidates; published from 500 companies |
 | `foerderkatalog` | Förderkatalog des Bundes | DAG, monthly | | free | grants table |
+| `berlin_zuwendungen` | Zuwendungsdatenbank des Landes Berlin | DAG, monthly | | free | 18,427 grants to 3,861 companies |
 | `pipeline_coordinator` | all of the above | DAG | | free | picks the winning values |
 
 Every DAG is off by default. It needs its `ENABLE_*` flag and must be unpaused in Airflow.

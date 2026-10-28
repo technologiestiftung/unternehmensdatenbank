@@ -392,6 +392,28 @@ number that matches none of our companies stays unlinked, whatever the name says
 with any grant: 1,691 → 5,179. The unlinked ones are most likely companies registered after the
 OffeneRegister snapshot (2017–2019); not checked.
 
+## Website contacts and keywords (V8)
+
+Two DAGs read more from a website `website_discovery` has already proven to be the company's.
+
+- **`website_contacts`** (source `impressum_contacts`) writes `email` and `phone` observations from
+  the Impressum. An email counts only at the website's own domain and only when its mailbox is not
+  shaped like a person (`max.mustermann@`, or a manager named on the same page). On the first 37
+  Berlin websites (2026-10-28): 27 emails, all role mailboxes (`info@` 16, `kontakt@` 4, ...), and
+  25 phones. **Nothing resolves them**, so they reach neither `v_company_profile` nor
+  `v_field_provenance`: a sole trader's phone is personal data, and the privacy review does not
+  cover it yet.
+- **`website_keywords`** (source `website_keywords`) stores keyword-shaped headings of the services
+  and products pages, and the homepage's meta keywords, in its source record; a second task
+  measures which terms are generic across all companies read and writes one `activity_keywords`
+  observation per company ("Kältetechnik; Wärmepumpen"). V8 adds that column to
+  `v_company_profile` and `activity_keywords` as a feedback key. Nothing is published before 500
+  companies are read, because below that no heading is common enough to be measured as generic.
+
+V8 also shows how to add a profile column: `v_company_profile_live` gains it at the end, and
+`company_profile_mv` and `v_company_profile` are dropped and rebuilt, since the stored copy froze its
+columns when it was created.
+
 ## Identifiers and matching (V2)
 
 How a record from any source finds its company. In this order:
