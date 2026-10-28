@@ -164,6 +164,24 @@ Two consequences, each of which was a bug first:
   it saw a name mismatch, so `thebigbash.de` and `gmh-gruppe.de` scored ~0.55 on a guess while the
   company's own HRB number sat unread further down the same page. Both now score 0.99.
 
+### A brand before the legal form, and a number with a space in it
+
+"3pc GmbH Neue Kommunikation" is a brand, `3pc`, then a description, and its website is 3pc.de
+(issue #30). Three things stopped us finding it: `3pc` is shorter than the 4 letters a guessed stem
+needs, the host check only counts name words of 4+ letters, and its Impressum prints `HRB 794 28`,
+which was read as `HRB 794`: a different company's number, a disqualifier.
+
+- `url_patterns.brand_stem` takes the words before a legal form that has more name after it. It is
+  guessed first, and a host that *equals* it (never one that merely contains it) carries the name.
+  19,119 of 142,571 active companies have such a brand. In a sample of 200, discovery proved 14
+  websites, 6 of them through the brand.
+- `extract_register_numbers` also reads `HRB 794 28` as `HRB 79428`, next to the plain reading. Only
+  a tail of 1–3 digits is joined, so a postcode after the entry never is, and the joined number counts
+  only if it is exactly the company's own.
+
+Both changes only add: no published website was lost (234 re-checked on 2026-10-28; 4 fail the page
+check with and without the change).
+
 ## A model's stated reason is not evidence
 
 `cf-selbsthilfe-osnabrueck.de` was accepted in one run because the judge reported *"the Impressum
