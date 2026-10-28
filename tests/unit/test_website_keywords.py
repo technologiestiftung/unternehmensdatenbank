@@ -24,12 +24,13 @@ def test_candidates_come_from_meta_keywords_and_offer_headings() -> None:
 def test_names_and_sentences_are_never_keywords() -> None:
     for heading in ("Susanne Beispiel", "Dr. Erika Muster", "Frau Beispiel", "Rufen Sie uns an:",
                     "Was ist ein Kältemittel?", "Erika Muster – Inhaberin", "Erika Muster, Geschäftsführerin",
-                    "Erika Muster (Inhaberin)", "Kontakt: Erika Muster", "ERIKA MUSTER"):
+                    "Erika Muster (Inhaberin)", "Kontakt: Erika Muster", "ERIKA MUSTER", "Erika Muster Inhaberin",
+                    "Inhaberin Erika Muster", "Ansprechpartnerin Erika Muster", "Erika Muster-Inhaberin"):
         assert not ak.is_candidate(heading), heading
     # The price of that rule, kept visible: a capitalised two-word phrase reads as a name too.
-    assert not ak.is_candidate("Erneuerbare Energien")
+    assert not ak.is_candidate("Erneuerbare Energien") and not ak.is_candidate("Heizung / Sanitär")
     assert ak.is_candidate("Kältetechnik") and ak.is_candidate("erneuerbare Energien")
-    assert ak.is_candidate("KÄLTETECHNIK") and ak.is_candidate("Heizung / Sanitär")
+    assert ak.is_candidate("KÄLTETECHNIK") and ak.is_candidate("Heizung und Sanitär")
 
 
 def test_no_meta_tag_and_no_headings_give_nothing() -> None:

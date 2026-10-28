@@ -23,9 +23,10 @@ them would have passed: below `MIN_CORPUS` companies nothing is published.
 What a candidate must look like is a shape, not a word list: 1 to 4 words, 3 to 60 characters, at
 least one letter, no address, not a sentence ("Rufen Sie uns an:", "Was ist ...?"), and never
 anything shaped like a person's name (`imprint_extractor.looks_like_person_name`, with or without
-"Dr." or "Frau" in front, in capitals, or next to a label or role: "Kontakt: Erika Muster",
-"Erika Muster – Inhaberin"). That last rule also drops some real keywords ("Erneuerbare Energien"),
-which is the price of never publishing a name.
+"Dr." or "Frau" in front, in capitals, or anywhere inside the heading: "Kontakt: Erika Muster",
+"Erika Muster-Inhaberin"). Any 2 to 4 capitalised words in a row count, so that rule also drops
+real keywords ("Erneuerbare Energien", "Heizung / Sanitär"), which is the price of never
+publishing a name.
 
 Nothing here has been hand-checked; the quality of a published keyword is unmeasured.
 """
@@ -60,9 +61,8 @@ _MIN_CHARS, _MAX_CHARS = 3, 60
 _PERSON_PREFIX = re.compile(r"^(?:dr|prof|herr|frau|mr|mrs|ms)\b\.?", re.IGNORECASE)
 #: A question, an exclamation, or a heading that leads into what follows ("Rufen Sie uns an:").
 _SENTENCE = re.compile(r"[?!]|[.:]\s*$")
-#: What sets a label or a role apart from a name in one heading: "Kontakt: Erika Muster",
-#: "Erika Muster – Inhaberin", "Erika Muster (Inhaberin)".
-_PART_SEPARATOR = re.compile(r"[,;:()\[\]|/–—]|\s-\s")
+#: What splits a heading into words for the name check: "Kontakt: Erika Muster-Inhaberin".
+_TOKEN_SEPARATOR = re.compile(r"[\s,;:()\[\]|/–—-]+")
 
 
 def term_key(term: str) -> str:
@@ -81,16 +81,19 @@ def is_candidate(term: str, company_name: str = "") -> bool:
         return False
     if _SENTENCE.search(term):
         return False
-    if _PERSON_PREFIX.match(key) or any(_is_name(part) for part in _PART_SEPARATOR.split(term)):
+    if _PERSON_PREFIX.match(key) or _contains_name(term):
         return False
     # The company's own name as a heading is not a keyword for it.
     return not (company_name and key in company_name.lower())
 
 
-def _is_name(part: str) -> bool:
-    """Is this part of a heading a person's name, with or without "Dr." in front or in capitals?"""
-    bare = _PERSON_PREFIX.sub("", part.strip()).strip()
-    return looks_like_person_name(bare.title() if bare.isupper() else bare)
+def _contains_name(term: str) -> bool:
+    """Does any run of 2 to 4 words in this heading read as a person's name, capitals title-cased?"""
+    words = [w.title() if w.isupper() else w for w in _TOKEN_SEPARATOR.split(term) if w]
+    return any(
+        looks_like_person_name(" ".join(words[i:i + n]))
+        for n in range(2, 5) for i in range(len(words) - n + 1)
+    )
 
 
 def meta_keywords(html: str) -> list[str]:
