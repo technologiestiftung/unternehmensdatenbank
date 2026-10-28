@@ -80,8 +80,8 @@ def load_model(version: str | None) -> Any:
 
 def read_impressum(website: str) -> str:
     """The company's Impressum as plain text, or "" when none is found."""
-    from url_discovery.http_client import fetch_impressum
-    from url_discovery.imprint_extractor import page_text
+    from enrichment.http_client import fetch_impressum
+    from enrichment.imprint_extractor import page_text
 
     found = fetch_impressum(website)
     return page_text(found[0]) if found else ""
@@ -183,7 +183,7 @@ def _score(nlp: Any, held_out: list[tuple[str, Labels]]) -> Score:
 def run_train() -> None:
     _require_enabled()
     from spacy.training import Example
-    from url_discovery.imprint_extractor import extract_ceo_names
+    from enrichment.imprint_extractor import extract_ceo_names
 
     connection = get_connection()
     try:

@@ -25,7 +25,36 @@ import sqlite3
 import sys
 from pathlib import Path
 
-from prepare_company_import import OUTPUT_COLUMNS, normalize_company_name
+# The columns of `public.companies` the CSV fills, in `\copy` order (docs/data-model.md).
+OUTPUT_COLUMNS = [
+    "company_name",
+    "normalized_name",
+    "registration_number",
+    "legal_form",
+    "business_purpose",
+    "wz_code",
+    "address",
+    "established_at",
+    "postcode",
+    "city",
+    # aktiv / erloschen. Its own column because discovery filters on `= 'aktiv'`, which excludes
+    # NULL: a load that forgets to map it leaves an active-only run with nothing to do.
+    "register_status",
+    "metadata_json",
+]
+
+LEGAL_SUFFIX_RE = re.compile(
+    r"\b(gmbh(?:\s*&\s*co\.\s*kg)?|ug|haftungsbeschränkt|ag|eg|kg|ohg|gbr|se|kgaa|mbh|e\.v\.)\b",
+    re.IGNORECASE,
+)
+
+
+def normalize_company_name(value: str) -> str:
+    """The matching key for a name: lower case, no legal form, no punctuation, single spaces."""
+    value = value.lower().replace("&", " und ")
+    value = re.sub(r"[^0-9a-zäöüß]+", " ", value, flags=re.IGNORECASE)
+    value = LEGAL_SUFFIX_RE.sub(" ", value)
+    return re.sub(r"\s+", " ", value).strip()
 
 FEDERAL_STATE = "Berlin"
 

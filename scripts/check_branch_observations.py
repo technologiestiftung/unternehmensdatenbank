@@ -58,8 +58,8 @@ else:  # pragma: no cover - the repo layout would have to be broken
 
 REPO = Path(__file__).resolve().parent.parent
 
-from combined_discovery import branch_observations as bo  # noqa: E402
-from combined_discovery import purpose_branch as pb  # noqa: E402
+from enrichment import branch_observations as bo  # noqa: E402
+from enrichment import purpose_branch as pb  # noqa: E402
 from pipeline_coordinator.resolver import _FIELD_MIN_CONF  # noqa: E402
 
 FAILURES: list[str] = []

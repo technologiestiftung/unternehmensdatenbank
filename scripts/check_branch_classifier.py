@@ -19,10 +19,9 @@ where one branch clearly won *fell*, 338 to 316. More matches, worse answers.
 
 Where a rule lives in the code, this file **imports and calls it** rather than restating it. A check
 that rebuilds the rule it is checking agrees with itself no matter what the real code does — which is
-exactly what the model-answer section here used to do, and why `scripts/replay_judge_gate.py` imports
-the website judge's gate instead of copying it.
+exactly what a model-answer section here once did.
 
-Run it after touching `branch_classifier.py`, `content_pages.py`, `branch_llm.py` or the taxonomy:
+Run it after touching `branch_classifier.py`, `content_pages.py` or the taxonomy:
 
     python scripts/check_branch_classifier.py
 
@@ -30,10 +29,8 @@ Exit code is non-zero on any mismatch, so it works as a pre-commit gate.
 """
 from __future__ import annotations
 
-import csv
 import inspect
 import sys
-import tempfile
 from pathlib import Path
 
 for candidate in (
@@ -44,26 +41,10 @@ for candidate in (
         sys.path.insert(0, str(candidate))
         break
 
-from combined_discovery import branch_classifier as bc  # noqa: E402
-from combined_discovery import branch_llm, content_pages, wz_cluster  # noqa: E402
+from enrichment import branch_classifier as bc  # noqa: E402
+from enrichment import content_pages, wz_cluster  # noqa: E402
 
 FAILURES: list[str] = []
-
-
-def _load_runner():
-    """`scripts/run_combined_discovery.py` as a module, without running its CLI.
-
-    It is a script rather than a package, so it cannot simply be imported by name. Only pure
-    functions are called from here — nothing that touches the network, the database or the page
-    cache — so this stays as free as the rest of the file.
-    """
-    import importlib.util
-
-    path = Path(__file__).resolve().parent / "run_combined_discovery.py"
-    spec = importlib.util.spec_from_file_location("_runner_under_check", path)
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
 
 
 def check(label: str, got: object, want: object) -> None:
@@ -297,40 +278,6 @@ def main() -> int:
     check("worth_asking with both", bc.worth_asking({"a": "x", "b": "y"}, 99.0), True)
 
     # -------------------------------------------------------------------------------------
-    section("a model answer that was not on the menu decides nothing")
-    # -------------------------------------------------------------------------------------
-    # `branch_llm.choose` talks to Ollama, so the check goes at the layer below it: the prompt is a
-    # multiple-choice question and only its own options may be returned. It calls the REAL
-    # validation, `branch_llm.verdict_from_answer` — the one `choose` uses. An earlier version of
-    # this section rebuilt that if/elif inline, which meant it compared a copy against itself and
-    # would have kept printing `ok` after the real rule broke. Same reason `replay_judge_gate.py`
-    # imports the website judge's gate instead of restating it.
-    shortlist = ["Bahnindustrie", "Automobilwirtschaft", "Handwerk"]
-    for answer, want_branch, want_rejected in (
-        ("Bahnindustrie", "Bahnindustrie", False),
-        (branch_llm.NONE_ANSWER, None, True),
-        ("Raumfahrt-Katzenfutter", None, False),
-        # A model picking option one, in the shapes it actually writes them. None of these is a
-        # fourth option, and refusing them silently turns a correct choice into a lost row.
-        ("bahnindustrie", "Bahnindustrie", False),
-        ("- Bahnindustrie", "Bahnindustrie", False),
-        ('"Handwerk"', "Handwerk", False),
-        ("KEINE", None, True),
-        # Nothing at all is not a rejection of the three. It is a broken answer.
-        ("", None, False),
-    ):
-        verdict = branch_llm.verdict_from_answer(answer, "weil", shortlist)
-        check(f"answer {answer[:24]!r} -> branch", verdict.branch, want_branch)
-        check(f"answer {answer[:24]!r} -> rejected_all", verdict.rejected_all, want_rejected)
-        if want_branch is None and not want_rejected:
-            check(f"answer {answer[:24]!r} is refused", bool(verdict.refused), True)
-    # The value written to the column is the TAXONOMY's spelling, never the model's. "bahnindustrie"
-    # is not a Berlin field name and must not reach a column that may only hold one of the 77.
-    for offered in ("bahnindustrie", "- BAHNINDUSTRIE"):
-        got = branch_llm.verdict_from_answer(offered, "", shortlist).branch
-        check(f"{offered[:20]!r} is normalised to the list's spelling", got in taxonomy.branches, True)
-
-    # -------------------------------------------------------------------------------------
     section("finding the services pages on a homepage, without downloading anything")
     # -------------------------------------------------------------------------------------
     html = """
@@ -437,150 +384,6 @@ def main() -> int:
           bc.load_taxonomy().version == bc.hashlib.sha256(
               bc.TAXONOMY_PATH.read_text(encoding="utf-8").encode("utf-8")).hexdigest()[:12],
           False)
-
-    # -------------------------------------------------------------------------------------
-    section("a hand label is never silently thrown away or silently reused")
-    # -------------------------------------------------------------------------------------
-    # 40 hand labels are the only thing that can say whether the Technologiefeld is right, which
-    # makes them the most expensive data in this project. Both halves of this rule were wrong once.
-    label_staleness = _load_runner().label_staleness
-    unlabelled = {"bucket": "torn", "technologiefeld": "NONE", "label": "", "stale": ""}
-    check("an empty row is not stale", label_staleness(unlabelled, "torn", "NONE"), (False, False))
-
-    same = {"bucket": "keyword_decided", "technologiefeld": "Handel", "label": "yes", "stale": ""}
-    check("an unchanged row keeps its label",
-          label_staleness(same, "keyword_decided", "Handel"), (False, False))
-
-    # The field changed under the label. "yes, Handel is right" is not an answer about "Logistik".
-    check("a changed Technologiefeld is stale",
-          label_staleness(same, "keyword_decided", "Logistik"), (True, False))
-    # The bucket changed, so the QUESTION changed: "is this field right" vs "does any field fit".
-    # This used to erase the label outright, because the merge key included the bucket.
-    check("a changed bucket is stale", label_staleness(same, "no_text", "NONE"), (True, False))
-
-    # Stale is STICKY. Writing the row back makes `was` match the current state, so recomputing from
-    # scratch said "unchanged" on the very next run and the label rejoined the precision count with
-    # nobody having re-read it.
-    flagged = dict(same, stale="yes")
-    check("a flagged row stays flagged next run",
-          label_staleness(flagged, "keyword_decided", "Handel"), (False, True))
-    check("...and blanking the cell is what clears it",
-          label_staleness(dict(flagged, stale=""), "keyword_decided", "Handel"), (False, False))
-
-    # -------------------------------------------------------------------------------------
-    section("a label can be made without opening the company's website")
-    # -------------------------------------------------------------------------------------
-    # 40 hand labels are the gate on this whole column, so the worksheet has to carry the company's
-    # own sentence. Without it a person opens 40 websites and the labelling does not get done.
-    runner = _load_runner()
-    texts = {"services": "Familienbetrieb.  Unser Einzelhandel fuehrt Wein und Feinkost seit 1953."}
-    found = runner.keywords_with_source(texts, taxonomy)
-    snippets, fallback = runner.evidence_snippets(texts, found, taxonomy)
-    check("the deciding keyword is found", "einzelhandel" in found, True)
-    check("...and its sentence comes back with it",
-          "wein und feinkost" in (snippets.get("einzelhandel") or ""), True)
-    # A `no_keyword` row is the one that most needs this: "we read this and none of Berlin's words
-    # appeared" is a claim a person can check in seconds, where a blank cell is not.
-    holding = {"purpose": "Verwaltung eigenen Vermoegens und Beteiligung an anderen Unternehmen"}
-    empty_snippets, holding_fallback = runner.evidence_snippets(holding, {}, taxonomy)
-    check("nothing fired -> no snippets", empty_snippets, {})
-    check("...but the text we read is still shown",
-          "verwaltung eigenen vermoegens" in holding_fallback, True)
-    check("...labelled with which text it was", holding_fallback.startswith("[purpose]"), True)
-    check("no text at all -> nothing claimed", runner.evidence_snippets({}, {}, taxonomy), ({}, ""))
-    check("the worksheet has a column for it", "evidence" in runner.BRANCH_LABEL_COLUMNS, True)
-
-    # -------------------------------------------------------------------------------------
-    section("a worksheet survives a trip through Excel")
-    # -------------------------------------------------------------------------------------
-    # Excel on a German locale saves CSV with SEMICOLONS, silently. It happened: 40 rows came back
-    # from a save as `;`-delimited, csv.DictReader's comma default read the whole header as one
-    # column name, and classify-labels-report would have reported nothing rather than failing. Hand
-    # labels are the most expensive data in this project; losing them to a delimiter is unacceptable.
-    header = ["bucket", "company_name", "technologiefeld", "label", "notes"]
-    row = ["keyword_decided", "Karl Widera, Gaststättenbetriebe", "Gastgewerbe", "yes", "a, b"]
-    with tempfile.TemporaryDirectory() as tmp:
-        wanted = None
-        for delimiter, name in ((",", "comma.csv"), (";", "semicolon.csv")):
-            path = Path(tmp) / name
-            with path.open("w", encoding="utf-8-sig", newline="") as handle:
-                writer = csv.writer(handle, delimiter=delimiter)
-                writer.writerow(header)
-                writer.writerow(row)
-            got = runner.read_label_csv(path)
-            check(f"{delimiter!r}-delimited: one row, five columns",
-                  (len(got), len(got[0])), (1, 5))
-            # The company name and the note both contain a comma. A naive split on "," mangles them;
-            # a real csv reader does not, which is why the fix sniffs the delimiter instead of
-            # splitting the line itself.
-            check(f"{delimiter!r}-delimited: a quoted comma survives",
-                  got[0]["company_name"], "Karl Widera, Gaststättenbetriebe")
-            check(f"{delimiter!r}-delimited: the label is readable", got[0]["label"], "yes")
-            if wanted is None:
-                wanted = got
-            else:
-                check("both delimiters give identical rows", got, wanted)
-
-    # -------------------------------------------------------------------------------------
-    section("the model may propose WORDS where no keyword fired, never a field")
-    # -------------------------------------------------------------------------------------
-    # The model has two jobs. `choose` breaks a tie between 2-3 fields the keywords nominated —
-    # closed multiple choice. `propose_vocabulary` runs where NOTHING fired, so there is no shortlist,
-    # and asking it to pick a field there would be asking it to invent one. Measured on the tie-break
-    # run: it says "none of these" 15% of the time, and for these companies the true answer is "none"
-    # about half the time. It under-refuses by a factor of three.
-    #
-    # THIS is the check that keeps the design safe: no field name may appear in the proposal prompt.
-    # With no list in front of it there is nothing to hallucinate against. One careless edit to the
-    # template — adding "z.B. Gastgewerbe" as an example — would undo that silently.
-    leaked = [n for n in taxonomy.branches if bc.normalize(n) in bc.normalize(branch_llm.VOCAB_PROMPT)]
-    check("no Berlin field name appears in the proposal prompt", leaked, [])
-    check("...and it does not name the taxonomy file either",
-          "branch_taxonomy" in branch_llm.VOCAB_PROMPT, False)
-
-    # A proposal is a list of words and nothing else. `Assignment` has no place to put one, so a
-    # proposal cannot become a column value even by accident.
-    check("Assignment has no field for a proposal",
-          any("propos" in f for f in bc.Assignment.__dataclass_fields__), False)
-    check("the classifier never imports the proposer", "branch_llm" in dir(bc), False)
-
-    # Words are normalised on both sides, or a proposal and a keyword can never be compared.
-    p = branch_llm.proposal_from_answer(["Messebau", " ingenieurbau ", "MESSEBAU"])
-    check("case, padding and duplicates collapse", p.words, ["messebau", "ingenieurbau"])
-    check("...and nothing is refused", p.refused, "")
-    check("a sentence is not a keyword",
-          branch_llm.proposal_from_answer(["Wir bieten seit 1974 Heizungen und Baeder an"]).words, [])
-    check("a non-list answer is refused",
-          bool(branch_llm.proposal_from_answer("Messebau").refused), True)
-    check("an empty answer is refused",
-          bool(branch_llm.proposal_from_answer([]).refused), True)
-    check("more words than the cap are trimmed",
-          len(branch_llm.proposal_from_answer(["eiscafe", "eissorten", "speiseeis", "waffeln"]).words),
-          branch_llm.MAX_PROPOSED_WORDS)
-
-    # The three-way split, which is what makes the worksheet a work queue rather than a wish list.
-    # A word only helps if it FIRES on the company's own text: a paraphrase the company never wrote
-    # cannot make the matcher do anything.
-    page = bc.normalize("Wir bauen Messestände. Unser Messebau überzeugt seit 1974.")
-    for word, want, why in (
-        ("messebau", "new", "on the page, not in the list — the prize"),
-        ("einzelhandel", "does_not_fire", "a real keyword, but not on this page"),
-        ("schienenfahrzeuge", "does_not_fire", "not on the page either"),
-    ):
-        fires = bool(bc._pattern_for(word).search(page))
-        known = word in taxonomy.keyword_branches
-        status = "already_keyword" if known and fires else "new" if fires else "does_not_fire"
-        check(f"{word!r} -> {want} ({why})", status, want)
-    # And the case the rule exists for: the model answers with a word that IS a keyword and IS on the
-    # page. Then the list already had it and something else stopped it — worth a look, not an addition.
-    gastro = bc.normalize("Unsere Gastronomie in Osnabrück.")
-    check("a keyword that is on the page -> already_keyword",
-          "already_keyword" if ("gastronomie" in taxonomy.keyword_branches
-                                and bc._pattern_for("gastronomie").search(gastro)) else "?",
-          "already_keyword")
-
-    check("the worksheet never asks the model for a field",
-          _load_runner().PROPOSAL_COLUMNS[-2:], ["suggested_field", "decision"])
 
     print(f"\n{'FAILED' if FAILURES else 'all checks passed'}")
     for label in FAILURES:

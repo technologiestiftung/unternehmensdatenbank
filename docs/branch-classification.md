@@ -1,5 +1,10 @@
 # Two columns: Technologiefeld and WZ cluster
 
+> **Status 2026-10-28.** Written on the Osnabrück example data, which has been removed. The rules
+> here still hold; the numbers were measured on that data and Berlin replaces them. The commands
+> of the old discovery CLI (`run_combined_discovery.py`) and the Ollama stages are gone; the code
+> lives in `airflow/dags/enrichment/`, and the DAGs that run it are being rebuilt (issue #18).
+
 We have 14,443 companies, mostly just a name and an address. This is about adding two industry
 columns. Everything here is free — no paid API, and the language model is optional and runs on the
 laptop.
@@ -46,13 +51,12 @@ Where things live:
 
 | | |
 |---|---|
-| Berlin's 77 fields and their keywords | `airflow/dags/combined_discovery/branch_taxonomy.yaml` |
-| every WZ code and its official name | `airflow/dags/combined_discovery/wz_titles.yaml` (2,008 codes) |
-| the keyword matcher | `airflow/dags/combined_discovery/branch_classifier.py` |
-| the WZ cluster lookup | `airflow/dags/combined_discovery/wz_cluster.py` |
-| fetching better pages | `airflow/dags/combined_discovery/content_pages.py` |
-| the optional tie-break | `airflow/dags/combined_discovery/branch_llm.py` |
-| the commands | `scripts/run_combined_discovery.py classify …` |
+| Berlin's 77 fields and their keywords | `airflow/dags/enrichment/branch_taxonomy.yaml` |
+| every WZ code and its official name | `airflow/dags/enrichment/wz_titles.yaml` (2,008 codes) |
+| the keyword matcher | `airflow/dags/enrichment/branch_classifier.py` |
+| the WZ cluster lookup | `airflow/dags/enrichment/wz_cluster.py` |
+| fetching better pages | `airflow/dags/enrichment/content_pages.py` |
+| the commands | removed with the old CLI; a Technologiefeld DAG replaces them (issue #18) |
 | the free guard | `scripts/check_branch_classifier.py` |
 
 ## The mistake this design exists to prevent
@@ -293,18 +297,9 @@ or an activity everybody does? Settle the hyphen question first, because it move
 
 ## Running it
 
-Step-by-step, with what each command prints:
-[running-branch-classification.md](running-branch-classification.md). The short version:
+The commands were removed with the old CLI; the Technologiefeld DAG replaces them (issue #18).
 
-```powershell
-python scripts/check_branch_classifier.py                               # free, must pass first
-python scripts/run_combined_discovery.py fetch-content                  # once: 1,567 pages
-python scripts/run_combined_discovery.py classify --source page,purpose  # 2 min, no network
-python scripts/run_combined_discovery.py classify-report
-python scripts/run_combined_discovery.py csv
-```
-
-`--source wz` is **refused**: the Technologiefeld is filled only from text the company published. The
+A WZ code is **never** a source: the Technologiefeld is filled only from text the company published. The
 WZ cluster is attached to every row regardless, whether or not any text was read.
 
 ## What is not known yet
@@ -363,6 +358,6 @@ here disagrees with one above, this one is current.
   older); only `classify-labels-report` reports precision. Excel on a German locale saves that
   worksheet with semicolons; the reader sniffs the delimiter, so a round trip is safe. Still not one
   row is hand-checked; the model's `llm_reason` per row is the cheap proxy and reads well.
-- **Both columns are written to Postgres** since 2026-09 via `scripts/import_branch_classification.py`
-  and `combined_discovery/branch_observations.py`, so the "Nothing is written to Postgres" paragraph
-  above describes the state before that.
+- **Both columns are written to Postgres** since 2026-09 via `enrichment/branch_observations.py`
+  (the import script that called it was removed with the old CLI on 2026-10-28), so the "Nothing
+  is written to Postgres" paragraph above describes the state before that.

@@ -3,8 +3,8 @@ from __future__ import annotations
 
 import json
 
-from combined_discovery.branch_observations import confidence_for
-from combined_discovery.branch_textcat import (
+from enrichment.branch_observations import confidence_for
+from enrichment.branch_textcat import (
     DECIDED_BY_TEXTCAT,
     accuracy,
     classifier_text,

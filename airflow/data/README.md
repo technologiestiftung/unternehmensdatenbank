@@ -1,10 +1,7 @@
-# Airflow Data
+# airflow/data
 
-Persistent runtime data written by the Berlin Gewerbedaten DAG lives here.
+Mounted into the Airflow containers at `/opt/airflow/data`. Local runtime files only; everything here
+except this README is gitignored. On the Data Hub there is no shared disk, so nothing that has to
+survive between task runs may depend on this folder (issue #18).
 
-Expected files:
-
-- `gewerbedaten.jsonl`
-- `adressen_cache.json`
-
-These files are intentionally not committed.
+- `models/manager_ner/`: spaCy model versions trained by `manager_ner_train`, and `current.json`

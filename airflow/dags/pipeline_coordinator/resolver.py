@@ -312,7 +312,7 @@ def resolve_purpose_field(cur: Any) -> int:
 
     The confidence policy behind these rows has its lowest value at 0.52, deliberately above
     `_FIELD_MIN_CONF`. It used to be 0.50, exactly on the bar, where 4,095 rows promoted only because
-    the filter reads `>=`. `combined_discovery/branch_observations.py` asserts the gap at import.
+    the filter reads `>=`. `enrichment/branch_observations.py` asserts the gap at import.
     """
     return _apply_canonical(
         cur,

@@ -56,7 +56,7 @@ _ACTIVE_ONLY_SQL = "AND c.register_status = 'aktiv'" if ACTIVE_ONLY else ""
 #:
 #: **Two ways a website can already be known, and the flag now covers both.** The second is
 #: `northdata_export.website` — 3,283 URLs the register export shipped. Once
-#: `import_northdata_websites.py` has run and `pipeline_coordinator` has resolved them, the
+#: the (since removed) Northdata website import had run and `pipeline_coordinator` has resolved them, the
 #: canonical check above already covers every one of those companies and the export predicate skips
 #: nobody: measured 2026-09-03, the two together leave the same **3,109** active companies as the
 #: canonical check alone. Its whole value is the window before that — a Berlin export sitting in the
@@ -80,7 +80,7 @@ SKIP_RESOLVED_WEBSITE = os.getenv("DISCOVERY_SKIP_RESOLVED_WEBSITE", "").strip()
 #: return **zero companies**, in all six candidate queries at once, with nothing logged. The
 #: `website IS NOT NULL` filter excludes all 13 today, so `NOT IN` would work here and then break on
 #: the first export matched by a different key. Same silent-total-filter failure that
-#: `run_combined_discovery.load_sample` raises `SystemExit` over for `DISCOVERY_ACTIVE_ONLY`;
+#: the old discovery CLI had to raise `SystemExit` over for `DISCOVERY_ACTIVE_ONLY`;
 #: `NOT EXISTS` is simply immune to it.
 _SKIP_RESOLVED_WEBSITE_SQL = (
     """AND NOT EXISTS (
@@ -464,7 +464,7 @@ def insert_text_observation(
 
     **Newest write wins**, unconditionally. Not highest-confidence-wins: a re-score has to be able to
     DEMOTE, and this repo has already been bitten by a change that could only ever promote
-    (`scripts/replay_judge_gate.py` exists because of it). A conditional `DO UPDATE ... WHERE` would
+    (a replay guard had to be written because of it). A conditional `DO UPDATE ... WHERE` would
     also return no row when it declined to fire, and the `RETURNING id` below would then raise.
 
     Two things it deliberately does not refresh on conflict: `observed_at` and `source_sync_run_id`
@@ -700,9 +700,8 @@ def fetch_companies_for_llm_enrichment(
 #: trackers and business directories, because those are the pages that quote register numbers.
 #: The search gets pulled toward pages *about* the company and away from the company's own site.
 #:
-#: This does NOT stop url_discovery.scorer.score_candidate from using the register number to
-#: confirm a page it has already downloaded. The two uses are separable and only the query side
-#: is turned off here. See docs/website-and-owner-discovery-results.md.
+#: This does NOT stop the page verification from using the register number to confirm a page
+#: it has already downloaded. The two uses are separable and only the query side is turned off here.
 SEARCH_QUERY_INCLUDE_REGISTER_NUMBER = (
     os.getenv("SEARCH_QUERY_INCLUDE_REGISTER_NUMBER", "false").lower() == "true"
 )

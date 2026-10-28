@@ -1,9 +1,10 @@
 # Unternehmensdatenbank: Architecture Overview
 
-> State on 2026-10-27. The target setup: the **Fusionbase API** delivers the base record of every
+> State on 2026-10-28. The target setup: the **Fusionbase API** delivers the base record of every
 > Berlin company, and our **Airflow DAGs** enrich it. Fusionbase is not connected yet; until it is,
-> everything runs on example data, 14,443 companies from a Northdata export of the Osnabrück region.
-> Every number on this page is an Osnabrück measurement that Berlin will replace.
+> the example data is **296,486 Berlin companies from OffeneRegister** (a Handelsregister snapshot
+> from 2017–2019). Numbers marked "example data" below were measured on the earlier Osnabrück data
+> (14,443 companies, removed 2026-10-28). The next steps are in issue #18.
 
 ## 1. Goal
 
@@ -217,7 +218,7 @@ flowchart TD
 flowchart LR
   FB["Fusionbase API<br/>base record"]
   subgraph DAGS["Our Airflow DAGs"]
-    DISC["Website discovery<br/>url_discovery, combined_discovery"]
+    DISC["Website discovery<br/>enrichment library, DAG being rebuilt"]
     BC["branch_classifier"]
     NER["manager_ner<br/>spaCy"]
     FKD["foerderkatalog"]
@@ -283,9 +284,9 @@ output from the vendor and are checked like our own.
 | Pipeline | Source | Kind | Priority | Cost | Result on example data |
 |---|---|---|---|---|---|
 | Fusionbase import | Fusionbase API | DAG, quarterly, to build | high, proposed | contract | none yet |
-| `url_discovery`: guesses URLs from the name | company websites | DAG | 100 | free | 37 websites |
-| `combined_discovery`: URL patterns, Impressum and register check | company websites | script | 100 | free | 552 websites |
-| `branch_classifier`: 77 technology fields | company websites, register purpose | script and import | 100 | free | Technologiefeld and purpose field |
+| OffeneRegister import | Handelsregister snapshot 2017–2019 | scripts, once | register facts | free | 296,486 Berlin companies, full record per company |
+| Website discovery: URL patterns, OSM, Impressum and register check | company websites | DAG to rebuild on `enrichment/` (#18) | 100 | free | 552 websites on example data; 106 of 1,000 active Berlin companies |
+| `branch_classifier`: 77 technology fields | company websites, register purpose | DAG to rebuild on `enrichment/` (#18) | 100 | free | 27 of 106 Berlin companies with a website |
 | `manager_ner`: names from the Impressum | Impressum pages, app votes | DAGs | 100 | free | measured on 222 Impressum pages (section 9) |
 | `foerderkatalog` | Förderkatalog des Bundes | DAG, monthly | | free | grants table |
 | `pipeline_coordinator` | all of the above | DAG | | free | picks the winning values |
@@ -294,16 +295,17 @@ Every DAG is off by default. It needs its `ENABLE_*` flag and must be unpaused i
 
 ## 8. Experiments on the example data (not part of the target)
 
-These ran only on the Osnabrück example data, to learn what works. None of them is a source in the
-target setup.
+These ran only on the Osnabrück example data, to learn what works. **All of them except OSM were
+removed from the repo on 2026-10-28** (code, DAGs and docker-compose services); the backup of that
+state is outside the repo.
 
 | Experiment | What it did | Measured result | What happens to it |
 |---|---|---|---|
-| Northdata export | example base data, 14,443 companies; its websites imported at priority 50 | 2,815 canonical websites | drop once Fusionbase is connected |
-| Brave, Exa and Parallel search | paid web search plus a model that picks the company's site | 85, 39 and 1 canonical websites | drop: paid, used once |
-| OpenStreetMap (local Overpass) | matches a company to a mapped business with a website | no separate count; part of the 552 combined discovery websites | keep as a local tool |
-| SearXNG | free local web search for the `llm` stage | found nothing: search engines answer with a CAPTCHA on this network | drop |
-| Ollama judge | a local model reads a downloaded page and says whether it is this company's site | 886 high, 56 medium, 1 low among 943 websites | decide after comparing `band` with `band_without_judge` |
+| Northdata export | example base data, 14,443 companies; its websites imported at priority 50 | 2,815 canonical websites | removed |
+| Brave, Exa and Parallel search | paid web search plus a model that picks the company's site | 85, 39 and 1 canonical websites | removed: paid, used once |
+| OpenStreetMap | matches a company to a mapped business with a website | 3 of 1,000 active Berlin companies | kept, in `enrichment/`; to be extended (#18) |
+| SearXNG | free local web search for the `llm` stage | found nothing: search engines answer with a CAPTCHA on this network | removed |
+| Ollama judge | a local model reads a downloaded page and says whether it is this company's site | 886 high, 56 medium, 1 low among 943 websites | removed: no GPUs on the hub |
 
 ## 9. AI and models
 
@@ -336,7 +338,7 @@ flowchart LR
 |---|---|---|
 | Geschäftsführung (names) | named-entity recognition (persons) next to labels like "Geschäftsführer" | built: `manager_ner_extract` and `manager_ner_train` |
 | Kontakt (person, role) | named-entity recognition plus rules for roles | after names work |
-| Technologiefeld (gaps) | text classification, seeded by the keyword results and corrected by app votes | built: `scripts/train_branch_textcat.py`, `classify --textcat` |
+| Technologiefeld (gaps) | text classification, seeded by the keyword results and corrected by app votes | library built (`enrichment/branch_textcat.py`); its trainer and `classify --textcat` were removed with the old CLI, the Technologiefeld DAG replaces them (#18) |
 | Cluster, DeepTech, isAI | text classification on website text and register purpose, same pattern | needs labels first; Cluster may be a lookup from the Technologiefeld |
 | Technologiefeld | lemmatising for the keyword matching (inflected forms) | optional improvement; does not split German compounds |
 | Matching grants to companies | organisation names (ORG) as a fallback to exact name match | idea |
@@ -396,8 +398,9 @@ How votes become training data, per company:
 - Corrections do not change the shown value. Whether they should become a source of their own, at
   which priority, is an open decision.
 
-The Technologiefeld text classifier follows the same loop, run by hand with
-`scripts/train_branch_textcat.py`:
+The Technologiefeld text classifier follows the same loop. It was run by hand with
+`scripts/train_branch_textcat.py`, which was removed with the old CLI on 2026-10-28; the
+Technologiefeld DAG replaces it (#18):
 
 ```mermaid
 flowchart LR
@@ -502,7 +505,7 @@ flowchart LR
 | Gate | What it does | Where |
 |---|---|---|
 | Claude Code hooks | lint after each edit; checks before each commit; asks before new files, commits and pushes; short commit messages | both repos, `.claude/` |
-| Guards and tests | five rule guards, unit tests, and tests that pin the numbers of one reference copy of the example data | data repo |
+| Guards and tests | seven rule guards and unit tests, no database (`scripts/free_checks.sh`) | data repo |
 | CI | lint, typecheck, tests, build on every pull request | app repo |
 | no-mistakes (optional) | review, tests, docs, lint, push, pull request, CI in one run | both repos, only where it is installed |
 

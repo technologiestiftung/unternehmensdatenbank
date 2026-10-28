@@ -47,7 +47,7 @@ for candidate in (
         sys.path.insert(0, str(candidate))
         break
 
-from url_discovery.imprint_extractor import extract_from_html  # noqa: E402
+from enrichment.imprint_extractor import extract_from_html  # noqa: E402
 
 #: (name of the case, Impressum HTML, names that must come out, in order)
 CASES: list[tuple[str, str, list[str]]] = [
@@ -154,7 +154,7 @@ LINK_CASES = [
 
 def _check_link_resolution() -> int:
     """Free: no network. The parser falls back to html.parser where lxml is not installed."""
-    from url_discovery.http_client import _find_impressum_link
+    from enrichment.http_client import _find_impressum_link
 
     failures = 0
     for label, base_url, href, expected in LINK_CASES:

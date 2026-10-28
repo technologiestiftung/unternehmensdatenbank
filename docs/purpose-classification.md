@@ -1,5 +1,10 @@
 # Column 3: what the register says the company was set up to do
 
+> **Status 2026-10-28.** Written on the Osnabrück example data, which has been removed. The rules
+> here still hold; the numbers were measured on that data and Berlin replaces them. The commands
+> of the old discovery CLI (`run_combined_discovery.py`) and the Ollama stages are gone; the code
+> lives in `airflow/dags/enrichment/`, and the DAGs that run it are being rebuilt (issue #18).
+
 Every company registered in Germany files a **Gegenstand des Unternehmens** — one or two sentences
 saying what the company is for. It is written by a notary, it describes what the company is
 *permitted* to do, and it is filed once, at registration, and rarely changed. It arrives here as
@@ -220,29 +225,7 @@ Three things to get right when it is built:
 
 ## Commands
 
-```powershell
-python scripts/check_purpose_branch.py                          # free, first. 154 checks
-python scripts/run_combined_discovery.py classify-purpose       # 13 s, no network, no model
-python scripts/run_combined_discovery.py classify-purpose-report
-
-$env:OLLAMA_MODEL = "qwen3.5:4b"
-# Tier A, the 3-way tie-break: 17 calls, about 3 minutes
-python scripts/run_combined_discovery.py classify-purpose --llm
-
-# Tier B, the 77-way ask, bounded. ~10 s a call, so 200 calls is about 35 minutes.
-# Re-run to continue: cached answers are free and do not count against the budget.
-python scripts/run_combined_discovery.py classify-purpose --llm --tier tiebreak,semantic --llm-limit 200
-```
-
-`--tier` takes `tiebreak` (the default), `semantic`, or both comma-separated. `--llm` alone does
-nothing without a tier, and an unknown tier name is refused rather than ignored.
-
-`--limit N` writes the first N companies by id. Keyword weights are **always** measured over the whole
-table, so a limit changes what is written, not what is counted — which is what makes `--limit 50` a
-true prefix of the full run rather than a different sample.
-
-Output: `airflow/data/combined_discovery/purpose_branches.jsonl`, one row per company, plus seven
-`purpose_*` columns in the handover CSV.
+The commands were removed with the old CLI; the Technologiefeld DAG replaces them (issue #18).
 
 ---
 

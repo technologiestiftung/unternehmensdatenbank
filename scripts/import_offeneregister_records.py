@@ -27,8 +27,7 @@ Matches companies by `registration_number`, so run it after the CSV load. Safe t
 record is upserted on (source, external_id).
 
 Usage:
-    PG_DSN="host=localhost port=5433 dbname=unternehmensdatenbank_berlin user=app password=app" \\
-      python scripts/import_offeneregister_records.py openregister.db
+    python scripts/import_offeneregister_records.py openregister.db     # PG_DSN to override the target
 """
 from __future__ import annotations
 
@@ -119,7 +118,7 @@ def main() -> int:
     registrations = grouped(lite, f"SELECT * FROM registrations WHERE company_id IN ({berlin})")
     officers = grouped(lite, f"SELECT * FROM officer WHERE company_id IN ({berlin}) ORDER BY id")
 
-    dsn = os.getenv("PG_DSN", "host=localhost port=5433 dbname=unternehmensdatenbank_berlin user=app password=app")
+    dsn = os.getenv("PG_DSN", "host=localhost port=5433 dbname=unternehmensdatenbank user=app password=app")
     with psycopg2.connect(dsn) as pg, pg.cursor() as cur:
         source_id = ensure_source(
             cur, key=SOURCE_KEY, name="OffeneRegister (Handelsregister snapshot 2017–2019)",

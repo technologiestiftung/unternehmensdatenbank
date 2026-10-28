@@ -34,7 +34,7 @@ import sys
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
-DEFAULT_OUT = REPO_ROOT / "airflow" / "dags" / "combined_discovery" / "wz_titles.yaml"
+DEFAULT_OUT = REPO_ROOT / "airflow" / "dags" / "enrichment" / "wz_titles.yaml"
 
 #: The sheet's own level numbers. 1 is an Abschnitt (a letter), 2 an Abteilung (two digits).
 LEVEL_SECTION = "1"

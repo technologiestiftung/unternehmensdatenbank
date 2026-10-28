@@ -3,8 +3,7 @@
 # Test settings are only honored from the default-branch (main) copy of this file.
 
 # The free checks, in a throwaway container so the gate needs no local Python setup (the gate's
-# worktree has no .venv, and Python 3.12 matches the Airflow image). The pinned-number tests are
-# left out: they need the reference copy of the example data, which most machines do not have.
+# worktree has no .venv, and Python 3.12 matches the Airflow image).
 commands:
   test: >-
     docker run --rm -v "$PWD":/repo -w /repo -e RUFF_NO_CACHE=true -e PYTHONDONTWRITEBYTECODE=1
@@ -13,7 +12,5 @@ commands:
 
 test:
   instructions: |
-    Run the configured test command only. It covers ruff, the unit tests and the five rule guards.
-    Do not run tests/integration/ (pinned to one machine's example data), do not start the Docker
-    stack, Airflow or any DAG, and never call a paid search API or a model (scripts that do are
-    blocked by a hook for a reason). If a change needs coverage, add a unit test under tests/unit/.
+    Run the configured test command only. It covers ruff, the unit tests and the seven rule guards.
+    Do not start the Docker stack, Airflow or any DAG, and never call a model or a search engine. If a change needs coverage, add a unit test under tests/unit/.

@@ -52,155 +52,29 @@ x-airflow-common: &airflow-common
     AIRFLOW__SCHEDULER__ENABLE_HEALTH_CHECK: "true"
     AIRFLOW_CONFIG: /opt/airflow/config/airflow.cfg
     AIRFLOW_DATA_DIR: /opt/airflow/data
-    OUTPUT_FILE: /opt/airflow/data/gewerbedaten.jsonl
-    CHECKPOINT_FILE: /opt/airflow/data/gewerbedaten_checkpoint.json
-    RESET_CHECKPOINT: ${RESET_CHECKPOINT:-false}
-    ADRESSEN_CACHE_FILE: /opt/airflow/data/adressen_cache.json
     # The writer role, like a DAG on the Data Hub: read/write rows, no DDL. Host scripts still
     # default to the owner `app`; see docs/datahub-emulation.md.
     PG_DSN: host=postgres port=5432 dbname=${APP_DB_NAME:-unternehmensdatenbank} user=${APP_DB_WRITER_USER:-writer} password=${APP_DB_WRITER_PASSWORD:-writer}
-    MAX_RECORDS: ${MAX_RECORDS:-0}
-    WFS_PAGE_SIZE: ${WFS_PAGE_SIZE:-2000}
-    WFS_START_INDEX: ${WFS_START_INDEX:-0}
-    SKIP_GEOCODE: ${SKIP_GEOCODE:-false}
-    SKIP_NAME_LOOKUP: ${SKIP_NAME_LOOKUP:-true}
-    ADRESSEN_MAX_DIST_M: ${ADRESSEN_MAX_DIST_M:-60}
-    OVERPASS_URL: ${OVERPASS_URL:-http://overpass/api/interpreter}
-    ALLOW_PUBLIC_OVERPASS_FALLBACK: ${ALLOW_PUBLIC_OVERPASS_FALLBACK:-false}
-    OVERPASS_RADIUS: ${OVERPASS_RADIUS:-80}
-    OVERPASS_DELAY_S: ${OVERPASS_DELAY_S:-1.5}
-    OVERPASS_WORKERS: ${OVERPASS_WORKERS:-6}
-    NAME_MATCH_MIN_SCORE: ${NAME_MATCH_MIN_SCORE:-35}
-    NOMINATIM_URL: ${NOMINATIM_URL:-https://nominatim.openstreetmap.org/reverse}
-    NOMINATIM_DELAY_S: ${NOMINATIM_DELAY_S:-2.0}
-    DB_COMMIT_BATCH_SIZE: ${DB_COMMIT_BATCH_SIZE:-250}
     SOURCE_ENRICHMENT_BATCH_SIZE: ${SOURCE_ENRICHMENT_BATCH_SIZE:-50}
-    # Skip companies whose register_status is not 'aktiv' — 56.4% of the Osnabrück table. Off by
-    # default because it changes which companies every stage sees, and all published numbers were
-    # measured unfiltered. See source_enrichment_common.ACTIVE_ONLY.
-    DISCOVERY_ACTIVE_ONLY: ${DISCOVERY_ACTIVE_ONLY:-false}
+    # Skip companies whose register_status is not 'aktiv' (153,915 of the 296,486 Berlin companies).
+    # See source_enrichment_common.ACTIVE_ONLY.
+    DISCOVERY_ACTIVE_ONLY: ${DISCOVERY_ACTIVE_ONLY:-true}
     DISCOVERY_SKIP_RESOLVED_WEBSITE: ${DISCOVERY_SKIP_RESOLVED_WEBSITE:-false}
-    ENABLE_MISTRAL_SEARCH_DISCOVERY: ${ENABLE_MISTRAL_SEARCH_DISCOVERY:-false}
-    ENABLE_CLAUDE_SEARCH_DISCOVERY: ${ENABLE_CLAUDE_SEARCH_DISCOVERY:-false}
-    MISTRAL_API_KEY: ${MISTRAL_API_KEY:-}
-    MISTRAL_MODEL: ${MISTRAL_MODEL:-magistral-small-2509}
-    MISTRAL_SEARCH_TOOL: ${MISTRAL_SEARCH_TOOL:-web_search}
-    MISTRAL_DISCOVERY_MAX_RESULTS: ${MISTRAL_DISCOVERY_MAX_RESULTS:-5}
-    MISTRAL_REQUEST_DELAY_S: ${MISTRAL_REQUEST_DELAY_S:-3.0}
-    MISTRAL_HTTP_TIMEOUT_S: ${MISTRAL_HTTP_TIMEOUT_S:-45}
-    MISTRAL_HTTP_MAX_RETRIES: ${MISTRAL_HTTP_MAX_RETRIES:-5}
-    MISTRAL_RETRY_MAX_WAIT_S: ${MISTRAL_RETRY_MAX_WAIT_S:-60}
-    MISTRAL_PROGRESS_LOG_EVERY: ${MISTRAL_PROGRESS_LOG_EVERY:-10}
-    MISTRAL_DISCOVERY_CHECKPOINT_FILE: ${MISTRAL_DISCOVERY_CHECKPOINT_FILE:-/opt/airflow/data/mistral_search_discovery_checkpoint.json}
-    ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
-    CLAUDE_MODEL: ${CLAUDE_MODEL:-claude-sonnet-4-20250514}
-    CLAUDE_WEB_SEARCH_TOOL_TYPE: ${CLAUDE_WEB_SEARCH_TOOL_TYPE:-web_search_20250305}
-    CLAUDE_API_BASE_URL: ${CLAUDE_API_BASE_URL:-https://api.anthropic.com/v1}
-    CLAUDE_HTTP_TIMEOUT_S: ${CLAUDE_HTTP_TIMEOUT_S:-45}
-    CLAUDE_HTTP_MAX_RETRIES: ${CLAUDE_HTTP_MAX_RETRIES:-5}
-    CLAUDE_REQUEST_DELAY_S: ${CLAUDE_REQUEST_DELAY_S:-3.0}
-    CLAUDE_RETRY_MAX_WAIT_S: ${CLAUDE_RETRY_MAX_WAIT_S:-60}
-    CLAUDE_MAX_TOKENS: ${CLAUDE_MAX_TOKENS:-1200}
-    CLAUDE_WEB_SEARCH_MAX_USES: ${CLAUDE_WEB_SEARCH_MAX_USES:-5}
-    CLAUDE_MAX_PAUSE_TURNS: ${CLAUDE_MAX_PAUSE_TURNS:-3}
-    CLAUDE_DISCOVERY_MAX_RESULTS: ${CLAUDE_DISCOVERY_MAX_RESULTS:-5}
-    CLAUDE_PROGRESS_LOG_EVERY: ${CLAUDE_PROGRESS_LOG_EVERY:-10}
-    CLAUDE_DISCOVERY_CHECKPOINT_FILE: ${CLAUDE_DISCOVERY_CHECKPOINT_FILE:-/opt/airflow/data/claude_search_discovery_checkpoint.json}
-    ENABLE_OLLAMA_SEARCH_DISCOVERY: ${ENABLE_OLLAMA_SEARCH_DISCOVERY:-false}
-    OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-http://ollama:11434}
-    # OpenAI-compatible endpoint on the same server. It returns token counts, the native API
-    # does not, so ac_measurement.py uses this one to compare a local model against Mistral.
-    OLLAMA_OPENAI_BASE_URL: ${OLLAMA_OPENAI_BASE_URL:-http://ollama:11434/v1}
-    OLLAMA_MODEL: ${OLLAMA_MODEL:-qwen2.5:7b}
-    OLLAMA_HTTP_TIMEOUT_S: ${OLLAMA_HTTP_TIMEOUT_S:-120}
-    OLLAMA_HTTP_MAX_RETRIES: ${OLLAMA_HTTP_MAX_RETRIES:-3}
-    OLLAMA_REQUEST_DELAY_S: ${OLLAMA_REQUEST_DELAY_S:-0.0}
-    OLLAMA_RETRY_WAIT_S: ${OLLAMA_RETRY_WAIT_S:-5.0}
-    OLLAMA_PROGRESS_LOG_EVERY: ${OLLAMA_PROGRESS_LOG_EVERY:-10}
-    OLLAMA_DISCOVERY_CHECKPOINT_FILE: ${OLLAMA_DISCOVERY_CHECKPOINT_FILE:-/opt/airflow/data/ollama_search_discovery_checkpoint.json}
-    SEARXNG_BASE_URL: ${SEARXNG_BASE_URL:-http://searxng:8080}
-    SEARXNG_MAX_RESULTS: ${SEARXNG_MAX_RESULTS:-5}
-    SEARXNG_TIMEOUT_S: ${SEARXNG_TIMEOUT_S:-15}
-    SEARXNG_HTTP_MAX_RETRIES: ${SEARXNG_HTTP_MAX_RETRIES:-3}
-    SEARXNG_RETRY_WAIT_S: ${SEARXNG_RETRY_WAIT_S:-2.0}
-    SEARXNG_REQUEST_DELAY_S: ${SEARXNG_REQUEST_DELAY_S:-10.0}
-    ENABLE_URL_DISCOVERY: ${ENABLE_URL_DISCOVERY:-false}
-    URL_DISCOVERY_BATCH_SIZE: ${URL_DISCOVERY_BATCH_SIZE:-50}
-    URL_DISCOVERY_CONCURRENCY: ${URL_DISCOVERY_CONCURRENCY:-5}
-    URL_DISCOVERY_HTTP_TIMEOUT_S: ${URL_DISCOVERY_HTTP_TIMEOUT_S:-10}
-    URL_DISCOVERY_REQUEST_DELAY_S: ${URL_DISCOVERY_REQUEST_DELAY_S:-0.5}
-    URL_DISCOVERY_PROGRESS_LOG_EVERY: ${URL_DISCOVERY_PROGRESS_LOG_EVERY:-25}
-    URL_DISCOVERY_CHECKPOINT_FILE: ${URL_DISCOVERY_CHECKPOINT_FILE:-/opt/airflow/data/url_discovery_checkpoint.json}
     ENABLE_FOERDERKATALOG: ${ENABLE_FOERDERKATALOG:-false}
     ENABLE_MANAGER_NER: ${ENABLE_MANAGER_NER:-false}
     MANAGER_NER_MIN_COMPANIES: ${MANAGER_NER_MIN_COMPANIES:-30}
     MANAGER_NER_EPOCHS: ${MANAGER_NER_EPOCHS:-10}
-    ENABLE_OSM_DISCOVERY: ${ENABLE_OSM_DISCOVERY:-false}
+    # Website discovery building blocks (airflow/dags/enrichment).
+    URL_DISCOVERY_HTTP_TIMEOUT_S: ${URL_DISCOVERY_HTTP_TIMEOUT_S:-10}
     OSM_OVERPASS_URL: ${OSM_OVERPASS_URL:-https://overpass-api.de/api/interpreter}
     OSM_DISCOVERY_TIMEOUT_S: ${OSM_DISCOVERY_TIMEOUT_S:-30}
     OSM_DISCOVERY_REQUEST_DELAY_S: ${OSM_DISCOVERY_REQUEST_DELAY_S:-1.0}
-    OSM_DISCOVERY_BATCH_SIZE: ${OSM_DISCOVERY_BATCH_SIZE:-50}
-    OSM_DISCOVERY_PROGRESS_LOG_EVERY: ${OSM_DISCOVERY_PROGRESS_LOG_EVERY:-25}
-    OSM_DISCOVERY_CHECKPOINT_FILE: ${OSM_DISCOVERY_CHECKPOINT_FILE:-/opt/airflow/data/osm_discovery_checkpoint.json}
     OSM_MIN_MATCH_SCORE: ${OSM_MIN_MATCH_SCORE:-0.65}
-    # Shared extraction model for the search-API providers. Deliberately NOT MISTRAL_MODEL,
-    # which is a reasoning model and would burn output tokens on a mechanical extraction.
-    EXTRACT_MODEL: ${EXTRACT_MODEL:-ministral-8b-latest}
-    EXTRACT_MAX_CHARS: ${EXTRACT_MAX_CHARS:-20000}
-    EXTRACT_HTTP_TIMEOUT_S: ${EXTRACT_HTTP_TIMEOUT_S:-90}
-    EXTRACT_HTTP_MAX_RETRIES: ${EXTRACT_HTTP_MAX_RETRIES:-3}
-    EXTRACT_RETRY_MAX_WAIT_S: ${EXTRACT_RETRY_MAX_WAIT_S:-30}
-    EXTRACT_PRICE_IN: ${EXTRACT_PRICE_IN:-0}
-    EXTRACT_PRICE_OUT: ${EXTRACT_PRICE_OUT:-0}
-    MISTRAL_API_BASE_URL: ${MISTRAL_API_BASE_URL:-https://api.mistral.ai/v1}
     # Impressum probing: works around fetch_impressum returning homepages (0/8 register
     # numbers found vs 3/8 when the explicit paths are probed).
     IMPRINT_PROBE_ENABLED: ${IMPRINT_PROBE_ENABLED:-true}
     IMPRINT_PROBE_PATHS: ${IMPRINT_PROBE_PATHS:-/impressum/,/impressum,/imprint,/impressum.html}
     IMPRINT_PROBE_TIMEOUT_S: ${IMPRINT_PROBE_TIMEOUT_S:-12}
-    LLM_WEBSITE_CONF_CAP: ${LLM_WEBSITE_CONF_CAP:-0.34}
-    # Off: the register number in the query pulls results toward aggregators and directories.
-    # Measured 21 vs 25 provable websites per 100 companies. Scorer use is unaffected.
-    SEARCH_QUERY_INCLUDE_REGISTER_NUMBER: ${SEARCH_QUERY_INCLUDE_REGISTER_NUMBER:-false}
-    # Parallel Search MCP — free and anonymous, so the key is optional and only raises limits.
-    ENABLE_PARALLEL_SEARCH_DISCOVERY: ${ENABLE_PARALLEL_SEARCH_DISCOVERY:-false}
-    PARALLEL_API_KEY: ${PARALLEL_API_KEY:-}
-    PARALLEL_MCP_URL: ${PARALLEL_MCP_URL:-https://search.parallel.ai/mcp}
-    PARALLEL_MCP_TIMEOUT_S: ${PARALLEL_MCP_TIMEOUT_S:-120}
-    PARALLEL_QUOTA_GIVEUP_AFTER: ${PARALLEL_QUOTA_GIVEUP_AFTER:-3}
-    PARALLEL_MAX_CANDIDATES: ${PARALLEL_MAX_CANDIDATES:-5}
-    PARALLEL_PROGRESS_LOG_EVERY: ${PARALLEL_PROGRESS_LOG_EVERY:-10}
-    PARALLEL_DISCOVERY_CHECKPOINT_FILE: ${PARALLEL_DISCOVERY_CHECKPOINT_FILE:-/opt/airflow/data/parallel_search_discovery_checkpoint.json}
-    # Exa — returns page contents with the search, and reports costDollars per request.
-    ENABLE_EXA_SEARCH_DISCOVERY: ${ENABLE_EXA_SEARCH_DISCOVERY:-false}
-    EXA_API_KEY: ${EXA_API_KEY:-}
-    EXA_API_BASE_URL: ${EXA_API_BASE_URL:-https://api.exa.ai}
-    EXA_SEARCH_TYPE: ${EXA_SEARCH_TYPE:-auto}
-    EXA_NUM_RESULTS: ${EXA_NUM_RESULTS:-8}
-    # highlights | text | both. Highlights are query-biased, so owner extraction may want text.
-    EXA_CONTENT_MODE: ${EXA_CONTENT_MODE:-highlights}
-    EXA_TEXT_MAX_CHARS: ${EXA_TEXT_MAX_CHARS:-4000}
-    EXA_HTTP_TIMEOUT_S: ${EXA_HTTP_TIMEOUT_S:-45}
-    EXA_HTTP_MAX_RETRIES: ${EXA_HTTP_MAX_RETRIES:-3}
-    EXA_RETRY_MAX_WAIT_S: ${EXA_RETRY_MAX_WAIT_S:-30}
-    EXA_REQUEST_DELAY_S: ${EXA_REQUEST_DELAY_S:-0.15}
-    EXA_MAX_CANDIDATES: ${EXA_MAX_CANDIDATES:-5}
-    EXA_PROGRESS_LOG_EVERY: ${EXA_PROGRESS_LOG_EVERY:-10}
-    EXA_DISCOVERY_CHECKPOINT_FILE: ${EXA_DISCOVERY_CHECKPOINT_FILE:-/opt/airflow/data/exa_search_discovery_checkpoint.json}
-    # Brave — snippets only, no page text, and q is capped at 400 chars / 50 words.
-    ENABLE_BRAVE_SEARCH_DISCOVERY: ${ENABLE_BRAVE_SEARCH_DISCOVERY:-false}
-    BRAVE_API_KEY: ${BRAVE_API_KEY:-}
-    BRAVE_API_URL: ${BRAVE_API_URL:-https://api.search.brave.com/res/v1/web/search}
-    BRAVE_COUNTRY: ${BRAVE_COUNTRY:-DE}
-    BRAVE_SEARCH_LANG: ${BRAVE_SEARCH_LANG:-de}
-    BRAVE_COUNT: ${BRAVE_COUNT:-10}
-    BRAVE_HTTP_TIMEOUT_S: ${BRAVE_HTTP_TIMEOUT_S:-30}
-    BRAVE_HTTP_MAX_RETRIES: ${BRAVE_HTTP_MAX_RETRIES:-3}
-    BRAVE_RETRY_MAX_WAIT_S: ${BRAVE_RETRY_MAX_WAIT_S:-30}
-    BRAVE_REQUEST_DELAY_S: ${BRAVE_REQUEST_DELAY_S:-0.1}
-    BRAVE_MAX_CANDIDATES: ${BRAVE_MAX_CANDIDATES:-5}
-    BRAVE_PROGRESS_LOG_EVERY: ${BRAVE_PROGRESS_LOG_EVERY:-10}
-    BRAVE_DISCOVERY_CHECKPOINT_FILE: ${BRAVE_DISCOVERY_CHECKPOINT_FILE:-/opt/airflow/data/brave_search_discovery_checkpoint.json}
   volumes:
     - ./airflow/dags:/opt/airflow/dags
     - ./airflow/logs:/opt/airflow/logs
@@ -297,21 +171,6 @@ services:
       OVERPASS_PLANET_PREPROCESS: "osmium cat /db/planet.osm.bz2 -F pbf -f osm.bz2 -o /tmp/planet_converted.osm.bz2 && mv /tmp/planet_converted.osm.bz2 /db/planet.osm.bz2 && chmod o+x /db"
     volumes:
       - overpass-db:/db
-
-  nominatim:
-    image: mediagis/nominatim:4.4
-    profiles:
-      - geocoding
-    restart: unless-stopped
-    ports:
-      - "${NOMINATIM_PORT:-8081}:8080"
-    environment:
-      PBF_URL: ${OVERPASS_PLANET_URL:-https://download.geofabrik.de/europe/germany/berlin-latest.osm.pbf}
-      REPLICATION_URL: ${OVERPASS_DIFF_URL:-https://download.geofabrik.de/europe/germany/berlin-updates/}
-      NOMINATIM_PASSWORD: ${NOMINATIM_PASSWORD:-nominatim}
-    volumes:
-      - nominatim-db:/var/lib/postgresql/14/main
-    shm_size: "1gb"
 
   airflow-init:
     <<: *airflow-common
@@ -421,42 +280,6 @@ services:
       - -connectRetries=60
       - migrate
 
-  searxng:
-    image: searxng/searxng:latest
-    profiles:
-      - llm
-    ports:
-      - "${SEARXNG_PORT:-8888}:8080"
-    volumes:
-      - ./searxng:/etc/searxng:rw
-    environment:
-      SEARXNG_SECRET: ${SEARXNG_SECRET:-changeme_update_this}
-    cap_drop:
-      - ALL
-    cap_add:
-      - CHOWN
-      - SETGID
-      - SETUID
-    restart: unless-stopped
-
-  ollama:
-    image: ollama/ollama:latest
-    profiles:
-      - llm
-    ports:
-      - "${OLLAMA_PORT:-11434}:11434"
-    volumes:
-      - ollama-models:/root/.ollama
-    restart: unless-stopped
-    # Uncomment to enable NVIDIA GPU:
-    # deploy:
-    #   resources:
-    #     reservations:
-    #       devices:
-    #         - driver: nvidia
-    #           count: all
-    #           capabilities: [gpu]
-
   # --- Data Hub emulation: the platform services the hub runs for us ---------------------------
   # Profile `datahub`. Versions follow what the hub runs where known; see docs/datahub-emulation.md.
 
@@ -546,5 +369,3 @@ volumes:
   s3-data:
   pgadmin-data:
   overpass-db:
-  nominatim-db:
-  ollama-models:

@@ -2,7 +2,6 @@ name: Checks
 
 # The free checks and the migration image test. Called by ci.yml for every PR and push to main,
 # and by release.yml before a release is tagged, so nothing reaches an image unchecked.
-# The pinned-number tests (tests/integration/) are left out: they need one machine's example data.
 
 on:
   workflow_call:

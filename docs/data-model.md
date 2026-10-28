@@ -88,20 +88,19 @@ First, a dissolved company's domain is exactly the kind that gets sold to somebo
 
 Second, the expensive stages can skip them. `DISCOVERY_ACTIVE_ONLY=1` restricts every discovery
 query and every new model call to `register_status = 'aktiv'` — `in Liquidation` counts as inactive,
-which costs 7 high-confidence websites and skips 472 companies. It is **off by default**, on purpose:
-see the note on `SAMPLE_SQL` in `scripts/run_combined_discovery.py` before you compare a filtered run
-to anything.
+which on the earlier example data cost 7 high-confidence websites and skipped 472 companies. With
+a limit, the limit applies *after* the filter, so a limited run gets a different sample, not a
+smaller one. Compare a filtered run only with another filtered run.
 
 The column was added in `V13__company_register_status.sql`, which backfilled it from
 `metadata->>'status'` — the value had been imported all along, just never read. `metadata` keeps its
 copy as the raw source record.
 
-> **The manual load has to map this column.** There is no loader script in this repo: a prepared CSV
-> goes into Postgres by hand. `prepare_company_import.py` emits `register_status`, but if the
-> hand-written `\copy` column list leaves it out, every row lands `NULL`; the filter is `= 'aktiv'`,
-> which excludes `NULL`, so an active-only run would find nothing to do at all. `load_sample()`
-> raises rather than reporting a clean run over zero companies, but that is a net under the tightrope
-> — put the column in the copy list.
+> **The load has to map this column.** The prepared CSV goes into Postgres with a `\copy`.
+> `prepare_offeneregister_import.py` emits `register_status`, but if the `\copy` column list leaves
+> it out, every row lands `NULL`; the filter is `= 'aktiv'`, which excludes `NULL`, so an
+> active-only run would find nothing to do at all. The command in "Loading the OffeneRegister
+> Berlin set" below maps it.
 
 ### `public.sources`
 
@@ -110,7 +109,7 @@ This is the address book of upstream systems.
 Examples:
 
 - `handelsregister`
-- `berlin_gewerbedaten`
+- `offeneregister`
 - `northdata`
 - `manual_import`
 
@@ -154,7 +153,7 @@ Exactly one current row per `(source_id, external_id)`.
 
 This is the raw company row from one source.
 
-If `berlin_gewerbedaten` has company `12345`, that source row lives here.
+If `offeneregister` has company `F1103R_HRB12345`, that source row lives here.
 
 It keeps:
 
@@ -183,7 +182,7 @@ Examples:
 
 - company X, field `website_url`, value `https://example.com`, source `handelsregister`
 - company X, field `employee_count`, value `18`, source `manual_import`
-- company X, field `address`, value `Berlin, ...`, source `berlin_gewerbedaten`
+- company X, field `address`, value `Berlin, ...`, source `offeneregister`
 
 Each row stores:
 
@@ -298,7 +297,8 @@ Four things to know before using it.
    `registration_number`, which each carry 158 duplicates. A Berlin export may land before its
    companies are imported; NULL then means unmatched, never failed.
 
-Loaded by `scripts/import_northdata_export.py`, idempotent per file. Nothing reads the table yet:
+It was loaded by a Northdata import script that was removed with the Osnabrück data on 2026-10-28;
+the table stays in the schema until the squash in issue #18. Nothing reads it:
 whether an unverified third-party URL should outrank a page carrying the company's own register
 number is undecided, and the 207 companies where the two disagree are the evidence nobody has
 looked at.
@@ -309,8 +309,8 @@ looked at.
 January 2019. It is closer to the target than Osnabrück (it is Berlin) but it is still example data:
 6–9 years old, so companies founded since are missing and "active" means active in 2018.
 
-It goes into its **own database**, `unternehmensdatenbank_berlin`, so the Osnabrück database and the
-numbers pinned to it are untouched. Loaded on 2026-10-27:
+It is the content of `unternehmensdatenbank` since 2026-10-28 (loaded into a database of its own on
+2026-10-27, which then replaced the Osnabrück one). Loaded:
 
 | | |
 |---|---|
@@ -330,13 +330,11 @@ dropped too, person or company alike: **10,423** of the 116,527 addresses had on
 postcode, only parts with a digit (house number, building, postcode) are kept, so a name split by a
 comma ("Muster, Erika") goes as well. Street, postcode and city stay.
 
+Into an empty, migrated database (`./scripts/dev-up.sh` creates and migrates `unternehmensdatenbank`):
+
 ```bash
 python scripts/prepare_offeneregister_import.py openregister.db berlin.csv
-docker compose exec -T postgres psql -U postgres -c "CREATE DATABASE unternehmensdatenbank_berlin OWNER app"
-docker compose exec -T postgres psql -U postgres -d unternehmensdatenbank_berlin \
-  -c "CREATE EXTENSION IF NOT EXISTS postgis; CREATE EXTENSION IF NOT EXISTS vector;"
-APP_DB_NAME=unternehmensdatenbank_berlin docker compose --profile tools run --rm flyway
-docker compose exec -T postgres psql -U app -d unternehmensdatenbank_berlin -c "\copy public.companies \
+docker compose exec -T postgres psql -U app -d unternehmensdatenbank -c "\copy public.companies \
   (company_name, normalized_name, registration_number, legal_form, business_purpose, wz_code, address, \
   established_at, postcode, city, register_status, metadata) FROM STDIN WITH (FORMAT csv, HEADER true)" < berlin.csv
 ```
@@ -348,12 +346,8 @@ seat, status, the seven document flags, **former names (32,170 companies)**, **r
 none (179,959 rows), so every company has a city. Run it after the CSV load; it is safe to re-run.
 
 ```bash
-PG_DSN="host=localhost port=5433 dbname=unternehmensdatenbank_berlin user=app password=app" \
-  python scripts/import_offeneregister_records.py openregister.db
+python scripts/import_offeneregister_records.py openregister.db
 ```
-
-To point Airflow and Hasura at it, set `APP_DB_NAME=unternehmensdatenbank_berlin` in `.env` and
-recreate those containers.
 
 ## Resolution lifecycle
 
@@ -369,7 +363,7 @@ For each incoming company row from a source:
 
 ## Query groups
 
-The canonical query catalog lives in [core-queries.sql](core-queries.sql).
+Working queries: [core-queries-current.sql](core-queries-current.sql).
 
 The most important groups are:
 
