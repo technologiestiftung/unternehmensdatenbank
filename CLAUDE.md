@@ -81,11 +81,19 @@ Multi-source canonical resolution, detail in [data-model](docs/data-model.md):
 
 ## DAGs
 
-[airflow/dags/README.md](airflow/dags/README.md): `pipeline_coordinator`, `manager_ner_extract` /
-`manager_ner_train` (spaCy, retrained from the app's votes), `foerderkatalog` and `berlin_zuwendungen` (grants, `@monthly`), and the
-library `enrichment/`. `berlin_gewerbedaten` was removed on 2026-10-28: Berlin's open trade data is
-anonymised (no name, no street, no register number), so it cannot be linked to a company. Website discovery and the Technologiefeld have no DAG yet; they are rebuilt on
-the library next (#18).
+[airflow/dags/README.md](airflow/dags/README.md): `pipeline_coordinator`, `website_discovery`,
+`website_contacts` and `website_keywords` (contacts and keywords from the proven website),
+`manager_ner_extract` / `manager_ner_train` (spaCy, retrained from the app's votes),
+`foerderkatalog` and `berlin_zuwendungen` (grants, `@monthly`), and the library `enrichment/`.
+`berlin_gewerbedaten` was removed on 2026-10-28: Berlin's open trade data is anonymised (no name,
+no street, no register number), so it cannot be linked to a company. The Technologiefeld has no DAG
+yet; it is rebuilt on the library next (#18).
+
+- **`email` and `phone` are stored, never resolved.** `website_contacts` writes them, but a resolved
+  value reaches the app and `v_field_provenance`, and a sole trader's phone is personal data. They
+  stay unresolved until a privacy review clears them.
+- **A keyword is never a person's name.** `activity_keywords.is_candidate` drops anything
+  `imprint_extractor.looks_like_person_name` accepts, at the cost of some real two-word keywords.
 
 - DAG packages import their own modules **by package name** (`from enrichment.confidence import …`).
   A bare `from scorer import` after a `sys.path` insert once handed one package another's module.
@@ -153,6 +161,8 @@ the app's initContainer from the migration image ([release](docs/release.md)).
   (the coordinator does). A filter on the live view took up to 45 s.
 - **Grant links (V4)** are a table, refreshed by `refresh_company_funding_links()` after grants or
   companies load. Never link grants on read again: it made the company list take 71 s.
+- **A new profile column means rebuilding `company_profile_mv` (V8).** It froze `p.*` when it was
+  created, so `CREATE OR REPLACE` on `v_company_profile_live` alone never reaches the app. V8 shows how.
 - **Feedback and provenance (V3):** users can vote on every shown field, and `v_field_provenance`
   says where every shown value came from. A new shown field needs its key in both.
 

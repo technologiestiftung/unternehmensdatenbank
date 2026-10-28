@@ -10,6 +10,7 @@ from datetime import datetime, timezone
 from resolver import (
     compute_quality_scores,
     report_field_coverage,
+    resolve_activity_keywords,
     resolve_ceo_contact,
     resolve_cluster,
     resolve_employee_count,
@@ -69,12 +70,14 @@ def run_pipeline_coordinator() -> None:
                 # field names are deliberately resolved by nothing at all — see resolver.py.
                 n_tfeld     = resolve_technologiefeld(cur)
                 n_purpose   = resolve_purpose_field(cur)
+                n_keywords  = resolve_activity_keywords(cur)
 
         log.info(
             "Resolution complete — website=%d cluster=%d tech_field=%d "
             "revenue=%d employee_count=%d ceo_contact=%d "
-            "technologiefeld=%d purpose_field=%d canonical records upserted",
+            "technologiefeld=%d purpose_field=%d activity_keywords=%d canonical records upserted",
             n_website, n_cluster, n_tech, n_revenue, n_employees, n_ceo, n_tfeld, n_purpose,
+            n_keywords,
         )
 
         # Recompute quality scores

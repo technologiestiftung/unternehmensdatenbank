@@ -1,13 +1,16 @@
 # DAGs
 
-Three DAG packages and one library. The website-discovery and Technologiefeld DAGs are being rebuilt
-on the library (issue #18); until then the library's only Airflow caller is `manager_ner`.
+Seven DAG packages and one library. The Technologiefeld has no DAG yet; it is rebuilt on the
+library next (issue #18).
 
 | package | DAG id | schedule | flag | what it does |
 |---|---|---|---|---|
 | `pipeline_coordinator/` | `pipeline_coordinator` | triggered | — | the ONLY thing that decides which observation wins a field |
 | `manager_ner/` | `manager_ner_extract` | triggered | `ENABLE_MANAGER_NER` | spaCy reads the Impressum of companies with a website and writes Geschäftsführer names (source `spacy_ner`) |
 | | `manager_ner_train` | `@weekly` | `ENABLE_MANAGER_NER` | turns the app's votes into training examples; promotes a model only if it beats the current one on a held-out fifth |
+| `website_discovery/` | `website_discovery` | triggered | `ENABLE_WEBSITE_DISCOVERY` | guesses each company's domains, reads the Impressum, and keeps only websites the page proves are the company's (`confidence.identifies_company`) |
+| `website_contacts/` | `website_contacts` | triggered | `ENABLE_WEBSITE_CONTACTS` | the company's own `info@`-style email and phone from the Impressum of its proven website (source `impressum_contacts`). **Stored, not published**: nothing resolves `email`/`phone` until a privacy review. A failed read (no answer, no Impressum) is tried again, 3 times at most |
+| `website_keywords/` | `website_keywords` | triggered | `ENABLE_WEBSITE_KEYWORDS` | product and service keywords from the website's meta keywords and the headings of its services/products pages; generic ones measured out over all companies read; publishes `activity_keywords` (V8) once 500 companies are read; a site that did not load is tried again, 3 times at most |
 | `berlin_zuwendungen/` | `berlin_zuwendungen` | `@monthly` | `ENABLE_BERLIN_ZUWENDUNGEN` | the Land Berlin's own grants (Zuwendungsdatenbank) to HRA/HRB recipients into `company_fundings`, linked by register number (V6) |
 | `foerderkatalog/` | `foerderkatalog` | `@monthly` | `ENABLE_FOERDERKATALOG` | every Berlin grant from the Förderkatalog des Bundes into `company_fundings`; linked to companies on read (`v_company_fundings`) |
 | `enrichment/` | — | — | — | the library: URL patterns, OSM matching, Impressum regex, confidence, industry classification. Its `__init__.py` is the map |

@@ -416,6 +416,39 @@ def upsert_source_record(
     return row[0], bool(row[1])
 
 
+#: How often a website source tries a site that failed to load before leaving it alone.
+MAX_READ_ATTEMPTS = 3
+
+
+def failed_read_payload(payload: dict[str, Any], attempts: int) -> dict[str, Any]:
+    """The source payload of a read that failed: not read, tried once more than before."""
+    return {**payload, "failed": True, "attempts": attempts + 1}
+
+
+def companies_with_website_to_read(cur: Any, *, source_id: str, limit: int) -> list[tuple[str, str, str, int]]:
+    """Companies with a published website this source has not read: (id, name, website, attempts).
+
+    A company whose last read failed (`failed_read_payload`) comes back until it has been tried
+    `MAX_READ_ATTEMPTS` times, so a dead site cannot hold a batch slot forever.
+    """
+    cur.execute(
+        """
+        SELECT e.id, e.company_name, e.website_url,
+               COALESCE((r.source_payload ->> 'attempts')::int, 0)
+        FROM public.v_companies_enriched e
+        LEFT JOIN public.company_source_records r ON r.company_id = e.id AND r.source_id = %s
+        WHERE e.website_url IS NOT NULL
+          AND (r.id IS NULL
+               OR (r.source_payload ->> 'failed' = 'true'
+                   AND COALESCE((r.source_payload ->> 'attempts')::int, 0) < %s))
+        ORDER BY e.id
+        LIMIT %s
+        """,
+        (source_id, MAX_READ_ATTEMPTS, limit),
+    )
+    return cur.fetchall()
+
+
 def insert_text_observation(
     cur: Any,
     *,
