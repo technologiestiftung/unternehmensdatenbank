@@ -31,3 +31,11 @@ Industry classification (three columns that must never be mixed: docs/branch-cla
 Writing
   observations.py, branch_observations.py   turn results into `company_field_observations`
 """
+
+import warnings
+
+from bs4 import XMLParsedAsHTMLWarning
+
+# A guessed URL sometimes answers with XML (an RSS feed, a sitemap). Reading it as HTML is harmless,
+# it just yields no evidence, but bs4 warned once per page and buried website discovery's log lines.
+warnings.filterwarnings("ignore", category=XMLParsedAsHTMLWarning)
