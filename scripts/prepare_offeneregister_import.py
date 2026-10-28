@@ -112,7 +112,8 @@ def to_row(record: dict) -> dict:
         "address": address,
         "established_at": None,
         "postcode": postcode,
-        "city": city,
+        # The registered seat when the address has none: every row has a seat, a third an address.
+        "city": city or (record.get("registered_office") or "").strip() or None,
         "register_status": STATUS.get(record["current_status"]),
         "metadata_json": json.dumps(
             {
@@ -134,7 +135,7 @@ def main() -> int:
     db = sqlite3.connect(f"file:{source}?mode=ro", uri=True)
     db.row_factory = sqlite3.Row
     rows = db.execute(
-        "SELECT company_number, native_company_number, name, current_status, registered_address, retrieved_at"
+        "SELECT company_number, native_company_number, name, current_status, registered_address, registered_office, retrieved_at"
         " FROM company WHERE federal_state = ? AND name <> ''",
         (FEDERAL_STATE,),
     )

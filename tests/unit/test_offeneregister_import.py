@@ -6,6 +6,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "scripts"))
 
+from import_offeneregister_records import REGISTRATION_FIELDS, payload  # noqa: E402
 from prepare_offeneregister_import import legal_form, parse_address, to_row  # noqa: E402
 
 
@@ -68,3 +69,36 @@ def test_row_uses_northdatas_register_format_and_german_status() -> None:
     assert row["register_status"] == "erloschen"
     assert row["address"] is None and row["postcode"] is None
     assert row["legal_form"] == "GmbH" and row["normalized_name"] == "beispiel"
+
+
+def test_city_falls_back_to_the_registered_seat() -> None:
+    row = to_row({
+        "company_number": "F1103R_HRB2", "native_company_number": "Berlin (Charlottenburg) HRB 2",
+        "name": "Beispiel GmbH", "current_status": "currently registered", "registered_address": "",
+        "registered_office": "Potsdam", "retrieved_at": "2018-11-01T00:00:00Z",
+    })
+    assert row["city"] == "Potsdam" and row["address"] is None
+
+
+def test_payload_keeps_register_history_and_drops_raw_address_and_same_name() -> None:
+    company = {
+        "company_number": "F1103R_HRB3", "native_company_number": "Berlin (Charlottenburg) HRB 3",
+        "name": "Neu GmbH", "current_status": "currently registered", "jurisdiction_code": "de",
+        "registered_address": "Weg 1, 10115 Berlin Geschäftsführer: Erika Muster", "registered_office": "Berlin",
+        "registrar": "Berlin (Charlottenburg)", "register_art": "HRB", "register_nummer": "3",
+        "_registerNummerSuffix": "", "former_registrar": "", "federal_state": "Berlin",
+        "retrieved_at": "2018-11-01T00:00:00Z",
+        "register_flag_AD": 1, "register_flag_CD": 0, "register_flag_DK": 1, "register_flag_HD": 0,
+        "register_flag_SI": 1, "register_flag_UT": 0, "register_flag_VOE": 1,
+    }
+    names = [{"company_name": "Alt GmbH"}, {"company_name": "neu  gmbh"}]
+    # A real sqlite row has every column; empty ones must not reach the payload.
+    moves = [dict.fromkeys(REGISTRATION_FIELDS) | {
+        "data_type": "subsequent-registration", "previous_company_number": "F1103R_HRB1", "source_url": ""}]
+    p = payload(company, names, moves)
+    assert p["former_names"] == ["Alt GmbH"]
+    assert p["address"]["address"] == "Weg 1, 10115 Berlin"
+    assert "Erika" not in str(p)
+    assert p["register"]["document_flags"] == {"AD": True, "CD": False, "DK": True, "HD": False,
+                                               "SI": True, "UT": False, "VÖ": True}
+    assert p["registrations"] == [{"data_type": "subsequent-registration", "previous_company_number": "F1103R_HRB1"}]

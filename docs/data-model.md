@@ -339,6 +339,17 @@ docker compose exec -T postgres psql -U app -d unternehmensdatenbank_berlin -c "
   established_at, postcode, city, register_status, metadata) FROM STDIN WITH (FORMAT csv, HEADER true)" < berlin.csv
 ```
 
+Everything else the dump knows goes into **`company_source_records`**, one row per company under
+the source `offeneregister`, so nothing is lost: register court, type and number, registered
+seat, status, the seven document flags, **former names (32,170 companies)** and **register moves
+(25,584)**. The same script fills `companies.city` from the registered seat where the address gave
+none (179,959 rows), so every company has a city. Run it after the CSV load; it is safe to re-run.
+
+```bash
+PG_DSN="host=localhost port=5433 dbname=unternehmensdatenbank_berlin user=app password=app" \
+  python scripts/import_offeneregister_records.py openregister.db
+```
+
 To point Airflow and Hasura at it, set `APP_DB_NAME=unternehmensdatenbank_berlin` in `.env` and
 recreate those containers.
 
