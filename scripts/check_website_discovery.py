@@ -255,19 +255,6 @@ for killer in (conf.DIRECTORY_HOST, conf.REGISTER_MISMATCH, conf.HOST_NAME_MISMA
     check(f"{killer} is not promotable", verdict.promotable, False)
     check(f"{killer} says why", verdict.disqualified_because, killer)
 
-# A model reading search snippets has read text ABOUT the company, not the company's page.
-llm_only = conf.score(methods=[conf.METHOD_LOCAL_LLM], evidence=set(), name_uniqueness=1.0)
-check_true("an unchecked model pick stays below the promotion bar", not llm_only.promotable)
-check("an unchecked model pick is capped", llm_only.value <= conf.UNVERIFIED_CAP, True)
-
-# ...but the same URL, once downloaded and verified, is allowed up the ladder.
-llm_verified = conf.score(
-    methods=[conf.METHOD_LOCAL_LLM],
-    evidence={conf.IMPRINT_FOUND, conf.REGISTER_MATCH, conf.NAME_ON_PAGE},
-    name_uniqueness=1.0,
-)
-check_true("a verified model pick is promotable", llm_verified.promotable)
-
 # A guessed domain that answers, but where nothing on the page ties it to the company, is not
 # an answer. This is the case the old scorer accepted at 0.35+ and this one refuses.
 bare_guess = conf.score(
@@ -277,17 +264,17 @@ check_true("a guess with no page evidence is not promotable", not bare_guess.pro
 
 # Two methods that share no inputs beyond the name reaching the same host is real evidence.
 #
-# All three rows below carry NAME_ON_PAGE, and that is not decoration. Since 2026-08-14 an Impressum
-# no longer lifts UNVERIFIED_CAP, so without a fact naming this company every one of these rows would
-# sit at 0.34 and the arithmetic being tested here would be invisible under the cap.
+# All three rows below carry NAME_ON_PAGE and POSTCODE_MATCH, and that is not decoration: only an
+# identity proof lifts UNVERIFIED_CAP (name AND postcode is one), so without it every row would sit
+# at 0.34 and the arithmetic being tested here would be invisible under the cap.
 alone = conf.score(
     methods=[conf.METHOD_OSM],
-    evidence={conf.IMPRINT_FOUND, conf.NAME_ON_PAGE},
+    evidence={conf.IMPRINT_FOUND, conf.NAME_ON_PAGE, conf.POSTCODE_MATCH},
     name_uniqueness=0.5,
 )
 together = conf.score(
     methods=[conf.METHOD_OSM, conf.METHOD_URL_PATTERN],
-    evidence={conf.IMPRINT_FOUND, conf.NAME_ON_PAGE, conf.AGREE_TWO},
+    evidence={conf.IMPRINT_FOUND, conf.NAME_ON_PAGE, conf.POSTCODE_MATCH, conf.AGREE_TWO},
     name_uniqueness=0.5,
 )
 check_true("agreement raises confidence", together.value > alone.value)
@@ -295,8 +282,8 @@ check("agreement is named as the reason", together.verified_by, "method_agreemen
 
 # Three-way agreement replaces the two-way bonus rather than stacking with it.
 three = conf.score(
-    methods=[conf.METHOD_OSM, conf.METHOD_URL_PATTERN, conf.METHOD_LOCAL_LLM],
-    evidence={conf.IMPRINT_FOUND, conf.NAME_ON_PAGE, conf.AGREE_TWO, conf.AGREE_THREE},
+    methods=[conf.METHOD_OSM, conf.METHOD_URL_PATTERN],
+    evidence={conf.IMPRINT_FOUND, conf.NAME_ON_PAGE, conf.POSTCODE_MATCH, conf.AGREE_TWO, conf.AGREE_THREE},
     name_uniqueness=0.5,
 )
 check(
@@ -353,10 +340,10 @@ check_true(
     ).promotable,
 )
 check_true(
-    "one fact naming the company changes that",
+    "the company's name and postcode together change that",
     conf.score(
         methods=[conf.METHOD_OSM],
-        evidence={conf.IMPRINT_FOUND, conf.HOST_EXACT, conf.OSM_STRONG_MATCH, conf.NAME_ON_PAGE},
+        evidence={conf.IMPRINT_FOUND, conf.HOST_EXACT, conf.OSM_STRONG_MATCH, conf.NAME_ON_PAGE, conf.POSTCODE_MATCH},
         name_uniqueness=1.0,
     ).promotable,
 )
@@ -506,9 +493,10 @@ email_confirmed = conf.score(
         conf.OSM_STRONG_MATCH,
         conf.IMPRINT_FOUND,
         conf.NAME_ON_PAGE,
+        conf.POSTCODE_MATCH,
     },
 )
-check_true("and once the page names the company, it can", email_confirmed.promotable)
+check_true("and once the page names the company and its postcode, it can", email_confirmed.promotable)
 
 # It lifts that refusal and nothing else. A business mapped with an email at a directory is a
 # mapping mistake, not a website.
@@ -558,194 +546,43 @@ check(
 
 
 # ---------------------------------------------------------------------------------------
-# The judge — what a local language model reading the page is allowed to change
-#
-# Every case here exists because the alternative has cost this project data before: a page that
-# merely mentions a company became that company's website. A model is confident and fluent and
-# will say "yes, this is their site" about a directory listing, so the limits are enforced in code
-# rather than asked for in the prompt.
+# The identity rule: what makes a page THIS company's website (agreed 2026-10-28, issue #18)
 # ---------------------------------------------------------------------------------------
-
-# The model likes the page, but the page proved nothing at all — no Impressum, no name, no
-# postcode. It must stay under the promotion bar. This is THE case: if it ever passes, the model
-# has become the evidence instead of weighing it.
-opinion_only = conf.score(
-    methods=[conf.METHOD_URL_PATTERN],
-    evidence={conf.LLM_OWN_SITE, conf.NO_IMPRINT},
-    name_uniqueness=1.0,
-)
-check_true("a model's opinion alone cannot promote a page", not opinion_only.promotable)
-check("and it is the unverified cap that stops it", opinion_only.value, conf.UNVERIFIED_CAP)
-
-# With real page evidence present, the opinion is allowed to add to it.
-with_facts = conf.score(
-    methods=[conf.METHOD_URL_PATTERN],
-    evidence={conf.IMPRINT_FOUND, conf.NAME_ON_PAGE, conf.LLM_OWN_SITE},
-    name_uniqueness=1.0,
-)
-without_facts = conf.score(
-    methods=[conf.METHOD_URL_PATTERN],
-    evidence={conf.IMPRINT_FOUND, conf.NAME_ON_PAGE},
-    name_uniqueness=1.0,
-)
-check_true("with real evidence present, the opinion adds to it", with_facts.value > without_facts.value)
-check_true("and the row is promotable", with_facts.promotable)
-
-# A model calling a directory page a company's own website changes nothing.
-directory_but_model_likes_it = conf.score(
-    methods=[conf.METHOD_URL_PATTERN],
-    evidence={conf.DIRECTORY_HOST, conf.LLM_OWN_SITE, conf.IMPRINT_FOUND},
-)
-check("a model cannot rescue a directory page", directory_but_model_likes_it.value, 0.0)
-check(
-    "and the refusal still names the real reason",
-    directory_but_model_likes_it.disqualified_because,
-    conf.DIRECTORY_HOST,
-)
-
-# "This page is about the company but is not theirs" is a penalty, not a death sentence. The model
-# is not given the power to delete a row that the page's own facts support.
-about = conf.score(
-    methods=[conf.METHOD_URL_PATTERN],
-    evidence={conf.IMPRINT_FOUND, conf.NAME_ON_PAGE, conf.LLM_ABOUT_COMPANY},
-    name_uniqueness=1.0,
-)
-check_true("'about the company' costs the row something", about.value < without_facts.value)
-check("but does not disqualify it", about.disqualified_because, None)
-
-# A page the model says belongs to somebody else may not become a company's website, however much
-# other evidence it carries.
 #
-# Measured 2026-08-12 on 100 companies, before this cap existed: 5 of the 11 promoted websites were
-# pages the judge had explicitly rejected — a DomainMarket sales listing, a US haircare brand, a
-# company in Ohio, a yacht charter, a differently-owned winery. A -0.20 penalty moved them from
-# `medium` to `low` and left them above the 0.35 bar, so the arithmetic overruled the model.
-for verdict_flag in (conf.LLM_UNRELATED, conf.LLM_ABOUT_COMPANY):
-    rejected = conf.score(
-        methods=[conf.METHOD_URL_PATTERN],
-        evidence={conf.IMPRINT_FOUND, conf.NAME_ON_PAGE, conf.HOST_EXACT, verdict_flag},
-        name_uniqueness=1.0,
-    )
-    check(f"{verdict_flag} caps the row", rejected.value, conf.NOT_OWN_SITE_CAP)
-    check(f"{verdict_flag} row is not promotable", rejected.promotable, False)
-    # A cap, not a disqualification: the row keeps its evidence and stays readable.
-    check(f"{verdict_flag} is not a disqualifier", rejected.disqualified_because, None)
-    check_true(
-        f"{verdict_flag} row still lists what was found",
-        conf.IMPRINT_FOUND in rejected.evidence,
-    )
-    check_true("and the arithmetic says why it was capped", "belongs to somebody else" in rejected.why)
+# Checked against their Impressum, only 34 of 106 Berlin websites had the register number or a
+# register officer on it; most of the rest rested on the company's name appearing somewhere on the
+# page, which a reseller, a namesake or a group page does too. So one fact is no longer enough: the
+# page needs the register number, a Geschäftsführer who is a register officer, or name AND postcode.
 
-# The cap binds even against the strongest evidence there is. A register number on a page the model
-# calls a directory is the exact combination that scored 0.805 and reached `high` before any of
-# this existed.
-strongest = conf.score(
-    methods=[conf.METHOD_URL_PATTERN],
-    evidence={conf.REGISTER_MATCH, conf.POSTCODE_MATCH, conf.IMPRINT_FOUND, conf.LLM_ABOUT_COMPANY},
-    name_uniqueness=1.0,
-)
-check("even a register match cannot beat the cap", strongest.promotable, False)
 
-# And it must not touch a page the model approved of, or one it never saw.
-check_true(
-    "an approved page is untouched by the cap",
-    conf.score(
-        methods=[conf.METHOD_URL_PATTERN],
-        evidence={conf.IMPRINT_FOUND, conf.NAME_ON_PAGE, conf.HOST_EXACT, conf.LLM_OWN_SITE},
-        name_uniqueness=1.0,
-    ).promotable,
-)
-check_true(
-    "a page the judge never read is untouched by the cap",
-    conf.score(
-        methods=[conf.METHOD_URL_PATTERN],
-        evidence={conf.IMPRINT_FOUND, conf.REGISTER_MATCH},
-        name_uniqueness=1.0,
-    ).promotable,
-)
+def _promotable(*evidence: str, methods=(conf.METHOD_URL_PATTERN,)) -> bool:
+    return conf.score(methods=list(methods), evidence=set(evidence), name_uniqueness=1.0).promotable
 
-# THE case this whole stage exists for. A directory prints the name, the address and the
-# commercial-register number of every company it lists, so a register match on a directory page is
-# worthless — and worth +0.45, which used to be enough to reach the `high` band on its own. Measured
-# on a hand-written FirmenWissen listing: 0.805 and `high` before this rule existed.
-quoting_directory = conf.score(
-    methods=[conf.METHOD_URL_PATTERN],
-    evidence={
-        conf.REGISTER_MATCH,
-        conf.POSTCODE_MATCH,
-        conf.IMPRINT_FOUND,
-        conf.LLM_ABOUT_COMPANY,
-    },
-    name_uniqueness=1.0,
-)
-publishing_own_site = conf.score(
-    methods=[conf.METHOD_URL_PATTERN],
-    evidence={conf.REGISTER_MATCH, conf.POSTCODE_MATCH, conf.IMPRINT_FOUND},
-    name_uniqueness=1.0,
-)
-check_true(
-    "a quoted register number scores far below a published one",
-    quoting_directory.value < publishing_own_site.value - 0.4,
-)
-check("and no longer reaches the high band", quoting_directory.band != "high", True)
+
+check_true("the name alone no longer promotes a page", not _promotable(conf.IMPRINT_FOUND, conf.HOST_EXACT, conf.NAME_ON_PAGE))
+check_true("the postcode alone does not either", not _promotable(conf.IMPRINT_FOUND, conf.HOST_EXACT, conf.POSTCODE_MATCH))
+check_true("name and postcode together do", _promotable(conf.IMPRINT_FOUND, conf.HOST_EXACT, conf.NAME_ON_PAGE, conf.POSTCODE_MATCH))
+check_true("so do the site's own structured name and postcode", _promotable(conf.IMPRINT_FOUND, conf.HOST_EXACT, conf.JSONLD_NAME_MATCH, conf.JSONLD_POSTCODE_MATCH))
+check_true("the own register number does", _promotable(conf.IMPRINT_FOUND, conf.REGISTER_MATCH))
+check_true("a Geschäftsführer who is a register officer does", _promotable(conf.IMPRINT_FOUND, conf.OFFICER_MATCH))
 check(
-    "and is never credited as register-number proof",
-    quoting_directory.verified_by != conf.REGISTER_MATCH,
-    True,
+    "and is named as the reason",
+    conf.score(methods=[conf.METHOD_URL_PATTERN], evidence={conf.IMPRINT_FOUND, conf.OFFICER_MATCH}).verified_by,
+    "officer_match",
 )
-check_true(
-    "but the row survives on its other merits rather than being deleted",
-    quoting_directory.value > 0.0 and quoting_directory.disqualified_because is None,
-)
-check_true(
-    "and the arithmetic says out loud why the number earned nothing",
-    "only quotes it" in quoting_directory.why,
-)
-# The evidence list still reports the register number. Hiding it would make the row unarguable.
-check_true(
-    "the suppressed register match is still listed as evidence",
-    conf.REGISTER_MATCH in quoting_directory.evidence,
-)
+check_true("identifies_company agrees with all of the above",
+           conf.identifies_company({conf.OFFICER_MATCH})
+           and conf.identifies_company({conf.NAME_ON_PAGE, conf.JSONLD_POSTCODE_MATCH})
+           and not conf.identifies_company({conf.NAME_ON_PAGE, conf.JSONLD_NAME_MATCH, conf.IMPRINT_FOUND}))
+# A matching officer never rescues a page the rules refuse outright: a directory lists managers
+# too, and a different register number means a different company.
+check("an officer match cannot rescue a directory page",
+      conf.score(methods=[conf.METHOD_URL_PATTERN], evidence={conf.DIRECTORY_HOST, conf.OFFICER_MATCH}).value, 0.0)
+check("nor a page with a different register number",
+      conf.score(methods=[conf.METHOD_URL_PATTERN], evidence={conf.REGISTER_MISMATCH, conf.OFFICER_MATCH}).value, 0.0)
 
-# An industry domain is overruled by a register match only when that match is real proof. A
-# directory sitting on a generic domain must stay refused.
-check(
-    "a quoted register number cannot overrule an industry domain",
-    conf.score(
-        methods=[conf.METHOD_URL_PATTERN],
-        evidence={conf.GENERIC_HOST, conf.REGISTER_MATCH, conf.LLM_ABOUT_COMPANY},
-    ).value,
-    0.0,
-)
-
-# `unsure` must be indistinguishable from not having asked. A judge with no opinion may not move
-# the number in either direction.
-unsure = conf.score(
-    methods=[conf.METHOD_URL_PATTERN],
-    evidence={conf.IMPRINT_FOUND, conf.NAME_ON_PAGE},
-    name_uniqueness=1.0,
-)
-check("an unsure judge changes nothing", unsure.value, without_facts.value)
-
-# `verified_by` must never credit the model when the page itself supplied the reason.
-check(
-    "a page fact outranks the model in verified_by",
-    conf.score(
-        methods=[conf.METHOD_URL_PATTERN],
-        evidence={conf.NAME_ON_PAGE, conf.IMPRINT_FOUND, conf.LLM_OWN_SITE},
-    ).verified_by,
-    "page_content_match",
-)
-check(
-    "the model is credited only when it is the best reason we have",
-    conf.score(
-        methods=[conf.METHOD_URL_PATTERN], evidence={conf.LLM_OWN_SITE}
-    ).verified_by,
-    "llm_judge",
-)
-
-# One register-number reading, shared by the regex and the model, so the same page can never match
-# for one and mismatch for the other.
+# One register-number reading, so the same page can never match for one caller and mismatch for
+# another.
 check("the register digits come out of a full register string", conf.register_digits("Amtsgericht Osnabrück HRB 213220"), "213220")
 check("a bare number survives", conf.register_digits("HRB 882"), "882")
 check("nothing in, nothing out", conf.register_digits(None), "")
@@ -906,6 +743,26 @@ def _evidence(html: str, extracted: dict | None = None) -> set[str]:
     got, _seen = pl._page_evidence(_OWN_HOST, _PageCompany(), html=html, extracted=extracted)
     return got
 
+
+# The Geschäftsführer match, read off a real Impressum the way the pipeline reads it. Officers arrive
+# as person_key comparison keys; titles and case must not stop a match, and a different person must
+# not make one. Made-up names.
+from enrichment.imprint_extractor import extract_from_html, person_key  # noqa: E402
+
+
+def _with_officers(*names: str) -> "_PageCompany":
+    company = _PageCompany()
+    company.officers = frozenset(person_key(n) for n in names)
+    return company
+
+
+_IMPRESSUM = "<html><h1>Impressum</h1><p>Zweirad Liebig GmbH</p><p>Geschäftsführer: Dr. Erika Muster</p></html>"
+_extracted = extract_from_html(_IMPRESSUM)
+_officer_hit, _ = pl._page_evidence(_OWN_HOST, _with_officers("Erika Muster"), html=_IMPRESSUM, extracted=_extracted)
+check_true("an officer named on the Impressum is an officer match", conf.OFFICER_MATCH in _officer_hit)
+_officer_miss, _ = pl._page_evidence(_OWN_HOST, _with_officers("Max Beispiel"), html=_IMPRESSUM, extracted=_extracted)
+check_true("a different person is not", conf.OFFICER_MATCH not in _officer_miss)
+check_true("and a company without officers gets no match", conf.OFFICER_MATCH not in _evidence(_IMPRESSUM, _extracted))
 
 # The register number is often printed in a page footer while the Impressum itself cannot be found —
 # the link is an image, or it is behind JavaScript. Reading it with a regex is free; the model used

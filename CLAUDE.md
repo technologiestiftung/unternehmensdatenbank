@@ -102,9 +102,10 @@ Read [website-verification](docs/website-verification.md) before touching `confi
   `own_site.is_own_site_candidate` is the single predicate for that call; a looser one anywhere else
   is the recurring bug.
 - **"A real business site" is not "THAT company's site."** Every German business site has an
-  Impressum, a VAT number and a contact email at its own domain. That evidence may add score but must
-  stay out of `confidence._VERIFYING_EVIDENCE`, or it lifts the 0.34 cap and promotes pages naming
-  nobody — how 190 wrong websites got promoted once.
+  Impressum, a VAT number and a contact email at its own domain. That evidence may add score but
+  never makes a page the company's website: only `confidence.identifies_company` does, and it asks
+  for the own register number, a Geschäftsführer who is a register officer, or name AND postcode
+  together. Letting the Impressum alone count once promoted 190 wrong websites.
 - **Never grow a list of bad domains or words.** Genericness is *measured*:
   `name_frequency.common_words` counts company names, `common_email_domains` counts mapped businesses.
 - **`enrichment/observations.py` is the write path for discovery results.** Its `evidence` set must be

@@ -69,7 +69,13 @@ from enrichment.confidence import WEBSITE_MIN_CONFIDENCE
 
 log = logging.getLogger(__name__)
 
-SOURCE_KEY = "combined_discovery"
+#: The source this write path files under. `website_discovery` since the identity rule of 2026-10-28
+#: (issue #18); rows written before it stay under `combined_discovery` as history, re-scored to the
+#: new rule by `website_discovery.main.rescore_websites`.
+SOURCE_KEY = "website_discovery"
+SOURCE_NAME = "Website discovery (URL patterns + OpenStreetMap, checked against the Impressum)"
+#: Every source this write path has filed websites under, for re-scoring.
+WEBSITE_SOURCE_KEYS = ("combined_discovery", SOURCE_KEY)
 
 #: Evidence names that mean "this is a page about the company, not the company's page".
 _THIRD_PARTY_EVIDENCE = frozenset({"directory_host", "host_name_mismatch"})

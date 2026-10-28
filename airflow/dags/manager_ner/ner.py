@@ -28,7 +28,7 @@ from collections import Counter
 from dataclasses import dataclass, field
 from typing import Any, Iterable
 
-from enrichment.imprint_extractor import ceo_label_windows
+from enrichment.imprint_extractor import ceo_label_windows, person_key
 
 LABEL = "PER"
 
@@ -36,15 +36,10 @@ LABEL = "PER"
 #: single word (a first name alone, a role, a town), so one-word spans are not reported.
 MIN_NAME_TOKENS = 2
 
-_TITLE = re.compile(r"^(dr\.?|prof\.?|dipl\.[-\w.]*)\s+", re.IGNORECASE)
-
 
 def normalize(name: str) -> str:
     """The comparison key for a name: lower case, no academic title, single spaces."""
-    name = re.sub(r"\s+", " ", name.strip(" ,.;:").lower())
-    while _TITLE.match(name):
-        name = _TITLE.sub("", name)
-    return name
+    return person_key(name)
 
 
 def window_text(page: str) -> str:

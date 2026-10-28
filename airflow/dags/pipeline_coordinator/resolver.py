@@ -131,6 +131,25 @@ def _apply_canonical(
     )
     n_winners = cur.rowcount
 
+    # A company whose published value no longer has any qualifying observation loses it. Without
+    # this, a re-score that drops a website below the bar (or any value whose confidence falls) left
+    # the old value published for good, because this function only ever wrote winners. Only the
+    # pointer goes: the observation stays, un-canonicalised, as every observation does.
+    cur.execute(
+        f"""
+        WITH stale AS (
+          DELETE FROM public.company_canonical_field_sources c
+          WHERE c.field_name = %s
+            AND NOT EXISTS (SELECT 1 FROM {_TMP_TABLE} w WHERE w.company_id = c.company_id)
+          RETURNING c.company_field_observation_id
+        )
+        UPDATE public.company_field_observations o
+        SET is_canonical = false, updated_at = now()
+        WHERE o.id IN (SELECT company_field_observation_id FROM stale) AND o.is_canonical
+        """,
+        (logical_field,),
+    )
+
     if n_winners == 0:
         return 0
 

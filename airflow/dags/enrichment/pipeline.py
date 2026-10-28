@@ -29,7 +29,7 @@ from urllib.parse import urlparse
 
 from enrichment.imprint_probe import best_imprint
 from enrichment.own_site import origin_url, own_site_verdict
-from enrichment.imprint_extractor import extract_from_html, extract_register_numbers
+from enrichment.imprint_extractor import extract_from_html, extract_register_numbers, person_key
 from enrichment.url_scorer import name_uniqueness
 
 from enrichment import confidence as conf
@@ -279,6 +279,12 @@ def _page_evidence(
         )
         if company.postcode and company.postcode in page_postcodes:
             evidence.add(conf.POSTCODE_MATCH)
+        # A Geschäftsführer on the Impressum who is one of the company's register officers. The
+        # officers are personal data: they arrive as comparison keys only, and only the evidence
+        # NAME is stored, never which person matched.
+        officers = getattr(company, "officers", None) or frozenset()
+        if officers and any(person_key(n) in officers for n in extracted.get("ceo_names") or []):
+            evidence.add(conf.OFFICER_MATCH)
     else:
         evidence.add(conf.NO_IMPRINT)
 
