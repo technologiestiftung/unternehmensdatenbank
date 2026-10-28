@@ -373,6 +373,21 @@ under 10 ms. `refresh_company_profile()` rebuilds it in about 3 seconds and refr
 statistics; the coordinator calls it at the end of every run, the Förderkatalog DAG and the
 OffeneRegister import after they load. Between refreshes the list shows the last resolved state.
 
+## Berlin grants (V6)
+
+`company_fundings` now holds a second source: the Land Berlin's Zuwendungsdatenbank (DAG
+`berlin_zuwendungen`, monthly). Each grant has a `source` (`foerderkatalog` or `berlin_zuwendungen`).
+Berlin grants also keep the recipient's register entry (`recipient_register`, e.g. `HRB 84522`) and
+policy area. Only grants to an HRA/HRB entry are loaded: 22,354 of the 55,454 on 2026-10-28.
+The others went to associations, public bodies and recipients without a register entry.
+
+`refresh_company_funding_links()` links a grant that names a register entry **by that entry only**
+(`match_method = 'register_number'`). A grant without one is linked by name and city, as before. A register
+number that matches none of our companies stays unlinked, whatever the name says. Measured
+2026-10-28: 18,427 Berlin grants linked to 3,861 companies (6.6 bn €), 3,927 unlinked. Companies
+with any grant: 1,691 → 5,179. The unlinked ones are most likely companies registered after the
+OffeneRegister snapshot (2017–2019); not checked.
+
 ## Identifiers and matching (V2)
 
 How a record from any source finds its company. In this order:
