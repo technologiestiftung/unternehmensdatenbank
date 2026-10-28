@@ -338,9 +338,19 @@ The most important groups are:
 
 ## Migration strategy
 
-- `V1__baseline.sql` is the whole schema as of 2026-10-28: 24 earlier migrations squashed while
-  nothing was deployed (issue #18). `V2__identifiers_and_matching.sql` adds identifiers, matching
-  and pipeline state.
+- `V1__baseline.sql` is the whole schema as of 2026-10-29. Nothing was deployed, so the migrations
+  before it were squashed twice: the 24 of the Osnabrück era on 2026-10-28 (issue #18), then V1-V9
+  of the Berlin rebuild on 2026-10-29. Checked: a database built from it and one built from the old
+  files dump to the same schema, grants and seed rows. The sections below keep the old migration
+  names in brackets, so git history finds the reasoning.
+- **A local database migrated before the squash** still has the old files in its Flyway history,
+  and Flyway refuses to run until that is reset. The schema is already the same, so no data moves:
+  ```bash
+  docker compose exec -T postgres psql -U app -d unternehmensdatenbank -c "DROP TABLE flyway_schema_history"
+  docker compose --profile tools run --rm flyway baseline -baselineVersion=1 -baselineDescription=baseline
+  ```
+  Only for a database that was at V9. One with an unmerged migration on top (a V10 from a branch)
+  keeps that table and column; renumber the migration to V2 before it lands.
 - From here on: forward-only, and never edit a migration that has run anywhere shared.
 - Add new schema changes under `db/migrations` as `V{N}__description.sql`.
 - Run Flyway before Airflow workers interact with changed schema.

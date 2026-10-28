@@ -100,7 +100,7 @@ flowchart TB
 
 | Piece | Lives in | Runs on |
 |---|---|---|
-| Database schema (migrations V1 baseline + V2) | data repo, `db/migrations/` | hub Postgres, once per environment |
+| Database schema (migration `V1__baseline.sql` and any after it) | data repo, `db/migrations/` | hub Postgres, once per environment |
 | Pipelines (Airflow DAGs, scripts) | data repo, `airflow/dags/`, `scripts/` | hub Airflow |
 | GraphQL API and permissions | data repo, `hasura/metadata/` | hub Hasura |
 | Login realm (local reference) | data repo, `keycloak/` | hub Keycloak |

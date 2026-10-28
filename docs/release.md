@@ -8,7 +8,7 @@ Flyway for us. It runs an **image** we build, before the app starts.
 
 | kind | example | goes where |
 |---|---|---|
-| schema | `V2__identifiers_and_matching.sql` | a migration |
+| schema | a new table or column, e.g. `V2__add_something.sql` | a migration |
 | reference data the code needs | `sources` rows with their priority | a migration |
 | a one-off data fix | deduplicating rows a bug wrote twice | a migration |
 | business data | Fusionbase, Förderkatalog, enrichment, users' votes | **never** a migration: the DAGs and the app write it |
