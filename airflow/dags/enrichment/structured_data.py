@@ -37,6 +37,8 @@ from typing import Any
 
 from bs4 import BeautifulSoup
 
+from enrichment.http_client import SOUP_OPTIONS
+
 log = logging.getLogger(__name__)
 
 #: `type="application/ld+json"` with the tolerance real pages need: any capitalisation, optional
@@ -70,7 +72,7 @@ def _blocks(html: str) -> list[str]:
     """The raw text of every JSON-LD script block on the page."""
     found: list[str] = []
     try:
-        soup = BeautifulSoup(html, "lxml")
+        soup = BeautifulSoup(html, "lxml", **SOUP_OPTIONS)
         for script in soup.find_all("script"):
             if _LD_JSON_TYPE.match(script.get("type") or ""):
                 text = script.string or script.get_text() or ""
