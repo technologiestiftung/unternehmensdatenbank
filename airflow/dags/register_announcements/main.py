@@ -21,10 +21,17 @@ allow 60 an hour.
 
 **Every announcement becomes a source record** (`external_id` = the portal's id), linked to its
 company by register number through `company_identifiers`. On 2026-10-28, 451 of the 900 matched a
-company we had, every one of them `aktiv` in the 2017–2019 snapshot. The others are almost certainly
-registered after it, so their company is **created**: name, legal form, city and register number, the
+company we had, every one of them `aktiv` in the 2017–2019 snapshot. An unknown register number can
+still be a company we have, under its old number (a change of legal form gets a new one), so the name
+comes second (`name_match`): exactly one company that is not merged with the same `normalized_name` and
+city is linked (`match_method = 'fuzzy'`, confidence 0.9) and gets the register number as an
+identifier. Otherwise the company is **created**: name, legal form, city and register number, the
 same `normalized_name` and `legal_form` the OffeneRegister import writes (`enrichment.register_names`),
-`match_method = 'created'`. Only Berlin's court is read, so only Berlin companies are created.
+`match_method = 'created'`; when several companies shared name and city, each becomes an open
+`match_candidates` row for a person to decide. On 2026-10-28, 14 of the 425 companies created without
+this rule shared name key and city with a company we had (11 `aktiv`), and 66 grant links by name and
+city would have been lost, because those need a unique name per city. Only Berlin's court is read, so
+only Berlin companies are created.
 
 **What the app shows** is a hint, never the status: `register_announcement` is the latest announcement's
 kind, with its date. A deletion announcement does not make a company `erloschen`; the court deletes it
@@ -82,7 +89,7 @@ class Announcement:
     #: As `company_identifiers` holds it: "Berlin (Charlottenburg) HRB 211322".
     register: str
     name: str
-    city: str
+    city: str | None
 
     @property
     def registration_number(self) -> str:
@@ -120,10 +127,12 @@ def parse_announcements(html: str) -> list[Announcement]:
         lines = [line.strip() for line in label.get_text("\n").split("\n") if line.strip()]
         if len(lines) != 3 or not lines[1].startswith(BERLIN_COURT + "Berlin"):
             continue
-        name, _, city = lines[2].rpartition(" – ")
+        name, separator, city = lines[2].rpartition(" – ")
+        if not separator:
+            name, city = lines[2], ""
         found.append(Announcement(
             portal_id=match.group(2), published_on=parse_java_date(match.group(1)), category=lines[0],
-            register=lines[1].removeprefix(BERLIN_COURT), name=name.strip() or lines[2], city=city.strip(),
+            register=lines[1].removeprefix(BERLIN_COURT), name=name.strip() or lines[2], city=city.strip() or None,
         ))
     return found
 
@@ -165,8 +174,19 @@ def fetch_berlin_page() -> str:
 # --- writing --------------------------------------------------------------------------------
 
 
-def _company_for(cur: Any, item: Announcement, source_id: str) -> tuple[str, str]:
-    """The company's id and how it was found: ("identifier" | "created")."""
+def name_match(same_name_and_city: list[str]) -> tuple[str | None, list[str]]:
+    """Fuzzy second: (the company, candidates for a person) from the companies sharing name key and city.
+
+    Exactly one is the company. Several are candidates: the announcement's company is created, and a
+    person decides which, if any, it is. None: it is created.
+    """
+    if len(same_name_and_city) == 1:
+        return same_name_and_city[0], []
+    return None, same_name_and_city
+
+
+def _company_for(cur: Any, item: Announcement, source_id: str) -> tuple[str, str, list[str]]:
+    """The company's id, how it was found ("identifier" | "fuzzy" | "created"), and candidates for a person."""
     from enrichment.register_names import legal_form, normalize_company_name
 
     cur.execute(
@@ -175,12 +195,26 @@ def _company_for(cur: Any, item: Announcement, source_id: str) -> tuple[str, str
     )
     row = cur.fetchone()
     if row:
-        return row[0], "identifier"
+        return row[0], "identifier", []
     # A company can exist under its registration number without the identifier row; never a second one.
     cur.execute("SELECT id FROM public.companies WHERE registration_number = %s", (item.registration_number,))
     row = cur.fetchone()
-    created = row is None
-    if created:
+    method, candidates = "identifier", []
+    key = normalize_company_name(item.name)
+    if row is None and key and item.city:
+        cur.execute(
+            """
+            SELECT id FROM public.companies
+            WHERE normalized_name = %s AND lower(city) = lower(%s) AND merged_into IS NULL
+            ORDER BY id
+            """,
+            (key, item.city),
+        )
+        match, candidates = name_match([r[0] for r in cur.fetchall()])
+        if match:
+            row, method = (match,), "fuzzy"
+    if row is None:
+        method = "created"
         cur.execute(
             """
             INSERT INTO public.companies (company_name, normalized_name, legal_form, registration_number,
@@ -188,8 +222,7 @@ def _company_for(cur: Any, item: Announcement, source_id: str) -> tuple[str, str
             VALUES (%s, %s, %s, %s, %s, jsonb_build_object('created_by', %s::text))
             RETURNING id
             """,
-            (item.name, normalize_company_name(item.name), legal_form(item.name), item.registration_number,
-             item.city, SOURCE_KEY),
+            (item.name, key, legal_form(item.name), item.registration_number, item.city, SOURCE_KEY),
         )
         row = cur.fetchone()
     company_id = row[0]
@@ -201,16 +234,16 @@ def _company_for(cur: Any, item: Announcement, source_id: str) -> tuple[str, str
         """,
         (company_id, item.register, source_id),
     )
-    return company_id, "created" if created else "identifier"
+    return company_id, method, candidates
 
 
 def write_announcement(cur: Any, item: Announcement, *, source_id: str, sync_run_id: str) -> tuple[bool, str]:
     """One announcement as a source record, plus its observation the first time it is seen.
 
-    Returns (new announcement?, "identifier" | "created"). Re-runs see the same announcement for 8
-    weeks; only the first sight writes an observation.
+    Returns (new announcement?, "identifier" | "fuzzy" | "created"). Re-runs see the same announcement
+    for 8 weeks; only the first sight writes an observation.
     """
-    company_id, method = _company_for(cur, item, source_id)
+    company_id, method, candidates = _company_for(cur, item, source_id)
     payload = asdict(item) | {"published_on": item.published_on.isoformat()}
     record_id, is_new = upsert_source_record(
         cur, company_id=company_id, source_id=source_id, external_id=f"rb:{item.portal_id}",
@@ -221,11 +254,20 @@ def write_announcement(cur: Any, item: Announcement, *, source_id: str, sync_run
     cur.execute(
         """
         UPDATE public.company_source_records
-        SET match_method = %s, match_confidence = 1.0, matched_at = now()
+        SET match_method = %s, match_confidence = %s, matched_at = now()
         WHERE id = %s AND match_method IS NULL
         """,
-        (method, record_id),
+        (method, 0.9 if method == "fuzzy" else 1.0, record_id),
     )
+    for candidate_id in candidates:
+        cur.execute(
+            """
+            INSERT INTO public.match_candidates (source_record_id, company_id, score, reasons, status)
+            VALUES (%s, %s, 0.9, '{"normalized_name": true, "city": true}'::jsonb, 'open')
+            ON CONFLICT DO NOTHING
+            """,
+            (record_id, candidate_id),
+        )
     if is_new:
         insert_text_observation(
             cur, company_id=company_id, source_record_id=record_id, source_id=source_id,

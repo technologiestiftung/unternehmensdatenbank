@@ -6,7 +6,7 @@ from datetime import date
 import pytest
 
 from enrichment.register_names import legal_form, normalize_company_name
-from register_announcements.main import parse_announcements, parse_java_date
+from register_announcements.main import name_match, parse_announcements, parse_java_date
 
 
 def row(n: int, when: str, portal_id: str, category: str, court: str, name_city: str) -> str:
@@ -26,13 +26,15 @@ PAGE = "<form id='bekanntMachungenForm'>" + "".join([
         "Berlin Amtsgericht Berlin (Charlottenburg) HRA 59880", "DEVG Deutsche Energie Versorgung GmbH & Co. KG – Berlin"),
     row(2, "Wed Oct 28 00:00:00 CET 2026", "182529", "Löschungsankündigung",
         "Hamburg Amtsgericht Hamburg HRB 192874", "BRND Digital GmbH – Hamburg"),
+    row(3, "Tue Oct 27 00:00:00 CET 2026", "182400", "Sonstige Registerbekanntmachung",
+        "Berlin Amtsgericht Berlin (Charlottenburg) HRB 300001", "Ohne Ort GmbH"),
     '<a class="ui-commandlink" onclick="somethingElse()"><label>Filter löschen</label></a>',
 ]) + "</form>"
 
 
 def test_berlin_rows_are_read_and_other_courts_are_not() -> None:
     found = parse_announcements(PAGE)
-    assert [a.portal_id for a in found] == ["182538", "181001"]
+    assert [a.portal_id for a in found] == ["182538", "181001", "182400"]
     first = found[0]
     assert first.published_on == date(2026, 10, 28)
     assert first.category == "Löschungsankündigung"
@@ -62,3 +64,20 @@ def test_java_dates_in_summer_and_winter_time() -> None:
 
 def test_an_empty_page_gives_nothing() -> None:
     assert parse_announcements("<html></html>") == []
+
+
+def test_a_row_without_a_city_keeps_its_whole_line_as_the_name() -> None:
+    no_city = parse_announcements(PAGE)[2]
+    assert (no_city.name, no_city.city) == ("Ohne Ort GmbH", None)
+
+
+def test_no_company_with_the_same_name_and_city_creates_one() -> None:
+    assert name_match([]) == (None, [])
+
+
+def test_exactly_one_company_with_the_same_name_and_city_is_the_company() -> None:
+    assert name_match(["a"]) == ("a", [])
+
+
+def test_several_companies_with_the_same_name_and_city_go_to_a_person() -> None:
+    assert name_match(["a", "b"]) == (None, ["a", "b"])
