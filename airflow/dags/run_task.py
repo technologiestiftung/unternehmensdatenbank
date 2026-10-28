@@ -10,8 +10,14 @@ an arbitrary call.
 from __future__ import annotations
 
 import importlib
+import json
 import logging
 import sys
+from pathlib import Path
+
+#: Where a KubernetesPodOperator with `do_xcom_push` reads a pod's result. It mounts the directory
+#: only then, so its absence means nobody is asking.
+XCOM_FILE = Path("/airflow/xcom/return.json")
 
 
 def resolve(target: str):  # noqa: ANN201
@@ -30,7 +36,9 @@ def main(argv: list[str]) -> int:
         print(__doc__)
         return 2
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
-    resolve(argv[0])()
+    result = resolve(argv[0])()
+    if XCOM_FILE.parent.is_dir():
+        XCOM_FILE.write_text(json.dumps(result))
     return 0
 
 

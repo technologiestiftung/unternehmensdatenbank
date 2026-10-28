@@ -27,3 +27,18 @@ def test_the_pod_command_resolves_back_to_the_same_function() -> None:
 def test_anything_but_a_task_is_refused(target: str) -> None:
     with pytest.raises(ValueError):
         resolve(target)
+
+
+def test_a_pod_hands_the_return_value_to_airflow_only_when_asked(monkeypatch, tmp_path) -> None:
+    import json
+
+    import run_task
+
+    monkeypatch.setattr(run_task, "resolve", lambda target: lambda: 500)
+    monkeypatch.setattr(run_task, "XCOM_FILE", tmp_path / "missing" / "return.json")
+    assert run_task.main(["website_discovery.main:run_discover"]) == 0
+    assert not (tmp_path / "missing").exists()
+
+    monkeypatch.setattr(run_task, "XCOM_FILE", tmp_path / "return.json")
+    assert run_task.main(["website_discovery.main:run_discover"]) == 0
+    assert json.loads((tmp_path / "return.json").read_text()) == 500

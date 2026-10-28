@@ -39,8 +39,13 @@ def task_target(run: Callable[[], None]) -> str:
     return f"{'.'.join(module.parts)}:{run.__name__}"
 
 
-def pipeline_task(task_id: str, run: Callable[[], None]) -> Any:
-    """A `PythonOperator` calling `run`, or a pod running the same function from the pipelines image."""
+def pipeline_task(task_id: str, run: Callable[[], Any], *, returns: bool = False) -> Any:
+    """A `PythonOperator` calling `run`, or a pod running the same function from the pipelines image.
+
+    `returns=True` makes `run`'s return value the task's XCom on the hub too: the pod writes it to
+    `/airflow/xcom/return.json` (`run_task`), and the operator reads it from there. A PythonOperator
+    pushes its return value anyway.
+    """
     if _setting("pipeline_runner", "python") != "kubernetes":
         from airflow.providers.standard.operators.python import PythonOperator
 
@@ -58,4 +63,5 @@ def pipeline_task(task_id: str, run: Callable[[], None]) -> Any:
         arguments=[task_target(run)],
         env_from=[k8s.V1EnvFromSource(secret_ref=k8s.V1SecretEnvSource(name=_setting("pipeline_secret")))],
         get_logs=True,
+        do_xcom_push=returns,
     )
