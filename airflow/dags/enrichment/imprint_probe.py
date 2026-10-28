@@ -28,9 +28,8 @@ import os
 from typing import Any
 from urllib.parse import urljoin
 
-import requests
 
-from enrichment.http_client import HEADERS, fetch_impressum
+from enrichment.http_client import HEADERS, fetch_impressum, session
 from enrichment.imprint_extractor import extract_from_html
 
 
@@ -97,7 +96,7 @@ def best_imprint(
         if best and candidate == best[2]:
             continue
         try:
-            response = requests.get(candidate, headers=HEADERS, timeout=IMPRINT_PROBE_TIMEOUT_S)
+            response = session().get(candidate, headers=HEADERS, timeout=IMPRINT_PROBE_TIMEOUT_S)
         except Exception:  # noqa: BLE001  an unreachable path is the expected outcome
             continue
         if response.status_code != 200:

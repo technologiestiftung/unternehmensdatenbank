@@ -29,9 +29,9 @@ import socket
 from dataclasses import dataclass, field
 from urllib.parse import urlparse
 
-import requests
 
 from enrichment import page_cache
+from enrichment.http_client import session
 
 log = logging.getLogger(__name__)
 
@@ -668,7 +668,7 @@ def probe(url: str) -> Probe | None:
     last_error: str | None = None
     for attempt in _attempts(url):
         try:
-            response = requests.get(
+            response = session().get(
                 attempt,
                 headers=HEADERS,
                 # (connect, read). Connecting is where a dead host burns time, and 4 seconds
