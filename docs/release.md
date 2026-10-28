@@ -98,10 +98,10 @@ The same flow as the app:
 | what you do | workflow | image | environment |
 |---|---|---|---|
 | open a pull request | `ci.yml`: the free checks and the migration image test | none | none |
-| merge to `main` | `ci.yml`: the same, then the image is built | `:main`, `:sha-<commit>` | **staging** |
-| **Actions → Create release → Run workflow** on `main`, pick patch / minor / major | `release.yml`: checks again, tags `vX.Y.Z`, publishes a GitHub Release, builds the image after approval | `:X.Y.Z`, `:X.Y` | **production** |
+| merge to `main` | `ci.yml`: the same, then both images are built | `:main`, `:sha-<commit>` | **staging** |
+| **Actions → Create release → Run workflow** on `main`, pick patch / minor / major | `release.yml`: checks again, tags `vX.Y.Z`, publishes a GitHub Release, builds both images after approval | `:X.Y.Z`, `:X.Y` | **production** |
 
-Image: `ghcr.io/technologiestiftung/unternehmensdatenbank-migrations`. No `:latest`: with staging
+Images: `ghcr.io/technologiestiftung/unternehmensdatenbank-migrations` and `…-pipelines`. No `:latest`: with staging
 and production on one platform it would name neither. Tags are never overwritten, so a hotfix
 is a new patch release from `main`.
 
@@ -116,14 +116,10 @@ rename or drop one in the same release that stops using it.
 ### One-time repo settings
 
 1. Settings → Environments → `production` → required reviewers: whoever approves a production
-   release. Without reviewers the image is built straight after the tag.
+   release. Without reviewers the images are built straight after the tag.
 2. Settings → Branches → protect `main` (pull requests only).
 
 ## Not covered yet
 
 - **Hasura metadata** (`hasura/metadata/`): locally the Hasura image applies it on start. Whether
   the hub applies it, or we do with `hasura metadata apply`, is open.
-- **Airflow**: the DAGs could come straight from this repo (GitDagBundle, `airflow/dags`), but
-  their Python packages (spaCy, rapidfuzz, pyproj, scipy) are not in the upstream image. Whether
-  we get our own Airflow, and so our own image, is asked of the hub team. Until then no Airflow
-  image is built here.
