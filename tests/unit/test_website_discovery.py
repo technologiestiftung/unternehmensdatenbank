@@ -66,8 +66,18 @@ def test_one_failing_company_does_not_discard_the_batch(monkeypatch) -> None:
     monkeypatch.setattr(main, "write_company_result", lambda cur, *, company, **k: written.append(company.id))
     monkeypatch.setattr(main, "finish_sync_run", lambda cur, **k: finished.update(k))
 
-    main.run_discover()
+    assert main.run_discover() == 5
 
     assert sorted(written) == ["0", "1", "3", "4"]
     assert finished["records_created"] == 4
     assert finished["records_failed"] == 1
+
+
+def test_only_a_full_batch_starts_the_next_run(monkeypatch) -> None:
+    from website_discovery import main
+
+    monkeypatch.setattr(main, "BATCH_SIZE", 500)
+    assert main.is_full_batch(500)
+    assert not main.is_full_batch(499)
+    assert not main.is_full_batch(0)
+    assert not main.is_full_batch(None)
