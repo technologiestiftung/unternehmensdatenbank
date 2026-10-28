@@ -36,7 +36,7 @@ values are right — not one row of any classification column has been hand-chec
 | 17 | isAI | `is_ai` | **no** | needs a classifier | reserved, NULL |
 | 18 | timestamp | `updated_at` | quarterly refresh date | — | yes |
 | 19 | Amazon-Effekt *(dashed)* | `amazon_effect` | no | **meaning not defined yet** — reserved so the column exists | reserved, NULL |
-| 20 | Schließung / Liquidation *(dashed)* | `register_status` | **no** — Fusionbase only lists active companies | a company that drops out of a quarterly delivery is a candidate; the register decides | yes (Northdata status) |
+| 20 | Schließung / Liquidation *(dashed)* | `register_status`, `register_announcement` | **no** — Fusionbase only lists active companies | `register_announcements` DAG: the latest court announcement, e.g. a deletion announcement, shown as a hint next to the status; a company that drops out of a quarterly delivery is a candidate too | status from the 2017–2019 snapshot; announcements for 860 companies on 2026-10-28, 147 of them shown `aktiv` with a deletion announced |
 
 ## Fusionbase's own sources: which we can use (2026-10-28)
 
@@ -46,6 +46,7 @@ Fusionbase names its sources per column. Asked whether we could read the same on
 |---|---|---|
 | The company website | 11 website, 12 contact, 13 keywords | **yes**: `website_discovery`, `website_contacts`, `website_keywords` |
 | Fusionbase's AI on website + register purpose | 5 WZ code, 13 description | possible from the website only: OffeneRegister has no purpose. No hand-checked rows to measure it against |
+| Registerbekanntmachungen (handelsregister.de) | 20 closure hints, and companies registered after 2019 | **built**: `register_announcements`, weekly, 2 requests, list only. 900 Berlin announcements in 8 weeks; 425 companies created that the snapshot does not have. No new registrations or ordinary changes: since 2022 those are not announced (§ 10 HGB, to be checked) |
 | Handelsregister (handelsregister.de) | 13 Gegenstand, type of site (branch, head office) | **not built**: no API, and the terms reportedly allow 60 searches per hour (about 100 days for the 142,571 companies active in the snapshot). IT compliance, asked on 2026-10-28, said it should be fine; what exactly was cleared (bulk retrieval, a higher rate) is to be written down before a DAG is built |
 | Annual accounts (Bundesanzeiger / Unternehmensregister) | 2–3 employees and revenue, with history | **not built**: no bulk access, a CAPTCHA in front of the documents (solving it automatically is not an option), and small companies need not publish revenue at all (§ 326 HGB, to be checked). Whether accounts since 2022 sit in the Unternehmensregister instead (DiRUG) is also to be checked. Same compliance answer as the row above |
 

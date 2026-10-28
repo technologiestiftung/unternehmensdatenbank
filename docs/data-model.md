@@ -403,6 +403,28 @@ number that matches none of our companies stays unlinked, whatever the name says
 with any grant: 1,691 → 5,179. The unlinked ones are most likely companies registered after the
 OffeneRegister snapshot (2017–2019); not checked.
 
+## Register announcements (V10)
+
+The DAG `register_announcements` reads Berlin's register announcements from handelsregister.de once a
+week. The court keeps each one up for 8 weeks, so a weekly run misses none. It reads only the result
+list (category, register number, name, city, date), never a detail page: the details of deletions
+and mergers name liquidators and officers.
+
+- **Every announcement is a source record** (source `registerbekanntmachungen`, `external_id` the
+  portal's id), linked by register number through `company_identifiers` (`match_method =
+  'identifier'`).
+- **A company we do not have is created** (`match_method = 'created'`, `companies.metadata.created_by`)
+  with name, legal form, city, register number and its identifier. Name key and legal form come from
+  `enrichment.register_names`, the same code the OffeneRegister import uses. Measured 2026-10-28: 900
+  announcements, 451 matched (all `aktiv` in the snapshot), 425 companies created. 24 Berlin grants
+  then linked to created companies by register number.
+- **The profile shows the latest one as a hint**: `register_announcement` (its kind) and
+  `register_announcement_date`. Each announcement is an observation; the DAG gives the latest per
+  company confidence 1.0 and older ones 0, and the coordinator publishes the latest. It never changes
+  `register_status`: 147 companies shown `aktiv` had a deletion announced on 2026-10-28.
+
+V9 is the vote-delete migration, renumbered from a second V8 (#33).
+
 ## Website contacts and keywords (V8)
 
 Two DAGs read more from a website `website_discovery` has already proven to be the company's.

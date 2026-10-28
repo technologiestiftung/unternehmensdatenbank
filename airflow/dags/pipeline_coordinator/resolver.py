@@ -16,6 +16,7 @@ Logical field names → observation field_name aliases:
   technologiefeld← technologiefeld        (Berlin's 77 fields, website-gated)
   purpose_field  ← purpose_field          (the same 77, from the register purpose)
   activity_keywords ← activity_keywords   (product/service words from the website)
+  register_announcement ← register_announcement (latest kind of court announcement; a hint, not the status)
 
 `email` and `phone` (the `website_contacts` DAG) are resolved by nothing until a privacy review
 clears them: a resolved value reaches the app and `v_field_provenance`.
@@ -365,6 +366,18 @@ def resolve_activity_keywords(cur: Any) -> int:
         cur,
         logical_field="activity_keywords",
         obs_field_names=["activity_keywords"],
+        value_col="value_text",
+        min_confidence=_FIELD_MIN_CONF,
+    )
+
+
+def resolve_register_announcement(cur: Any) -> int:
+    """The latest register announcement (`register_announcements`). Its DAG gives the latest of each
+    company confidence 1.0 and every older one 0, so only the latest clears the bar."""
+    return _apply_canonical(
+        cur,
+        logical_field="register_announcement",
+        obs_field_names=["register_announcement"],
         value_col="value_text",
         min_confidence=_FIELD_MIN_CONF,
     )

@@ -25,6 +25,14 @@ import sqlite3
 import sys
 from pathlib import Path
 
+for candidate in (Path(__file__).resolve().parent.parent / "airflow" / "dags", Path("/opt/airflow/dags")):
+    if candidate.is_dir():
+        sys.path.insert(0, str(candidate))
+        break
+
+# Re-exported: the tests and `to_row` below use them under this module's name.
+from enrichment.register_names import legal_form, normalize_company_name  # noqa: E402,F401
+
 # The columns of `public.companies` the CSV fills, in `\copy` order (docs/data-model.md).
 OUTPUT_COLUMNS = [
     "company_name",
@@ -43,52 +51,12 @@ OUTPUT_COLUMNS = [
     "metadata_json",
 ]
 
-LEGAL_SUFFIX_RE = re.compile(
-    r"\b(gmbh(?:\s*&\s*co\.\s*kg)?|ug|haftungsbeschränkt|ag|eg|kg|ohg|gbr|se|kgaa|mbh|e\.v\.)\b",
-    re.IGNORECASE,
-)
-
-
-def normalize_company_name(value: str) -> str:
-    """The matching key for a name: lower case, no legal form, no punctuation, single spaces."""
-    value = value.lower().replace("&", " und ")
-    value = re.sub(r"[^0-9a-zäöüß]+", " ", value, flags=re.IGNORECASE)
-    value = LEGAL_SUFFIX_RE.sub(" ", value)
-    return re.sub(r"\s+", " ", value).strip()
-
 FEDERAL_STATE = "Berlin"
 
 # OffeneRegister's status, in the register's own German words that `register_status` uses everywhere
 # else (the discovery filter is `= 'aktiv'`).
 STATUS = {"currently registered": "aktiv", "removed": "erloschen"}
 
-# Longest first: "GmbH & Co. KG" must win over "KG", "UG (haftungsbeschränkt)" over "UG".
-LEGAL_FORMS = [
-    ("GmbH & Co. KG", r"gmbh\s*&\s*co\.?\s*kg"),
-    ("UG & Co. KG", r"ug\s*\(haftungsbeschränkt\)\s*&\s*co\.?\s*kg"),
-    # legal_form() strips a trailing ")", so the closing parenthesis is optional here.
-    ("UG", r"\(haftungsbeschränkt\)?|\bug"),
-    ("gGmbH", r"ggmbh"),
-    ("GmbH", r"gmbh|g\.\s*m\.\s*b\.\s*h|\bm\.?\s*b\.?\s*h|mit beschränkter haftung"),
-    ("PartG mbB", r"\bmbb"),
-    ("KGaA", r"kgaa"),
-    ("AG", r"\bag|aktiengesellschaft"),
-    ("SE", r"\bse"),
-    ("Ltd.", r"\bltd|\blimited"),
-    ("e. V.", r"\be\.\s*v"),
-    ("eG", r"\beg"),
-    ("e. K.", r"\be\.\s*k(fm|ffr|fr)?"),
-    ("OHG", r"ohg"),
-    ("KG", r"\bk\.?\s*g|kommanditgesellschaft"),
-    ("PartG", r"partg|partnerschaft"),
-]
-_LEGAL_FORM_RES = [(form, re.compile(rf"(?:{pattern})$", re.IGNORECASE)) for form, pattern in LEGAL_FORMS]
-# Words that often follow the legal form: "Beispiel GmbH Berlin", "… GmbH Steuerberatungsgesellschaft".
-_TRAILING_WORDS = re.compile(
-    r"(?:[\s,]+(?:berlin|deutschland|in liquidation|i\.\s*l|-|steuerberatungsgesellschaft"
-    r"|wirtschaftsprüfungsgesellschaft|rechtsanwaltsgesellschaft|rechtsanwälte)[.)]*)+$",
-    re.IGNORECASE,
-)
 # The address ends at "<postcode> <city>". What follows in some rows is register text, sometimes with
 # managers' names and dates of birth, which must not land in `address`.
 # shortcut: the city is one word, so "Frankfurt am Main" becomes "Frankfurt"; fine for Berlin.
@@ -98,15 +66,6 @@ _ADDRESS = re.compile(r"^(.*?\b(\d{5})\s+([^\s,.:;]+))")
 # segments with a digit (house number, building, postcode) and no such marker are kept.
 _CARE_OF = re.compile(r"c/o|c\.o\.|\bbei\b|z\.\s*hd\.|zu händen", re.IGNORECASE)
 _DIGIT = re.compile(r"\d")
-
-
-def legal_form(name: str) -> str | None:
-    """The legal form from the END of the name; the dump has no field for it."""
-    core = _TRAILING_WORDS.sub("", name.strip()).rstrip(" .)")
-    for form, pattern in _LEGAL_FORM_RES:
-        if pattern.search(core):
-            return form
-    return None
 
 
 def parse_address(raw: str) -> tuple[str | None, str | None, str | None]:

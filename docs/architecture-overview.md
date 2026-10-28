@@ -276,7 +276,7 @@ flowchart LR
 | 17 | isAI | `is_ai` | not delivered | classifier to build | empty |
 | 18 | Timestamp | `updated_at` | delivery date | resolver timestamps | filled |
 | 19 | Amazon-Effekt (optional) | `amazon_effect` | not delivered | not defined yet | empty |
-| 20 | Schließung / Liquidation (optional) | `register_status` | only active companies are delivered | a company missing from the next quarterly delivery is a candidate | register status in the example data |
+| 20 | Schließung / Liquidation (optional) | `register_status`, `register_announcement` | only active companies are delivered | `register_announcements` (weekly court announcements, a hint); a company missing from the next quarterly delivery is a candidate | register status in the example data; announcements for 860 companies |
 
 Proposal: import Fusionbase as a source with a high priority (like the register export today), so
 its values win unless a check of ours is configured to override them. Columns 5 and 13 are AI
@@ -295,6 +295,7 @@ output from the vendor and are checked like our own.
 | `website_keywords`: products and services | services/products pages of the proven website | DAG | 100 | free | 22 of 37 websites gave candidates; published from 500 companies |
 | `foerderkatalog` | Förderkatalog des Bundes | DAG, monthly | | free | grants table |
 | `berlin_zuwendungen` | Zuwendungsdatenbank des Landes Berlin | DAG, monthly | | free | 18,427 grants to 3,861 companies |
+| `register_announcements` | Registerbekanntmachungen, handelsregister.de | DAG, weekly | | free | 900 Berlin announcements in 8 weeks; 425 companies created |
 | `pipeline_coordinator` | all of the above | DAG | | free | picks the winning values |
 
 Every DAG is off by default. It needs its `ENABLE_*` flag and must be unpaused in Airflow.
