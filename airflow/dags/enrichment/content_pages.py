@@ -59,9 +59,9 @@ import re
 from dataclasses import dataclass
 from urllib.parse import urljoin, urlparse
 
-import requests
 
 from enrichment import page_cache
+from enrichment.http_client import SOUP_OPTIONS, session
 from enrichment.url_patterns import CONNECT_TIMEOUT_S, HEADERS, HTTP_TIMEOUT_S
 
 log = logging.getLogger(__name__)
@@ -159,7 +159,7 @@ def links_from_homepage(
         log.warning("beautifulsoup4 is missing; no content pages will be found")
         return []
 
-    soup = BeautifulSoup(html, "html.parser")
+    soup = BeautifulSoup(html, "html.parser", **SOUP_OPTIONS)
     found: dict[str, list[ContentLink]] = {name: [] for name in CATEGORIES}
     seen: set[str] = set()
     homepage = base_url.split("#")[0].rstrip("/")
@@ -211,7 +211,7 @@ def _fetch(url: str) -> str:
     html = ""
     final_url = url
     try:
-        response = requests.get(
+        response = session().get(
             url, headers=HEADERS, timeout=(CONNECT_TIMEOUT_S, HTTP_TIMEOUT_S), allow_redirects=True
         )
         if response.status_code < 400:

@@ -3,6 +3,7 @@ from __future__ import annotations
 import logging
 import os
 import re
+import threading
 
 from urllib.parse import urljoin
 
@@ -52,9 +53,28 @@ def _has_imprint_content(html: str, *, imprint_url: bool = True) -> bool:
     return bool(_REGISTER_RE.search(text) or (imprint_url and _IMPRINT_WORD_RE.search(text)))
 
 
+_local = threading.local()
+
+
+def session() -> requests.Session:
+    """One `requests.Session` per thread, so connections and the SSL context are reused.
+
+    A bare `requests.get` loads the CA bundle again on every call: 84 loads cost 4.3 s of CPU for 8
+    companies, and website discovery runs 8 companies at once in threads that share one CPU core.
+    """
+    if not hasattr(_local, "session"):
+        _local.session = requests.Session()
+    return _local.session
+
+
+#: Keep `class="a b"` as one string. bs4 splits such attributes into lists by default, which took
+#: 17.6 s of CPU for 8 companies; nothing here reads `class` or `rel`.
+SOUP_OPTIONS = {"multi_valued_attributes": None}
+
+
 def verify_url(url: str) -> dict | None:
     try:
-        resp = requests.head(
+        resp = session().head(
             url, headers=HEADERS, timeout=URL_DISCOVERY_HTTP_TIMEOUT_S, allow_redirects=True
         )
         if resp.status_code < 400:
@@ -63,7 +83,7 @@ def verify_url(url: str) -> dict | None:
         pass
 
     try:
-        resp = requests.get(
+        resp = session().get(
             url,
             headers=HEADERS,
             timeout=URL_DISCOVERY_HTTP_TIMEOUT_S,
@@ -81,7 +101,7 @@ def verify_url(url: str) -> dict | None:
 
 def fetch_page(url: str) -> str | None:
     try:
-        resp = requests.get(
+        resp = session().get(
             url, headers=HEADERS, timeout=URL_DISCOVERY_HTTP_TIMEOUT_S, allow_redirects=True
         )
         if resp.status_code == 200:
@@ -101,9 +121,9 @@ def _soup(html: str) -> BeautifulSoup:
     could not be covered by a free guard.
     """
     try:
-        return BeautifulSoup(html, "lxml")
+        return BeautifulSoup(html, "lxml", **SOUP_OPTIONS)
     except Exception:  # noqa: BLE001  FeatureNotFound, and anything else a builder raises
-        return BeautifulSoup(html, "html.parser")
+        return BeautifulSoup(html, "html.parser", **SOUP_OPTIONS)
 
 
 def _find_impressum_link(base_url: str, html: str) -> str | None:
