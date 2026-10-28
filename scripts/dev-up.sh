@@ -10,6 +10,13 @@ if [[ ! -f .env ]]; then
   echo "Created .env from .env.example"
 fi
 
+# Airflow's Fernet key (32 random bytes, URL-safe base64), one per developer and never in git.
+if grep -q '^AIRFLOW__CORE__FERNET_KEY=$' .env; then
+  key=$(openssl rand -base64 32 | tr '+/' '-_')
+  sed -i.bak "s|^AIRFLOW__CORE__FERNET_KEY=$|AIRFLOW__CORE__FERNET_KEY=${key}|" .env && rm .env.bak
+  echo "Generated a new Airflow Fernet key in .env"
+fi
+
 echo "Starting Postgres..."
 docker compose up -d postgres
 
