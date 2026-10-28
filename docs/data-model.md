@@ -362,9 +362,9 @@ What each source has collected, for the app's sources page. **Counts only, never
 field the app may not show yet (`email`, `phone`) can still be counted: "87 stored, 0 shown".
 
 - `v_source_overview`: one row per source with records, companies covered (source records and linked
-  grants), companies it created, and its **latest run read live** from `source_sync_runs`. A run
-  still `running` while a newer one exists is shown as `interrupted` (a restarted worker leaves its
-  row behind); the history itself is not changed.
+  grants), companies it created, and its **latest run read live** from `source_sync_runs`. Its
+  status is the newest run's stored status, so a run killed by a restart can show `running` until
+  the next run starts.
 - `v_source_fields`: per source and field, values stored, companies, and `companies_shown`, the
   companies whose shown value came from this source (the coordinator's winner, or a manager name).
   Grants count as the field `fundings`.

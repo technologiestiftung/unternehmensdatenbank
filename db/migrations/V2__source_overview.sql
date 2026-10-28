@@ -75,9 +75,8 @@ WITH DATA;
 
 CREATE UNIQUE INDEX source_field_stats_mv_key ON public.source_field_stats_mv (source_key, field_name);
 
--- 3. What the app reads. A run still `running` while a newer one exists was interrupted (a worker
---    or container restart leaves the row behind); it is reported as `interrupted`, the history is
---    left as it is.
+-- 3. What the app reads. last_run_status is the newest run's stored status, so a run killed by a
+--    restart can show `running` until the next run starts.
 CREATE VIEW public.v_source_overview AS
 SELECT
     s.key AS source_key,
@@ -100,15 +99,9 @@ FROM public.sources s
 LEFT JOIN public.source_stats_mv st ON st.source_key = s.key
 LEFT JOIN LATERAL (
     SELECT r.started_at, r.finished_at, r.records_seen, r.records_created, r.records_updated,
-           r.records_failed,
-           CASE WHEN r.status = 'running' AND EXISTS (
-                    SELECT 1 FROM public.source_sync_runs n
-                    WHERE n.source_id = r.source_id AND n.started_at > r.started_at)
-                THEN 'interrupted' ELSE r.status END AS status
+           r.records_failed, r.status
     FROM public.source_sync_runs r
     WHERE r.source_id = s.id
-    -- The newest run. A leftover that is still the newest shows `running`: nothing can tell it apart
-    -- from a run that is really going until a newer one starts.
     ORDER BY r.started_at DESC
     LIMIT 1
 ) run ON true;
