@@ -1,8 +1,9 @@
--- Baseline: the whole schema as of 2026-10-29, in one file.
+-- Baseline: the whole schema as of 2026-10-28, in one file.
 --
--- Nothing has been deployed, so the migrations before it were squashed into this one twice: the 24
--- of the Osnabrück era on 2026-10-28, then V1-V9 of the Berlin rebuild on 2026-10-29. They live on in
--- git history; their reasoning is in the comments of the objects they created. In short, V2-V9 added:
+-- Nothing has been deployed, so the migrations before it were squashed into this one three times: the
+-- 24 of the Osnabrück era, then V1-V9 of the Berlin rebuild, then V10, all on 2026-10-28. They live on
+-- in git history; their reasoning is in the comments of the objects they created. In short, V2-V10
+-- added:
 --
 --   identifiers and matching   company_identifiers, match columns on source records, merged_into,
 --                              match_candidates, pipeline_state (issue #18)
@@ -14,12 +15,13 @@
 --   manager evidence           whether the register confirms a manager name
 --   activity keywords          products and services from the company's own website
 --   own votes                  the app's reader may delete a user's own vote
+--   register announcements     the latest court announcement per company, a hint next to its status
 --
--- Generated from a database migrated to V9 with `pg_dump --schema-only --no-owner`, privileges
--- included, so every grant is exactly what V1-V9 left. Role names are Flyway placeholders
+-- Generated from a database migrated to V10 with `pg_dump --schema-only --no-owner`, privileges
+-- included, so every grant is exactly what V1-V10 left. Role names are Flyway placeholders
 -- (`${writer_role}`, `${reader_role}`) so the hub can use its own, and default privileges apply to
 -- whoever runs this file. PostGIS and pgvector are created by the database setup, not here.
--- Checked: a database built from this file and one built from V1-V9 dump to the same schema,
+-- Checked: a database built from this file and one built from V1 + V10 dump to the same schema,
 -- grants and seed rows.
 
 -- pg_dump writes functions before the tables they read; their bodies are checked when called.
@@ -570,8 +572,10 @@ CREATE VIEW public.v_company_profile_live AS
     obs_amazon.value_text AS amazon_effect,
     e.register_status,
     GREATEST(e.data_last_updated_at, e.canonical_updated_at) AS updated_at,
-    obs_keywords.value_text AS activity_keywords
-   FROM (((((((((((public.v_companies_enriched e
+    obs_keywords.value_text AS activity_keywords,
+    obs_announce.value_text AS register_announcement,
+    ((obs_announce.metadata ->> 'published_on'::text))::date AS register_announcement_date
+   FROM (((((((((((((public.v_companies_enriched e
      JOIN public.companies c ON ((c.id = e.id)))
      LEFT JOIN LATERAL ( SELECT count(*) AS funding_count,
             sum(f.amount_eur) AS funding_total_eur
@@ -587,7 +591,9 @@ CREATE VIEW public.v_company_profile_live AS
      LEFT JOIN public.company_canonical_field_sources cfs_amazon ON (((cfs_amazon.company_id = e.id) AND (cfs_amazon.field_name = 'amazon_effect'::text))))
      LEFT JOIN public.company_field_observations obs_amazon ON ((obs_amazon.id = cfs_amazon.company_field_observation_id)))
      LEFT JOIN public.company_canonical_field_sources cfs_keywords ON (((cfs_keywords.company_id = e.id) AND (cfs_keywords.field_name = 'activity_keywords'::text))))
-     LEFT JOIN public.company_field_observations obs_keywords ON ((obs_keywords.id = cfs_keywords.company_field_observation_id)));
+     LEFT JOIN public.company_field_observations obs_keywords ON ((obs_keywords.id = cfs_keywords.company_field_observation_id)))
+     LEFT JOIN public.company_canonical_field_sources cfs_announce ON (((cfs_announce.company_id = e.id) AND (cfs_announce.field_name = 'register_announcement'::text))))
+     LEFT JOIN public.company_field_observations obs_announce ON ((obs_announce.id = cfs_announce.company_field_observation_id)));
 
 
 --
@@ -664,6 +670,8 @@ CREATE MATERIALIZED VIEW public.company_profile_mv AS
     p.register_status,
     p.updated_at,
     p.activity_keywords,
+    p.register_announcement,
+    p.register_announcement_date,
     COALESCE(src.source_keys, '{}'::text[]) AS source_keys
    FROM (public.v_company_profile_live p
      LEFT JOIN ( SELECT v_company_sources.company_id,
@@ -690,7 +698,7 @@ CREATE TABLE public.extraction_feedback (
     CONSTRAINT extraction_feedback_correction_check CHECK (((correction IS NULL) OR ((length(correction) >= 1) AND (length(correction) <= 500)))),
     CONSTRAINT extraction_feedback_correction_only_when_wrong CHECK (((correction IS NULL) OR (verdict = 'wrong'::text))),
     CONSTRAINT extraction_feedback_empty_needs_correction CHECK (((value <> ''::text) OR ((verdict = 'wrong'::text) AND (correction IS NOT NULL)))),
-    CONSTRAINT extraction_feedback_field_name_check CHECK ((field_name = ANY (ARRAY['name'::text, 'address'::text, 'legal_form'::text, 'register_status'::text, 'wz_code'::text, 'established_at'::text, 'employee_count'::text, 'revenue'::text, 'fundings'::text, 'cluster'::text, 'technologiefeld'::text, 'website'::text, 'management'::text, 'business_purpose'::text, 'deeptech'::text, 'is_ai'::text, 'amazon_effect'::text, 'activity_keywords'::text]))),
+    CONSTRAINT extraction_feedback_field_name_check CHECK ((field_name = ANY (ARRAY['name'::text, 'address'::text, 'legal_form'::text, 'register_status'::text, 'wz_code'::text, 'established_at'::text, 'employee_count'::text, 'revenue'::text, 'fundings'::text, 'cluster'::text, 'technologiefeld'::text, 'website'::text, 'management'::text, 'business_purpose'::text, 'deeptech'::text, 'is_ai'::text, 'amazon_effect'::text, 'activity_keywords'::text, 'register_announcement'::text]))),
     CONSTRAINT extraction_feedback_value_check CHECK ((length(value) <= 500)),
     CONSTRAINT extraction_feedback_verdict_check CHECK ((verdict = ANY (ARRAY['correct'::text, 'wrong'::text])))
 );
@@ -806,6 +814,8 @@ CREATE VIEW public.v_company_profile AS
     company_profile_mv.register_status,
     company_profile_mv.updated_at,
     company_profile_mv.activity_keywords,
+    company_profile_mv.register_announcement,
+    company_profile_mv.register_announcement_date,
     company_profile_mv.source_keys
    FROM public.company_profile_mv;
 
