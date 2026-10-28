@@ -195,7 +195,8 @@ def is_full_batch(taken: int | None) -> bool:
 def _make_dag():  # noqa: ANN201
     try:
         from airflow import DAG
-        from airflow.providers.standard.operators.python import PythonOperator, ShortCircuitOperator
+        from airflow.providers.standard.operators.python import ShortCircuitOperator
+        from pipeline_task import pipeline_task
         from airflow.providers.standard.operators.trigger_dagrun import TriggerDagRunOperator
     except ImportError:
         return None
@@ -210,9 +211,13 @@ def _make_dag():  # noqa: ANN201
         schedule="@hourly", start_date=datetime(2026, 10, 1, tzinfo=timezone.utc), catchup=False,
         max_active_runs=1, tags=["sources", "websites"],
     ) as dag:
-        rescore = PythonOperator(task_id="rescore_websites", python_callable=run_rescore)
-        # Returns how many companies it took; 0 skips everything after it.
-        discover = ShortCircuitOperator(task_id="discover", python_callable=run_discover)
+        rescore = pipeline_task("rescore_websites", run_rescore)
+        # Returns how many companies it took, as XCom: from a PythonOperator directly, from a hub pod
+        # through /airflow/xcom/return.json (run_task). The two decisions below run in Airflow itself.
+        discover = pipeline_task("discover", run_discover, returns=True)
+        took_any = ShortCircuitOperator(
+            task_id="took_any", python_callable=lambda ti: bool(ti.xcom_pull(task_ids="discover")),
+        )
         coordinate = TriggerDagRunOperator(
             task_id="trigger_pipeline_coordinator", trigger_dag_id="pipeline_coordinator",
             wait_for_completion=False,
@@ -222,7 +227,7 @@ def _make_dag():  # noqa: ANN201
             python_callable=lambda ti: is_full_batch(ti.xcom_pull(task_ids="discover")),
         )
         next_batch = TriggerDagRunOperator(task_id="next_batch", trigger_dag_id=DAG_ID, wait_for_completion=False)
-        rescore >> discover >> [coordinate, more_left]
+        rescore >> discover >> took_any >> [coordinate, more_left]
         more_left >> next_batch
     return dag
 

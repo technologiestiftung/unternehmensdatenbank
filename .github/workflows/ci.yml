@@ -1,7 +1,7 @@
 name: CI and staging image
 
 # Pull request:  checks.
-# Push to main:  checks, then the STAGING migration image :main and :sha-<short>.
+# Push to main:  checks, then the STAGING images :main and :sha-<short>: migrations and pipelines.
 # Production images come only from release.yml.
 
 on:
@@ -11,7 +11,7 @@ on:
 
 env:
   REGISTRY: ghcr.io
-  IMAGE_NAME: ${{ github.repository }}-migrations
+  IMAGE_PREFIX: ${{ github.repository }}
 
 jobs:
   checks:
@@ -21,8 +21,13 @@ jobs:
     if: github.event_name == 'push'
     needs: checks
     concurrency:
-      group: staging-image
+      group: staging-image-${{ matrix.image.name }}
       cancel-in-progress: false
+    strategy:
+      matrix:
+        image:
+          - { name: migrations, context: db, file: db/Dockerfile }
+          - { name: pipelines, context: airflow, file: airflow/pipelines.Dockerfile }
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -38,14 +43,15 @@ jobs:
       - id: meta
         uses: docker/metadata-action@v5
         with:
-          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_PREFIX }}-${{ matrix.image.name }}
           tags: |
             type=ref,event=branch
             type=sha,prefix=sha-
           flavor: latest=false
       - uses: docker/build-push-action@v6
         with:
-          context: db
+          context: ${{ matrix.image.context }}
+          file: ${{ matrix.image.file }}
           platforms: linux/amd64
           push: true
           tags: ${{ steps.meta.outputs.tags }}

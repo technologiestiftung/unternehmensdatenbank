@@ -310,7 +310,7 @@ def run_train() -> None:
 def _make_dags():  # noqa: ANN201
     try:
         from airflow import DAG
-        from airflow.providers.standard.operators.python import PythonOperator
+        from pipeline_task import pipeline_task
         from airflow.providers.standard.operators.trigger_dagrun import TriggerDagRunOperator
     except ImportError:
         return None, None
@@ -322,7 +322,7 @@ def _make_dags():  # noqa: ANN201
         schedule=None, start_date=start, catchup=False, max_active_runs=1,
         tags=["sources", "spacy", "managers"],
     ) as extract:
-        read = PythonOperator(task_id="extract_manager_names", python_callable=run_extract)
+        read = pipeline_task("extract_manager_names", run_extract)
         coordinate = TriggerDagRunOperator(
             task_id="trigger_pipeline_coordinator", trigger_dag_id="pipeline_coordinator", wait_for_completion=False,
         )
@@ -334,7 +334,7 @@ def _make_dags():  # noqa: ANN201
         schedule="@weekly", start_date=start, catchup=False, max_active_runs=1,
         tags=["spacy", "training", "managers"],
     ) as training:
-        PythonOperator(task_id="train_from_feedback", python_callable=run_train)
+        pipeline_task("train_from_feedback", run_train)
 
     return extract, training
 

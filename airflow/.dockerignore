@@ -1,0 +1,5 @@
+# Build context of airflow/pipelines.Dockerfile.
+**/__pycache__
+data
+config
+plugins

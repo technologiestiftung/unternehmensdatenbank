@@ -104,7 +104,7 @@ def run_foerderkatalog() -> None:
 def _make_dag():  # noqa: ANN201
     try:
         from airflow import DAG
-        from airflow.providers.standard.operators.python import PythonOperator
+        from pipeline_task import pipeline_task
     except ImportError:
         return None
 
@@ -117,7 +117,7 @@ def _make_dag():  # noqa: ANN201
         max_active_runs=1,
         tags=["sources", "fundings"],
     ) as dag:
-        PythonOperator(task_id="load_fundings", python_callable=run_foerderkatalog)
+        pipeline_task("load_fundings", run_foerderkatalog)
     return dag
 
 

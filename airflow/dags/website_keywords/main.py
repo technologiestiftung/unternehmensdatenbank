@@ -230,7 +230,7 @@ def run_publish() -> None:
 def _make_dag():  # noqa: ANN201
     try:
         from airflow import DAG
-        from airflow.providers.standard.operators.python import PythonOperator
+        from pipeline_task import pipeline_task
         from airflow.providers.standard.operators.trigger_dagrun import TriggerDagRunOperator
     except ImportError:
         return None
@@ -241,8 +241,8 @@ def _make_dag():  # noqa: ANN201
         schedule=None, start_date=datetime(2026, 10, 1, tzinfo=timezone.utc), catchup=False,
         max_active_runs=1, tags=["sources", "websites", "keywords"],
     ) as dag:
-        read = PythonOperator(task_id="read_websites", python_callable=run_read)
-        publish = PythonOperator(task_id="publish_keywords", python_callable=run_publish)
+        read = pipeline_task("read_websites", run_read)
+        publish = pipeline_task("publish_keywords", run_publish)
         coordinate = TriggerDagRunOperator(
             task_id="trigger_pipeline_coordinator", trigger_dag_id="pipeline_coordinator",
             wait_for_completion=False,

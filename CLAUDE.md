@@ -99,8 +99,9 @@ yet; it is rebuilt on the library next (#18).
 
 - DAG packages import their own modules **by package name** (`from enrichment.confidence import …`).
   A bare `from scorer import` after a `sys.path` insert once handed one package another's module.
-- On the hub, DAG tasks will run as **KubernetesPodOperator** pods with our own image (#18), so code
-  must not rely on a shared disk: state belongs in Postgres, not in `airflow/data/` files.
+- On the hub, DAG tasks run as **KubernetesPodOperator** pods from our pipelines image, so code
+  must not rely on a shared disk: state belongs in Postgres, not in `airflow/data/` files. Build a task
+  with `pipeline_task(task_id, run_function)`, never a bare `PythonOperator` ([release](docs/release.md)).
 
 ## Website discovery rules (`enrichment/`)
 
