@@ -354,6 +354,15 @@ OffeneRegister). It exposes nothing personal beyond the shown value.
 `source_id`), and the coordinator now writes every name above the bar, not one per company: on the
 Berlin sample that is 67 names for 37 companies instead of 37.
 
+## Grant links (V4)
+
+Which company a grant belongs to is stored in `company_funding_links`, not computed on every read.
+`v_company_fundings` used to match all companies by name and city on each query (2.2 s), and the
+company list asked it once per company: 71 s for a page of 50. `refresh_company_funding_links()`
+recomputes the links (same rule: normalised name and city match exactly one company); the
+Förderkatalog DAG and the OffeneRegister import call it after they load. A list page now takes
+0.65 s.
+
 ## Identifiers and matching (V2)
 
 How a record from any source finds its company. In this order:

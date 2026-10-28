@@ -5,8 +5,8 @@ Bundesland Berlin, the full CSV export, and a per-year fallback if the export co
 This module only turns its rows into table rows and upserts them by Förderkennzeichen (FKZ).
 
 Fundings are NOT observations and do not go through `pipeline_coordinator`: a company has many
-grants, not one winning value. Linking a grant to a company happens on read, in
-`v_company_fundings`, because the Förderkatalog carries no register number to link by.
+grants, not one winning value. After each load `refresh_company_funding_links()` links the
+grants to companies by name and city (the Förderkatalog carries no register number to link by).
 """
 from __future__ import annotations
 
@@ -91,9 +91,12 @@ def run_foerderkatalog() -> None:
     try:
         with connection, connection.cursor() as cur:
             execute_values(cur, _UPSERT_SQL, rows, page_size=1000)
+            # Grants are linked to companies once here, not on every read (V4).
+            cur.execute("SELECT public.refresh_company_funding_links()")
+            linked = cur.fetchone()[0]
     finally:
         connection.close()
-    log.info("Upserted %d grants from %d export rows.", len(rows), len(result.rows))
+    log.info("Upserted %d grants from %d export rows; %d linked to a company.", len(rows), len(result.rows), linked)
 
 
 def _make_dag():  # noqa: ANN201
