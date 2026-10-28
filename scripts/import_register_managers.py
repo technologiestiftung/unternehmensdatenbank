@@ -7,8 +7,12 @@ observations of the source `offeneregister`; `pipeline_coordinator` then publish
 other name. Before this, the app's management names came only from spaCy: 29 of them.
 
 Current means the register gives no end date and does not mark the person as dismissed. That is
-current as of the snapshot, 2017–2019, so many of these people will have left since. Hence the low
-confidence: a name read off the company's own Impressum today (spaCy, 0.6) is better evidence.
+current as of the snapshot, 2017–2019, so many of these people will have left since. The confidence
+does not hide them: `resolve_ceo_contact` publishes every distinct (company, name) at or above 0.5,
+so every register name is shown next to spaCy's. The confidence only decides which observation backs
+an identical name string, and spaCy's (0.6) wins. The app's provenance names the source, the
+OffeneRegister snapshot of 2017–2019, so a reader can tell an old register name from one read off
+today's Impressum.
 
 PERSONAL DATA. Showing the register's Geschäftsführer in the app was approved in the privacy
 review of 2026-10-28 (issue #18). The hub and exports are not covered by it. Only the name and the
@@ -36,7 +40,7 @@ from source_enrichment_common import finish_sync_run, insert_text_observation, s
 SOURCE_KEY = "offeneregister"
 FIELD = "ceo_name_or_contact"
 POSITION = "Geschäftsführer"
-#: Above the resolver's 0.5 floor, below spaCy's 0.6: the snapshot is 6–9 years old.
+#: Above the resolver's 0.5 floor, so every name is published; below spaCy's 0.6, so spaCy backs a name both read.
 CONFIDENCE = 0.55
 
 
