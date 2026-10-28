@@ -147,6 +147,9 @@ the app's initContainer from the migration image ([release](docs/release.md)).
   score second, and records `match_method`/`match_confidence` on its source record. Merging never
   deletes (`companies.merged_into`).
 - **Pipeline state** goes into `pipeline_state`, never a file: the hub's pods share no disk.
+- **The company profile is stored (V5).** `v_company_profile` reads `company_profile_mv`; anything
+  that changes companies or their published values must end with `refresh_company_profile()`
+  (the coordinator does). A filter on the live view took up to 45 s.
 - **Grant links (V4)** are a table, refreshed by `refresh_company_funding_links()` after grants or
   companies load. Never link grants on read again: it made the company list take 71 s.
 - **Feedback and provenance (V3):** users can vote on every shown field, and `v_field_provenance`

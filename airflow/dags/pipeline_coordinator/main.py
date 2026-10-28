@@ -84,6 +84,13 @@ def run_pipeline_coordinator() -> None:
 
         log.info("Quality scores recomputed for %d companies.", n_scored)
 
+        # The app reads a stored copy of every profile (V5); bring it up to date with what was
+        # just resolved. About 3 seconds for 296,486 companies.
+        with conn:
+            with conn.cursor() as cur:
+                cur.execute("SELECT public.refresh_company_profile()")
+        log.info("Company profiles refreshed for the app.")
+
         # Snapshot after
         with conn:
             with conn.cursor() as cur:

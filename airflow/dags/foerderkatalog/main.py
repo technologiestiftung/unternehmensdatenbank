@@ -94,6 +94,8 @@ def run_foerderkatalog() -> None:
             # Grants are linked to companies once here, not on every read (V4).
             cur.execute("SELECT public.refresh_company_funding_links()")
             linked = cur.fetchone()[0]
+            # The grant counts in the app's company list come from the stored profile (V5).
+            cur.execute("SELECT public.refresh_company_profile()")
     finally:
         connection.close()
     log.info("Upserted %d grants from %d export rows; %d linked to a company.", len(rows), len(result.rows), linked)

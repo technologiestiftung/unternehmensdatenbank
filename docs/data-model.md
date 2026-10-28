@@ -363,6 +363,16 @@ recomputes the links (same rule: normalised name and city match exactly one comp
 Förderkatalog DAG and the OffeneRegister import call it after they load. A list page now takes
 0.65 s.
 
+## The stored company profile (V5)
+
+`v_company_profile`, which the app and Hasura read, is now a stored copy (`company_profile_mv`) of
+the live definition (`v_company_profile_live`), plus `source_keys`: which sources the company's shown
+values came from (from `v_company_sources`). A selective filter used to make Postgres compute the
+profile of company after company: 5 to 45 seconds to filter by source. Now every list filter takes
+under 10 ms. `refresh_company_profile()` rebuilds it in about 3 seconds and refreshes the planner's
+statistics; the coordinator calls it at the end of every run, the Förderkatalog DAG and the
+OffeneRegister import after they load. Between refreshes the list shows the last resolved state.
+
 ## Identifiers and matching (V2)
 
 How a record from any source finds its company. In this order:
