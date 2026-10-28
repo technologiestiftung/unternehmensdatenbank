@@ -322,7 +322,7 @@ services:
       - datahub
     environment:
       HASURA_GRAPHQL_METADATA_DATABASE_URL: postgres://hasura:${HASURA_DB_PASSWORD:-hasura}@postgres:5432/hasura
-      # Hasura reads as the reader role; V1__baseline grants it INSERT on company_comments and nothing else.
+      # Hasura reads as the reader role; V1__baseline grants it INSERT on company_comments and INSERT, UPDATE on extraction_feedback, nothing else.
       HASURA_UDB_DATABASE_URL: postgres://${APP_DB_READER_USER:-reader}:${APP_DB_READER_PASSWORD:-reader}@postgres:5432/${APP_DB_NAME:-unternehmensdatenbank}
       HASURA_GRAPHQL_ADMIN_SECRET: ${HASURA_ADMIN_SECRET:-local-admin-secret}
       HASURA_GRAPHQL_ENABLE_CONSOLE: "true"
