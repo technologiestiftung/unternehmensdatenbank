@@ -268,7 +268,7 @@ flowchart LR
 | 9 | Cluster (n=5) | `cluster` | not delivered | classifier to build | empty in the target; the example values are free text from the search experiments (section 8) |
 | 10 | Technologiefeld | `technologiefeld` | not delivered | `branch_classifier` keywords; a text classifier fills rows without a keyword (opt-in) | 403 of 14,443 |
 | 11 | Website | `website` | yes | discovery DAGs verify it and fill gaps | 3,529 |
-| 12 | Geschäftsführung / Kontakt | `management` | contact optional | `manager_ner` (spaCy) on the Impressum, trained on app votes; `website_contacts` for email and phone | names from register and Impressum; email and phone stored, not shown, until a privacy review |
+| 12 | Geschäftsführung / Kontakt | `management` | contact optional | the register's current Geschäftsführer (`import_register_managers.py`); `manager_ner` (spaCy) on the Impressum, trained on app votes; `website_contacts` for email and phone | names from register and Impressum; email and phone stored, not shown, until a privacy review |
 | 13 | Tätigkeitsbeschreibung | `business_purpose`, `activity_keywords` | written by Fusionbase's AI, plus keywords | register purpose as a check; `website_keywords` for keywords the website states | register purpose; keywords once 500 companies are read |
 | 14 | Kommentar | `comments` | not delivered | app users | live |
 | 15 | DeepTech Klassifikation | `deeptech_class` | not delivered | classifier to build | empty |

@@ -303,6 +303,15 @@ none (179,959 rows), so every company has a city. Run it after the CSV load; it 
 python scripts/import_offeneregister_records.py openregister.db
 ```
 
+The officers then give the app its management names: `import_register_managers.py` writes each
+current Geschäftsführer (name and position only) as a `ceo_name_or_contact` observation, and the next
+`pipeline_coordinator` run publishes them. Safe to re-run. Its docstring has the rules and the
+privacy review that allows it.
+
+```bash
+python scripts/import_register_managers.py
+```
+
 ## Resolution lifecycle
 
 For each incoming company row from a source:
@@ -357,6 +366,8 @@ the company no longer has. Since V7 the management part of `v_field_provenance` 
 observation's evidence: `["register_officer"]` when the name is one of the company's register
 officers, `[]` when it is not; which officer matched is never stored. On the local Berlin data on
 2026-10-28 that left 29 names (67 before), 7 of them confirmed by the register.
+With the register's Geschäftsführer added (`import_register_managers.py`), 156,846 register names
+and the 29 spaCy names are published, for 111,374 companies.
 
 ## Grant links (V4)
 
