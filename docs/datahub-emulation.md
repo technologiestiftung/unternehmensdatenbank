@@ -120,9 +120,9 @@ the space.
 ## Known differences from the hub
 
 - **DAG dependencies.** The hub's own DAGs (gitlab.com/tsb-udp/airflow-dags) install their packages
-  per task with `@task.virtualenv(requirements=...)`. Ours rely on the packages baked into
-  `airflow/Dockerfile`. On the hub that means asking for our packages in the shared image, or moving
-  to `@task.virtualenv`.
+  per task with `@task.virtualenv(requirements=...)`. Ours run locally on the packages baked into
+  `airflow/Dockerfile`, and on the hub as pods from our pipelines image (`pipeline_runner =
+  kubernetes`, see [release](release.md)). Locally a task can be run from that image with `docker run`.
 - **Executor.** The hub's Airflow runs CeleryExecutor, so tasks run on different workers with no
   shared disk. The checkpoint files under `airflow/data/` will not survive there. Locally it is
   LocalExecutor.

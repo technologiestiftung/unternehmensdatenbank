@@ -144,7 +144,7 @@ def run_pipeline_coordinator() -> None:
 def _make_dag():  # noqa: ANN201
     try:
         from airflow import DAG
-        from airflow.providers.standard.operators.python import PythonOperator
+        from pipeline_task import pipeline_task
     except ImportError:
         return None
 
@@ -159,10 +159,7 @@ def _make_dag():  # noqa: ANN201
         catchup=False,
         tags=["pipeline", "coordinator", "quality"],
     ) as dag:
-        PythonOperator(
-            task_id="resolve_and_score",
-            python_callable=run_pipeline_coordinator,
-        )
+        pipeline_task("resolve_and_score", run_pipeline_coordinator)
     return dag
 
 

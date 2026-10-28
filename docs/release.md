@@ -1,4 +1,4 @@
-# Releases: how the schema reaches the Data Hub
+# Releases: how the schema and the pipelines reach the Data Hub
 
 The app (repo `unternehmensdaten-app`) and this repo share one database on the Berlin Data Hub.
 This repo owns its **schema**: the Flyway migrations in `db/migrations/`. The hub does not run
@@ -50,6 +50,46 @@ initContainers:
 an empty Postgres 15 set up like the hub's, with role names that are not ours. The first run must
 apply every migration, the second none, and the writer must be able to insert where the reader
 cannot update. Needs Docker only. CI runs the same script.
+
+## The pipelines image
+
+The hub's Airflow cannot install our packages (spaCy, psycopg2, bs4 ...), and it offers no custom
+Airflow image. So every DAG task runs as a **KubernetesPodOperator** pod from our own image
+`ghcr.io/technologiestiftung/unternehmensdatenbank-pipelines` (`airflow/pipelines.Dockerfile`): the
+DAG packages and `airflow/requirements.txt`, no Airflow. A pod runs one task and exits; its exit code
+is the task's result, its log is the task's log in the Airflow UI.
+
+```
+Airflow (the hub's)            reads our DAG files from git (the DAG bundle), keeps the schedules
+  └─ task due → pod            image unternehmensdatenbank-pipelines:<tag>
+       python -m run_task website_discovery.main:run_discover
+       environment from the Kubernetes secret: PG_DSN (writer login), ENABLE_* flags
+```
+
+The DAG files are the same everywhere. `airflow/dags/pipeline_task.py` builds each task, and
+Airflow **variables** decide how:
+
+| variable | local | hub |
+|---|---|---|
+| `pipeline_runner` | unset: `PythonOperator`, as before | `kubernetes` |
+| `pipeline_image` | — | `…-pipelines:main` on staging, `…-pipelines:X.Y.Z` on production |
+| `pipeline_namespace` | — | from the hub team |
+| `pipeline_secret` | — | the Kubernetes secret with `PG_DSN` and the `ENABLE_*` flags |
+
+Schedules (`@monthly`, cron strings) and the `TriggerDagRunOperator` chains stay in Airflow; only the
+work moves into the pod. A pod shares no disk, so state between runs belongs in Postgres.
+
+**Test it locally:**
+
+```bash
+docker build -f airflow/pipelines.Dockerfile -t udb-pipelines airflow
+docker run --rm -e PG_DSN="host=host.docker.internal port=5433 dbname=unternehmensdatenbank user=writer password=writer" \
+  udb-pipelines pipeline_coordinator.main:run_pipeline_coordinator
+```
+
+It is built and tagged together with the migration image (table below). Not solved yet: the spaCy
+models of `manager_ner_train` live on disk (`MANAGER_NER_MODEL_DIR`) and need S3 or a volume on the
+hub; until then a pod trains and forgets.
 
 ## Staging and production
 

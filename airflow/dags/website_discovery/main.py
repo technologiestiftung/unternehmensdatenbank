@@ -181,7 +181,7 @@ def run_discover() -> None:
 def _make_dag():  # noqa: ANN201
     try:
         from airflow import DAG
-        from airflow.providers.standard.operators.python import PythonOperator
+        from pipeline_task import pipeline_task
         from airflow.providers.standard.operators.trigger_dagrun import TriggerDagRunOperator
     except ImportError:
         return None
@@ -192,8 +192,8 @@ def _make_dag():  # noqa: ANN201
         schedule=None, start_date=datetime(2026, 10, 1, tzinfo=timezone.utc), catchup=False,
         max_active_runs=1, tags=["sources", "websites"],
     ) as dag:
-        rescore = PythonOperator(task_id="rescore_websites", python_callable=run_rescore)
-        discover = PythonOperator(task_id="discover", python_callable=run_discover)
+        rescore = pipeline_task("rescore_websites", run_rescore)
+        discover = pipeline_task("discover", run_discover)
         coordinate = TriggerDagRunOperator(
             task_id="trigger_pipeline_coordinator", trigger_dag_id="pipeline_coordinator",
             wait_for_completion=False,

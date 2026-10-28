@@ -5,8 +5,8 @@ name: Create release
 # 1. runs the checks on the exact commit being released,
 # 2. works out the next version from the existing vX.Y.Z tags and refuses if it exists,
 # 3. tags that commit and publishes a GitHub Release with notes generated from the merged PRs,
-# 4. builds the PRODUCTION migration image :X.Y.Z and :X.Y from the tag, after the `production`
-#    environment's reviewers approve.
+# 4. builds the PRODUCTION images (migrations, pipelines) :X.Y.Z and :X.Y from the tag, after the
+#    `production` environment's reviewers approve.
 #
 # Tags and images are never overwritten. A hotfix is a new patch release from main.
 
@@ -26,7 +26,7 @@ concurrency:
 
 env:
   REGISTRY: ghcr.io
-  IMAGE_NAME: ${{ github.repository }}-migrations
+  IMAGE_PREFIX: ${{ github.repository }}
 
 jobs:
   checks:
@@ -71,6 +71,11 @@ jobs:
 
   production-image:
     needs: tag
+    strategy:
+      matrix:
+        image:
+          - { name: migrations, context: db, file: db/Dockerfile }
+          - { name: pipelines, context: airflow, file: airflow/pipelines.Dockerfile }
     runs-on: ubuntu-latest
     # Required reviewers are set on this environment in the repo settings.
     environment: production
@@ -90,7 +95,7 @@ jobs:
       - id: meta
         uses: docker/metadata-action@v5
         with:
-          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_PREFIX }}-${{ matrix.image.name }}
           # No :latest: with staging and prod on one platform it would name neither.
           tags: |
             type=semver,pattern={{version}},value=${{ needs.tag.outputs.tag }}
@@ -98,7 +103,8 @@ jobs:
           flavor: latest=false
       - uses: docker/build-push-action@v6
         with:
-          context: db
+          context: ${{ matrix.image.context }}
+          file: ${{ matrix.image.file }}
           platforms: linux/amd64
           push: true
           tags: ${{ steps.meta.outputs.tags }}

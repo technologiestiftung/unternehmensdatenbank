@@ -503,8 +503,8 @@ flowchart LR
   Hand-over list for the hub team: `unternehmensdaten-app/docs/datahub-handover.md`.
 - Database: Flyway runs against staging first, then prod. The login names are parameters.
 - Hasura: `hasura/metadata/` is applied unchanged; its database connection uses the reader login.
-- Airflow: DAGs from the data repo as a DAG bundle. How Python packages get installed (shared image
-  or one virtual environment per task, as the hub's own DAGs do) is still open.
+- Airflow: DAGs from the data repo as a DAG bundle. Every task runs as a KubernetesPodOperator pod
+  from our image `unternehmensdatenbank-pipelines` (allowed by the hub team; `docs/release.md`).
 
 ## 14. Quality gates
 
