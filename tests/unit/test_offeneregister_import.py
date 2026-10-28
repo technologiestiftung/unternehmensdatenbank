@@ -6,7 +6,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "scripts"))
 
-from import_offeneregister_records import REGISTRATION_FIELDS, payload  # noqa: E402
+from import_offeneregister_records import FLAGS, REGISTRATION_FIELDS, payload  # noqa: E402
 from prepare_offeneregister_import import legal_form, parse_address, to_row  # noqa: E402
 
 
@@ -102,3 +102,11 @@ def test_payload_keeps_register_history_and_drops_raw_address_and_same_name() ->
     assert p["register"]["document_flags"] == {"AD": True, "CD": False, "DK": True, "HD": False,
                                                "SI": True, "UT": False, "VÖ": True}
     assert p["registrations"] == [{"data_type": "subsequent-registration", "previous_company_number": "F1103R_HRB1"}]
+
+
+def test_payload_seat_of_only_spaces_is_none() -> None:
+    company = dict.fromkeys(["company_number", "native_company_number", "current_status", "jurisdiction_code",
+                             "registrar", "register_art", "register_nummer", "_registerNummerSuffix",
+                             "former_registrar", "federal_state", "retrieved_at", *FLAGS.values()])
+    company |= {"name": "Leer GmbH", "registered_address": "", "registered_office": "  "}
+    assert payload(company, [], [])["register"]["registered_office"] is None

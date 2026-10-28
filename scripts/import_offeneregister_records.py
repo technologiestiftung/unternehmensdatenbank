@@ -80,7 +80,7 @@ def payload(company: sqlite3.Row, names: list[sqlite3.Row], registrations: list[
             "opencorporates_number": company["company_number"],
             "jurisdiction_code": company["jurisdiction_code"],
             "federal_state": company["federal_state"],
-            "registered_office": company["registered_office"] or None,
+            "registered_office": (company["registered_office"] or "").strip() or None,
             "status": company["current_status"],
             "retrieved_at": company["retrieved_at"],
             "document_flags": {flag: bool(company[column]) for flag, column in FLAGS.items()},
