@@ -548,7 +548,7 @@ flowchart LR
 - [ ] Classifiers for Cluster (5), DeepTech with confidence, and isAI
 - [ ] spaCy: collect at least 30 companies with votes, then run `manager_ner_train` for the first time
 - [ ] Model storage on the hub (persistent volume or S3) and an upsert key for `ceo_name_or_contact`, so a better model can re-read all companies
-- [ ] Names voted wrong stay in `company_managers`: the resolver only adds names, it never removes one
+- [ ] Names voted wrong stay in `company_managers`: the resolver removes a name only when its source deleted the reading
 - [ ] Employee count and revenue where Fusionbase leaves gaps
 - [ ] Checkpoints and the page cache out of local files (the hub's Airflow has no shared disk)
 - [ ] Page cache bug: 39 of 268 websites found by URL pattern have no cached homepage

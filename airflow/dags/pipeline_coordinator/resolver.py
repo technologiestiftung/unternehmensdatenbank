@@ -274,7 +274,13 @@ def resolve_ceo_contact(cur: Any) -> int:
 
     Still deliberate: no batch and no changed-companies filter. It re-runs over every qualifying
     observation, which is cheap now that repeats collapse, so `rowcount` counts inserts and updates.
+
+    **A name whose observation is gone goes too.** The FK sets the pointer to NULL when a source
+    deletes what it read (spaCy does when a company's website changes); before this, those names
+    stayed in the app: 16 read off the wrong page of rustlerschriever.com on 2026-10-28.
     """
+    cur.execute("DELETE FROM public.company_managers WHERE company_field_observation_id IS NULL")
+    removed = cur.rowcount
     cur.execute(
         """
         WITH best AS (
@@ -306,7 +312,7 @@ def resolve_ceo_contact(cur: Any) -> int:
         """,
         (_FIELD_MIN_CONF,),
     )
-    return cur.rowcount
+    return removed + cur.rowcount
 
 
 def resolve_technologiefeld(cur: Any) -> int:
