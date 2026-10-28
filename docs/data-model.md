@@ -421,12 +421,16 @@ and mergers name liquidators and officers.
 - **The name comes second, before creating.** An unknown register number can be a company we have
   under an old number: a change of legal form (HRA to HRB) gets a new one. So the DAG looks for
   companies, not merged, with the same `normalized_name` and the same city (ignoring case). Exactly
-  one: it is the company (`match_method = 'fuzzy'`, `match_confidence` 0.9), and it gets the new
-  register number as an identifier. Several: the company is created, and each of them becomes an
-  open `match_candidates` row (score 0.9), so a person decides and merges. None: it is created.
+  one that is not `erloschen`: it is the company (`match_method = 'fuzzy'`, `match_confidence` 0.9),
+  and it gets the new register number as an identifier. Several live ones, or only deleted ones: the
+  company is created, and each of them becomes an open `match_candidates` row (score 0.9, its
+  `register_status` in `reasons`), so a person decides and merges. None: it is created.
+  A deleted company is never linked by name. A firm name only has to be distinguishable at its place
+  (§ 30 HGB, to be checked), so once a company is deleted its name can be used again by a new one.
   Why it matters, measured 2026-10-28 without the rule: 14 of the 425 created companies shared name
   key and city with a company we had (11 `aktiv`), and 66 grant links by name and city would have
   been lost, because `refresh_company_funding_links` links by name only when name and city are unique.
+  The DAG refreshes those grant links after any run that created a company or linked one by name.
 - **The profile shows the latest one as a hint**: `register_announcement` (its kind) and
   `register_announcement_date`. Each announcement is an observation; the DAG gives the latest per
   company confidence 1.0 and older ones 0, and the coordinator publishes the latest. It never changes

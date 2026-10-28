@@ -75,9 +75,19 @@ def test_no_company_with_the_same_name_and_city_creates_one() -> None:
     assert name_match([]) == (None, [])
 
 
-def test_exactly_one_company_with_the_same_name_and_city_is_the_company() -> None:
-    assert name_match(["a"]) == ("a", [])
+def test_exactly_one_live_company_with_the_same_name_and_city_is_the_company() -> None:
+    assert name_match([("a", "aktiv")]) == ("a", [])
+    assert name_match([("a", None)]) == ("a", [])
 
 
-def test_several_companies_with_the_same_name_and_city_go_to_a_person() -> None:
-    assert name_match(["a", "b"]) == (None, ["a", "b"])
+def test_a_deleted_company_with_the_same_name_and_city_goes_to_a_person() -> None:
+    assert name_match([("a", "erloschen")]) == (None, [("a", "erloschen")])
+
+
+def test_one_live_company_next_to_deleted_ones_is_the_company() -> None:
+    assert name_match([("a", "erloschen"), ("b", "aktiv")]) == ("b", [])
+
+
+def test_several_live_companies_with_the_same_name_and_city_go_to_a_person() -> None:
+    both = [("a", "aktiv"), ("b", "erloschen"), ("c", "in Liquidation")]
+    assert name_match(both) == (None, both)

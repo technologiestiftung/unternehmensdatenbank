@@ -23,15 +23,17 @@ allow 60 an hour.
 company by register number through `company_identifiers`. On 2026-10-28, 451 of the 900 matched a
 company we had, every one of them `aktiv` in the 2017–2019 snapshot. An unknown register number can
 still be a company we have, under its old number (a change of legal form gets a new one), so the name
-comes second (`name_match`): exactly one company that is not merged with the same `normalized_name` and
-city is linked (`match_method = 'fuzzy'`, confidence 0.9) and gets the register number as an
-identifier. Otherwise the company is **created**: name, legal form, city and register number, the
+comes second (`name_match`): when exactly one company that is not merged and not `erloschen` has the
+same `normalized_name` and city, it is linked (`match_method = 'fuzzy'`, confidence 0.9) and gets the
+register number as an identifier. A deleted company is never linked by name: a firm name must only be
+distinguishable at its place (§ 30 HGB, to be checked), so a deleted firm's name can be used again.
+Otherwise the company is **created**: name, legal form, city and register number, the
 same `normalized_name` and `legal_form` the OffeneRegister import writes (`enrichment.register_names`),
-`match_method = 'created'`; when several companies shared name and city, each becomes an open
-`match_candidates` row for a person to decide. On 2026-10-28, 14 of the 425 companies created without
-this rule shared name key and city with a company we had (11 `aktiv`), and 66 grant links by name and
-city would have been lost, because those need a unique name per city. Only Berlin's court is read, so
-only Berlin companies are created.
+`match_method = 'created'`; every company that shared name and city (several live ones, or deleted
+ones) becomes an open `match_candidates` row for a person to decide. On 2026-10-28, 14 of the 425
+companies created without this rule shared name key and city with a company we had (11 `aktiv`),
+and 66 grant links by name and city would have been lost, because those need a unique name per city.
+Only Berlin's court is read, so only Berlin companies are created.
 
 **What the app shows** is a hint, never the status: `register_announcement` is the latest announcement's
 kind, with its date. A deletion announcement does not make a company `erloschen`; the court deletes it
@@ -174,18 +176,22 @@ def fetch_berlin_page() -> str:
 # --- writing --------------------------------------------------------------------------------
 
 
-def name_match(same_name_and_city: list[str]) -> tuple[str | None, list[str]]:
-    """Fuzzy second: (the company, candidates for a person) from the companies sharing name key and city.
+def name_match(
+    same_name_and_city: list[tuple[str, str | None]],
+) -> tuple[str | None, list[tuple[str, str | None]]]:
+    """Fuzzy second: (the company, candidates for a person) from (id, register_status) of the companies
+    sharing name key and city.
 
-    Exactly one is the company. Several are candidates: the announcement's company is created, and a
-    person decides which, if any, it is. None: it is created.
+    Exactly one that is not `erloschen` is the company. Otherwise all of them are candidates: the
+    announcement's company is created, and a person decides which, if any, it is. None: it is created.
     """
-    if len(same_name_and_city) == 1:
-        return same_name_and_city[0], []
+    live = [company_id for company_id, status in same_name_and_city if status != "erloschen"]
+    if len(live) == 1:
+        return live[0], []
     return None, same_name_and_city
 
 
-def _company_for(cur: Any, item: Announcement, source_id: str) -> tuple[str, str, list[str]]:
+def _company_for(cur: Any, item: Announcement, source_id: str) -> tuple[str, str, list[tuple[str, str | None]]]:
     """The company's id, how it was found ("identifier" | "fuzzy" | "created"), and candidates for a person."""
     from enrichment.register_names import legal_form, normalize_company_name
 
@@ -204,13 +210,13 @@ def _company_for(cur: Any, item: Announcement, source_id: str) -> tuple[str, str
     if row is None and key and item.city:
         cur.execute(
             """
-            SELECT id FROM public.companies
+            SELECT id, register_status FROM public.companies
             WHERE normalized_name = %s AND lower(city) = lower(%s) AND merged_into IS NULL
             ORDER BY id
             """,
             (key, item.city),
         )
-        match, candidates = name_match([r[0] for r in cur.fetchall()])
+        match, candidates = name_match([(r[0], r[1]) for r in cur.fetchall()])
         if match:
             row, method = (match,), "fuzzy"
     if row is None:
@@ -259,14 +265,15 @@ def write_announcement(cur: Any, item: Announcement, *, source_id: str, sync_run
         """,
         (method, 0.9 if method == "fuzzy" else 1.0, record_id),
     )
-    for candidate_id in candidates:
+    for candidate_id, register_status in candidates:
         cur.execute(
             """
             INSERT INTO public.match_candidates (source_record_id, company_id, score, reasons, status)
-            VALUES (%s, %s, 0.9, '{"normalized_name": true, "city": true}'::jsonb, 'open')
+            VALUES (%s, %s, 0.9, jsonb_build_object('normalized_name', true, 'city', true,
+                                                    'register_status', %s::text), 'open')
             ON CONFLICT DO NOTHING
             """,
-            (record_id, candidate_id),
+            (record_id, candidate_id, register_status),
         )
     if is_new:
         insert_text_observation(
@@ -315,19 +322,20 @@ def run_read() -> None:
                 source_type="register_announcements", metadata={"dag_id": DAG_ID, "base_url": URL},
             )
             sync_run_id = start_sync_run(cur, source_id=source_id)
-            new = created = 0
+            new = created = linked = 0
             for item in announcements:
                 is_new, method = write_announcement(cur, item, source_id=source_id, sync_run_id=sync_run_id)
                 new += is_new
                 created += method == "created"
+                linked += method == "fuzzy"
             changed = mark_latest(cur, source_id)
-            if created:
-                # A new company can be the recipient of a grant that names its register number.
+            if created or linked:
+                # A new company or a new register number can be the recipient of a grant that names it.
                 cur.execute("SELECT public.refresh_company_funding_links()")
             finish_sync_run(cur, sync_run_id=sync_run_id, records_seen=len(announcements),
                             records_created=new, records_updated=changed, records_failed=0)
-        log.info("%d Berlin announcements on the page: %d new, %d companies created, %d marked latest/older.",
-                 len(announcements), new, created, changed)
+        log.info("%d Berlin announcements on the page: %d new, %d companies created, %d linked by name, "
+                 "%d marked latest/older.", len(announcements), new, created, linked, changed)
     finally:
         connection.close()
 
