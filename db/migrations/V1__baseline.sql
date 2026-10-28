@@ -678,7 +678,7 @@ CREATE MATERIALIZED VIEW public.company_profile_mv AS
             array_agg(DISTINCT v_company_sources.source_key ORDER BY v_company_sources.source_key) AS source_keys
            FROM public.v_company_sources
           GROUP BY v_company_sources.company_id) src ON ((src.company_id = p.id)))
-  WITH NO DATA;
+  WITH DATA; -- pg_dump writes NO DATA; unpopulated, refresh_company_profile() (CONCURRENTLY) fails
 
 
 --
