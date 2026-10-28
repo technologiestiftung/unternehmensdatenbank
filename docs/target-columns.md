@@ -1,7 +1,7 @@
 # Target columns — what each one is, where it comes from, and who fills it
 
 The project's goal is one record per Berlin company with the 20 columns below. This page says,
-for each one, which column of `public.v_company_profile` (Flyway V22) holds it and who is
+for each one, which column of `public.v_company_profile` holds it and who is
 expected to fill it.
 
 Two suppliers:

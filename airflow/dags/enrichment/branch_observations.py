@@ -92,7 +92,7 @@ SOURCE_KEY = "branch_classifier"
 #: must never be mistakable for a row from the other.
 BRANCH_ASSIGNED = "assigned"
 
-#: Confidence by who decided. **A POLICY, NOT A MEASUREMENT**, and V20's `sources.metadata` says so
+#: Confidence by who decided. **A POLICY, NOT A MEASUREMENT**, and the `branch_classifier` row's `sources.metadata` says so
 #: because that row is where a reader will look. These columns have no calibrated confidence: the
 #: score is an unbounded keyword-weight sum and 4,095 of column 3's 4,705 assigned rows have no score
 #: at all, while `confidence` is `NUMERIC(5,4) CHECK (0..1)`, so a number had to be chosen. The three

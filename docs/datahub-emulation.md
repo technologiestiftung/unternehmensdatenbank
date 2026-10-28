@@ -13,7 +13,7 @@ So that "works on my machine" means "works on the hub", this repo runs the same 
 |---|---|---|
 | Postgres **15** with PostGIS and pgvector | the same, built from `postgres:15` | `postgres/Dockerfile` |
 | one database per environment | `unternehmensdatenbank` (prod) and `unternehmensdatenbank_staging` | `postgres/init/01-create-databases.sh` |
-| three logins per database: owner, writer, reader | `app`, `writer`, `reader` | same file; grants in V21 |
+| three logins per database: owner, writer, reader | `app`, `writer`, `reader` | same file; grants at the end of the baseline migration |
 | Airflow (add-on, default 3.3.2) | Airflow 3.2.0, as before | `docker-compose.yml` |
 | Keycloak 26 (login, realm `tsb-prd`) | Keycloak 26.8.1, realm `datahub` | `keycloak/datahub-realm.json` |
 | Hasura v2 (GraphQL over Postgres) | Hasura v2.51.3 | `hasura/metadata/` |

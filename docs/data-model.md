@@ -92,9 +92,7 @@ which on the earlier example data cost 7 high-confidence websites and skipped 47
 a limit, the limit applies *after* the filter, so a limited run gets a different sample, not a
 smaller one. Compare a filtered run only with another filtered run.
 
-The column was added in `V13__company_register_status.sql`, which backfilled it from
-`metadata->>'status'` — the value had been imported all along, just never read. `metadata` keeps its
-copy as the raw source record.
+The import fills it from the register's own status; `metadata` keeps the raw value as well.
 
 > **The load has to map this column.** The prepared CSV goes into Postgres with a `\copy`.
 > `prepare_offeneregister_import.py` emits `register_status`, but if the `\copy` column list leaves
@@ -110,7 +108,7 @@ Examples:
 
 - `handelsregister`
 - `offeneregister`
-- `northdata`
+- `fusionbase`
 - `manual_import`
 
 Important fields:
@@ -259,50 +257,6 @@ So:
 
 `companies` is the answer, `company_field_observations` is the proof.
 
-## `northdata_export` — the one table that is outside all of this
-
-Everything above describes how a claim becomes a canonical field. `public.northdata_export` (V14)
-takes part in none of it. It is a **landing table**: one row per company per export file, kept
-verbatim, feeding nothing.
-
-It exists because the export has been arriving for months with only a handful of its columns read.
-The rest went into `companies.metadata` as loose JSON, and that has cost real work twice —
-`register_status` sat unread there until V13, and `website` is doing the same now.
-
-| | |
-|---|---|
-| rows, Osnabrück 2026-04-01 | 14,456 |
-| matched to a company | 14,443 (99.9%) |
-| **with a website** | **3,283** |
-| with an email | 3,677 |
-| with a WZ code | 8,481 |
-| **website, but no discovered one** | **2,394** |
-
-Four things to know before using it.
-
-1. **The key is `(source_file, internal_id)`, not `internal_id`.** Two exports a week apart already
-   exist; keeping both is what makes "what did Northdata change" answerable. Loading a second file
-   adds rows rather than replacing the first, so **every query must say which `source_file` it
-   means** or it will double-count.
-2. **`status` speaks English** — `active` / `terminated` / `liquidation`. `companies.register_status`
-   speaks German for the same fact — `aktiv` / `erloschen` / `in Liquidation`. A join comparing the
-   two as strings matches nothing and reports a clean zero rather than an error.
-3. **The website is not a top-level field in the source.** It lives at `extras[].items[]` where
-   `id = 'url'`, with `email`, `phone`, `fax` and `vatId`. Anyone reading the raw JSONL and looking
-   for a `Website` key concludes the export has no websites. It has 3,283 — and **none of them are
-   on `terminated` companies**, which is its own small piece of evidence that dead companies rarely
-   keep a site.
-4. **`company_id` is nullable and has no foreign key.** It is matched on
-   `companies.metadata ->> 'internal_id'`, unique across all 14,443 rows, unlike `unique_key` and
-   `registration_number`, which each carry 158 duplicates. A Berlin export may land before its
-   companies are imported; NULL then means unmatched, never failed.
-
-It was loaded by a Northdata import script that was removed with the Osnabrück data on 2026-10-28;
-the table stays in the schema until the squash in issue #18. Nothing reads it:
-whether an unverified third-party URL should outrank a page carrying the company's own register
-number is undecided, and the 207 companies where the two disagree are the evidence nobody has
-looked at.
-
 ## Loading the OffeneRegister Berlin set
 
 **OffeneRegister** is a snapshot of the German Handelsregister, retrieved between June 2017 and
@@ -375,7 +329,28 @@ The most important groups are:
 
 ## Migration strategy
 
-- Keep migrations forward-only
-- Never edit an applied migration in shared environments
-- Add new schema changes under `db/migrations`
-- Run Flyway before Airflow workers interact with changed schema
+- `V1__baseline.sql` is the whole schema as of 2026-10-28: 24 earlier migrations squashed while
+  nothing was deployed (issue #18). `V2__identifiers_and_matching.sql` adds identifiers, matching
+  and pipeline state.
+- From here on: forward-only, and never edit a migration that has run anywhere shared.
+- Add new schema changes under `db/migrations` as `V{N}__description.sql`.
+- Run Flyway before Airflow workers interact with changed schema.
+
+## Identifiers and matching (V2)
+
+How a record from any source finds its company. In this order:
+
+1. **A shared identifier.** `company_identifiers` holds every identifier a source uses for a company
+   (`register`, `register_former`, `opencorporates`, `fusionbase`, `vat`, `lei`); `(scheme, value)`
+   is unique, so one identifier can never point at two companies. The OffeneRegister import writes
+   the register number and the OpenCorporates number for all 296,486 Berlin companies.
+2. **A fuzzy score** on name, postcode, street, domain and phone. High: link. Middle: a row in
+   `match_candidates` for a person to decide. Low: a new company.
+3. Every link records `match_method`, `match_confidence` and `matched_at` on its
+   `company_source_records` row, so a wrong one can be found and undone.
+
+Merging never deletes: the company that turned out to be a duplicate keeps `merged_into`, and its
+source records and observations move to the survivor.
+
+`pipeline_state` holds what a DAG has done so far, one row per (pipeline, key). On the Data Hub,
+tasks run in pods with no shared disk, so a checkpoint file is gone by the next run.

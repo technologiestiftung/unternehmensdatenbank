@@ -65,7 +65,7 @@ def run_pipeline_coordinator() -> None:
                 n_revenue   = resolve_revenue(cur)
                 n_employees = resolve_employee_count(cur)
                 n_ceo       = resolve_ceo_contact(cur)
-                # V20's two industry columns. Neither has an alias list, and the two `_withheld`
+                # The two industry columns. Neither has an alias list, and the two `_withheld`
                 # field names are deliberately resolved by nothing at all — see resolver.py.
                 n_tfeld     = resolve_technologiefeld(cur)
                 n_purpose   = resolve_purpose_field(cur)

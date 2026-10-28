@@ -28,7 +28,7 @@ Shared code:
 - `source_enrichment_common.py`: database helpers every source uses: connection (`PG_DSN`),
   `ensure_source`, `upsert_source_record`, `insert_text_observation`, the batch queries and
   `DISCOVERY_ACTIVE_ONLY`. `insert_text_observation`'s `ON CONFLICT ... WHERE` repeats the partial
-  index predicate of the observation upsert key (V20) verbatim; widen one, widen the other, in the
+  index predicate of the observation upsert key (in the baseline migration) verbatim; widen one, widen the other, in the
   same commit.
 - DAG packages import their modules **by package name** (`from enrichment.confidence import ...`),
   never as a bare module after a `sys.path` insert: two packages with a same-named file would

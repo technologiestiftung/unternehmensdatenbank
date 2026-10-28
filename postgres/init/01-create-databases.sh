@@ -36,7 +36,7 @@ psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname postgres \
 
 # Data Hub emulation: one owner (migrations), one writer (pipelines), one reader (app, Hasura),
 # and the same three roles for a staging and a prod database. The DML grants live in Flyway
-# (V21), because the hub creates the roles and we only own what happens inside our database.
+# (V1__baseline), because the hub creates the roles and we only own what happens inside our database.
 create_role "$APP_DB_USER" "$APP_DB_PASSWORD"
 create_role "$APP_DB_WRITER_USER" "$APP_DB_WRITER_PASSWORD"
 create_role "$APP_DB_READER_USER" "$APP_DB_READER_PASSWORD"

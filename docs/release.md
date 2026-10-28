@@ -8,9 +8,9 @@ Flyway for us. It runs an **image** we build, before the app starts.
 
 | kind | example | goes where |
 |---|---|---|
-| schema | `V23__extraction_feedback.sql` | a migration |
+| schema | `V2__identifiers_and_matching.sql` | a migration |
 | reference data the code needs | `sources` rows with their priority | a migration |
-| a one-off data fix | V17's dedup, V19's `company_managers` | a migration |
+| a one-off data fix | deduplicating rows a bug wrote twice | a migration |
 | business data | Fusionbase, Förderkatalog, enrichment, users' votes | **never** a migration: the DAGs and the app write it |
 
 The test: if a fresh, empty database needs it to work, it is a migration. If it changes every
@@ -33,7 +33,7 @@ quarter, it is a pipeline. The Osnabrück example data never goes to the hub.
 | `FLYWAY_PLACEHOLDERS_WRITER_ROLE` | the hub's name for the writer login | no |
 | `FLYWAY_PLACEHOLDERS_READER_ROLE` | the hub's name for the reader login | no |
 
-The migrations never name the writer or reader login; V21 grants to whatever these two say.
+The migrations never name the writer or reader login; the baseline grants to whatever these two say.
 
 In the app's Deployment:
 
