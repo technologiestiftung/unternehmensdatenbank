@@ -7,6 +7,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "scripts"))
 
 from import_offeneregister_records import FLAGS, OFFICER_FIELDS, REGISTRATION_FIELDS, payload  # noqa: E402
+from import_register_managers import current_managers  # noqa: E402
 from prepare_offeneregister_import import legal_form, parse_address, to_row  # noqa: E402
 
 
@@ -113,3 +114,17 @@ def test_payload_seat_of_only_spaces_is_none() -> None:
                              "former_registrar", "federal_state", "retrieved_at", *FLAGS.values()])
     company |= {"name": "Leer GmbH", "registered_address": "", "registered_office": "  "}
     assert payload(company, [], [], [])["register"]["registered_office"] is None
+
+
+def test_only_current_geschaeftsfuehrer_become_managers() -> None:
+    officers = [
+        {"name": "Erika Muster", "position": "Geschäftsführer", "type": "person"},
+        {"name": "Max  Beispiel", "position": "Geschäftsführer"},
+        {"name": "Erika Muster", "position": "Geschäftsführer", "type": "person"},
+        {"name": "Alt Former", "position": "Geschäftsführer", "end_date": "2015-01-01"},
+        {"name": "Weg Dismissed", "position": "Geschäftsführer", "dismissed": True},
+        {"name": "Pro Kurist", "position": "Prokurist", "type": "person"},
+        {"name": "Holding GmbH", "position": "Geschäftsführer", "type": "company"},
+    ]
+    assert current_managers(officers) == ["Erika Muster", "Max Beispiel"]
+    assert current_managers(None) == []

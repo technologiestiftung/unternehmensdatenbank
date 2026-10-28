@@ -77,7 +77,9 @@ Multi-source canonical resolution, detail in [data-model](docs/data-model.md):
   companies have a former name). Matching across sources is by identifiers first, fuzzy second (#18).
 - **OffeneRegister's full record, officers and raw address included, sits in its source record.**
   That is personal data: `company_source_records` is not exposed through Hasura, and nothing of it
-  leaves local development without a privacy review (TSB rules).
+  leaves local development without a privacy review (TSB rules). Reviewed so far (2026-10-28, #18):
+  comparing officers in memory, and showing current Geschäftsführer in the app
+  (`scripts/import_register_managers.py`). Not the hub, not an export.
 
 ## DAGs
 

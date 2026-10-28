@@ -21,7 +21,8 @@ row has a seat, but only 116,527 have an address. Rows that already have a city 
 PERSONAL DATA. Officers and the raw address (which in some rows names managers with their birth
 dates) are personal data under the GDPR. They stay in `company_source_records`, which Hasura does
 not expose, and a privacy review is needed before any of it leaves local development (hub, app,
-export). The data is a 2017–2019 snapshot, so much of it is out of date.
+export). One use is reviewed: the current Geschäftsführer may be shown in the app, which
+`import_register_managers.py` does. The data is a 2017–2019 snapshot, so much of it is out of date.
 
 Matches companies by `registration_number`, so run it after the CSV load. The match is recorded on
 the source record (`match_method = 'identifier'`, confidence 1.0), and the register number and the
