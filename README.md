@@ -81,7 +81,7 @@ still shows up and fails with a clear message instead of hiding.
 ## Migrations
 
 `db/migrations/`: `V1__baseline.sql` is the whole schema as of 2026-10-28 (the earlier history squashed
-before anything was deployed), `V2` adds identifiers, matching and pipeline state. Forward-only from
+before anything was deployed, details in [data-model](docs/data-model.md#migration-strategy)). Forward-only from
 here. Flyway runs as a one-shot service (`--profile tools`), not with `docker compose up`.
 
 ## Checks

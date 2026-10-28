@@ -1,4 +1,4 @@
--- Queries that work against the schema as it stands (V1__baseline + V2).
+-- Queries that work against the schema as it stands (V1__baseline).
 --
 -- WHY THIS FILE CARRIES NO EXPECTED OUTPUT. Every number in this repo's documentation has gone
 -- stale at least once, and a comment saying "should return 3,529" is a number nobody re-measures.

@@ -153,8 +153,8 @@ purpose, so for Berlin only the Technologiefeld can be filled today.
 
 ## Migrations — one baseline, V1
 
-`V1__baseline.sql` is the whole schema as of 2026-10-29: everything before it was squashed twice while
-nothing was deployed, and a database built from it matches one built from the old files exactly
+`V1__baseline.sql` is the whole schema as of 2026-10-28: everything before it was squashed three times
+while nothing was deployed (last: V1 + V10), and a database built from it matches one built from the old files exactly
 (schema, grants, seed rows). A local database migrated before the squash needs its Flyway history
 reset once ([data-model](docs/data-model.md), "Migration strategy"). From here on forward-only: never edit a migration that has run anywhere shared. Flyway is a one-shot
 service under `--profile tools` and does **not** run with `docker compose up`. On the hub it runs as

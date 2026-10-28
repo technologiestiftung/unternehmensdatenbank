@@ -338,9 +338,9 @@ The most important groups are:
 
 ## Migration strategy
 
-- `V1__baseline.sql` is the whole schema as of 2026-10-29. Nothing was deployed, so the migrations
-  before it were squashed twice: the 24 of the Osnabrück era on 2026-10-28 (issue #18), then V1-V9
-  of the Berlin rebuild on 2026-10-29. Checked: a database built from it and one built from the old
+- `V1__baseline.sql` is the whole schema as of 2026-10-28. Nothing was deployed, so the migrations
+  before it were squashed three times, all on 2026-10-28: the 24 of the Osnabrück era (issue #18),
+  then V1-V9 of the Berlin rebuild, then V1 + V10 (register announcements). Checked each time: a database built from it and one built from the old
   files dump to the same schema, grants and seed rows. The sections below keep the old migration
   names in brackets, so git history finds the reasoning.
 - **A local database migrated before the squash** still has the old files in its Flyway history,
@@ -349,8 +349,9 @@ The most important groups are:
   docker compose exec -T postgres psql -U app -d unternehmensdatenbank -c "DROP TABLE flyway_schema_history"
   docker compose --profile tools run --rm flyway baseline -baselineVersion=1 -baselineDescription=baseline
   ```
-  Only for a database that was at V9. One with an unmerged migration on top (a V10 from a branch)
-  keeps that table and column; renumber the migration to V2 before it lands.
+  Only for a database that has every migration up to V10 applied (`flyway info`); its schema is then
+  exactly the baseline. One at V1 without V10 lacks the two `register_announcement` columns: build it
+  fresh. A branch with an unmerged migration renumbers it to V2 before it lands.
 - From here on: forward-only, and never edit a migration that has run anywhere shared.
 - Add new schema changes under `db/migrations` as `V{N}__description.sql`.
 - Run Flyway before Airflow workers interact with changed schema.
@@ -446,7 +447,8 @@ and mergers name liquidators and officers.
   company confidence 1.0 and older ones 0, and the coordinator publishes the latest. It never changes
   `register_status`: 147 companies shown `aktiv` had a deletion announced on 2026-10-28.
 
-V9 is the vote-delete migration, renumbered from a second V8 (#33).
+V10 was squashed into the baseline the same day it landed (#38); V9, the vote-delete migration,
+had been renumbered from a second V8 first (#33).
 
 ## Website contacts and keywords (V8)
 
