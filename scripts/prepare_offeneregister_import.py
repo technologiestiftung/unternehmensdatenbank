@@ -9,8 +9,8 @@ What it has: name, register number, status, address (127,025 of the Berlin rows)
 WZ code, purpose, founding date, website — those columns stay empty. Its `registrations` table
 records register moves, not founding dates, so it is not read.
 
-The `officer` table is deliberately NOT read. It holds names of real people (348,904 for Berlin),
-which is personal data under the TSB rules and needs a privacy review before it enters a database.
+Officers and the raw address are not part of `companies`; `import_offeneregister_records.py` keeps
+them in the company's source record (personal data — see its docstring).
 
 Usage:
     python scripts/prepare_offeneregister_import.py openregister.db berlin.csv

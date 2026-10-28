@@ -14,9 +14,14 @@ rest, so nothing in the dump is lost: one `company_source_records` row per compa
 It also fills `companies.city` from the registered seat where the address gave none: every Berlin
 row has a seat, but only 116,527 have an address. Rows that already have a city are not touched.
 
-Left out on purpose: the `officer` table (names of real people — personal data, needs a privacy
-review first) and the raw address, whose register text names managers and their birth dates in
-some rows. The dump itself stays the archive for both.
+  officers      every officer the register lists (348,904 entries for 143,355 companies): name,
+                position, start and end date, place, flags
+  address       the cleaned address, and the raw register text it came from
+
+PERSONAL DATA. Officers and the raw address (which in some rows names managers with their birth
+dates) are personal data under the GDPR. They stay in `company_source_records`, which Hasura does
+not expose, and a privacy review is needed before any of it leaves local development (hub, app,
+export). The data is a 2017–2019 snapshot, so much of it is out of date.
 
 Matches companies by `registration_number`, so run it after the CSV load. Safe to re-run: the
 record is upserted on (source, external_id).
@@ -47,6 +52,10 @@ SOURCE_KEY = "offeneregister"
 FLAGS = {"AD": "register_flag_AD", "CD": "register_flag_CD", "DK": "register_flag_DK",
          "HD": "register_flag_HD", "SI": "register_flag_SI", "UT": "register_flag_UT",
          "VÖ": "register_flag_VOE"}
+OFFICER_FIELDS = (
+    "name", "firstname", "lastname", "maidenname", "title", "position", "type", "city", "flag",
+    "start_date", "end_date", "dismissed", "reference_no",
+)
 REGISTRATION_FIELDS = (
     "data_type", "confidence", "publication_date", "retrieved_at", "source_url", "start_date",
     "start_date_type", "sample_date", "previous_company_number", "previous_jurisdiction_code",
@@ -67,7 +76,12 @@ def _same_name(a: str, b: str) -> bool:
     return " ".join(a.split()).casefold() == " ".join(b.split()).casefold()
 
 
-def payload(company: sqlite3.Row, names: list[sqlite3.Row], registrations: list[sqlite3.Row]) -> dict:
+def _present(row: sqlite3.Row, fields: tuple[str, ...]) -> dict:
+    return {field: row[field] for field in fields if row[field] not in (None, "")}
+
+
+def payload(company: sqlite3.Row, names: list[sqlite3.Row], registrations: list[sqlite3.Row],
+            officers: list[sqlite3.Row]) -> dict:
     address, postcode, city = parse_address(company["registered_address"] or "")
     return {
         "register": {
@@ -85,14 +99,12 @@ def payload(company: sqlite3.Row, names: list[sqlite3.Row], registrations: list[
             "retrieved_at": company["retrieved_at"],
             "document_flags": {flag: bool(company[column]) for flag, column in FLAGS.items()},
         },
-        # The cleaned address only; see the module docstring for why the raw one is not kept.
-        "address": {"address": address, "postcode": postcode, "city": city},
+        "address": {"address": address, "postcode": postcode, "city": city,
+                    "raw": company["registered_address"] or None},
         # The name table repeats the current name in another spacing or case for 435 companies.
         "former_names": sorted({n["company_name"].strip() for n in names if not _same_name(n["company_name"], company["name"])}),
-        "registrations": [
-            {field: r[field] for field in REGISTRATION_FIELDS if r[field] not in (None, "")}
-            for r in registrations
-        ],
+        "registrations": [_present(r, REGISTRATION_FIELDS) for r in registrations],
+        "officers": [_present(o, OFFICER_FIELDS) for o in officers],
     }
 
 
@@ -105,6 +117,7 @@ def main() -> int:
     berlin = "SELECT c.company_number FROM company c WHERE c.federal_state = ?"
     names = grouped(lite, f"SELECT company_id, company_name FROM name WHERE company_id IN ({berlin})")
     registrations = grouped(lite, f"SELECT * FROM registrations WHERE company_id IN ({berlin})")
+    officers = grouped(lite, f"SELECT * FROM officer WHERE company_id IN ({berlin}) ORDER BY id")
 
     dsn = os.getenv("PG_DSN", "host=localhost port=5433 dbname=unternehmensdatenbank_berlin user=app password=app")
     with psycopg2.connect(dsn) as pg, pg.cursor() as cur:
@@ -123,7 +136,8 @@ def main() -> int:
                 continue
             number = company["company_number"]
             rows.append((company_id, source_id, number, company["name"],
-                         Json(payload(company, names.get(number, []), registrations.get(number, [])))))
+                         Json(payload(company, names.get(number, []), registrations.get(number, []),
+                                      officers.get(number, [])))))
 
         execute_values(cur, """
             INSERT INTO public.company_source_records (company_id, source_id, external_id, source_company_name, source_payload)

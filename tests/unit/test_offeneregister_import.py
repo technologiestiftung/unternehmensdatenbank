@@ -6,7 +6,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "scripts"))
 
-from import_offeneregister_records import FLAGS, REGISTRATION_FIELDS, payload  # noqa: E402
+from import_offeneregister_records import FLAGS, OFFICER_FIELDS, REGISTRATION_FIELDS, payload  # noqa: E402
 from prepare_offeneregister_import import legal_form, parse_address, to_row  # noqa: E402
 
 
@@ -80,7 +80,7 @@ def test_city_falls_back_to_the_registered_seat() -> None:
     assert row["city"] == "Potsdam" and row["address"] is None
 
 
-def test_payload_keeps_register_history_and_drops_raw_address_and_same_name() -> None:
+def test_payload_keeps_register_history_officers_and_raw_address() -> None:
     company = {
         "company_number": "F1103R_HRB3", "native_company_number": "Berlin (Charlottenburg) HRB 3",
         "name": "Neu GmbH", "current_status": "currently registered", "jurisdiction_code": "de",
@@ -95,10 +95,13 @@ def test_payload_keeps_register_history_and_drops_raw_address_and_same_name() ->
     # A real sqlite row has every column; empty ones must not reach the payload.
     moves = [dict.fromkeys(REGISTRATION_FIELDS) | {
         "data_type": "subsequent-registration", "previous_company_number": "F1103R_HRB1", "source_url": ""}]
-    p = payload(company, names, moves)
+    officers = [{**dict.fromkeys(OFFICER_FIELDS), "firstname": "Erika", "lastname": "Muster",
+                 "position": "Geschäftsführer", "city": ""}]
+    p = payload(company, names, moves, officers)
     assert p["former_names"] == ["Alt GmbH"]
     assert p["address"]["address"] == "Weg 1, 10115 Berlin"
-    assert "Erika" not in str(p)
+    assert p["address"]["raw"] == company["registered_address"]
+    assert p["officers"] == [{"firstname": "Erika", "lastname": "Muster", "position": "Geschäftsführer"}]
     assert p["register"]["document_flags"] == {"AD": True, "CD": False, "DK": True, "HD": False,
                                                "SI": True, "UT": False, "VÖ": True}
     assert p["registrations"] == [{"data_type": "subsequent-registration", "previous_company_number": "F1103R_HRB1"}]
@@ -109,4 +112,4 @@ def test_payload_seat_of_only_spaces_is_none() -> None:
                              "registrar", "register_art", "register_nummer", "_registerNummerSuffix",
                              "former_registrar", "federal_state", "retrieved_at", *FLAGS.values()])
     company |= {"name": "Leer GmbH", "registered_address": "", "registered_office": "  "}
-    assert payload(company, [], [])["register"]["registered_office"] is None
+    assert payload(company, [], [], [])["register"]["registered_office"] is None

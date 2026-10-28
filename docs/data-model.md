@@ -320,9 +320,11 @@ numbers pinned to it are untouched. Loaded on 2026-10-27:
 | with a legal form (read from the end of the name) | 256,845 |
 | WZ code, purpose, founding date, website | **none** — the dump does not have them |
 
-The dump's officer table (348,904 Berlin entries with first and last names) is **not loaded**: it is
-personal data and needs a privacy review first. The address is cut after postcode and city for the
-same reason, because some rows continue with register text naming managers and their birth dates.
+The address in `companies` is cut after postcode and city, because some rows continue with register
+text naming managers and their birth dates. That raw text, and the dump's officer table (348,904
+Berlin entries with first and last names), are kept in the company's source record (below).
+**They are personal data.** `company_source_records` is not exposed through Hasura, and a privacy
+review is needed before any of it leaves local development (hub, app, export).
 A part of the address naming who receives the post — `c/o`, `bei`, `z. Hd.`, `zu Händen` — is
 dropped too, person or company alike: **10,423** of the 116,527 addresses had one. Before the
 postcode, only parts with a digit (house number, building, postcode) are kept, so a name split by a
@@ -341,8 +343,8 @@ docker compose exec -T postgres psql -U app -d unternehmensdatenbank_berlin -c "
 
 Everything else the dump knows goes into **`company_source_records`**, one row per company under
 the source `offeneregister`, so nothing is lost: register court, type and number, registered
-seat, status, the seven document flags, **former names (32,170 companies)** and **register moves
-(25,584)**. The same script fills `companies.city` from the registered seat where the address gave
+seat, status, the seven document flags, **former names (32,170 companies)**, **register moves
+(25,584)**, **officers (348,904)** and the raw address. The same script fills `companies.city` from the registered seat where the address gave
 none (179,959 rows), so every company has a city. Run it after the CSV load; it is safe to re-run.
 
 ```bash
