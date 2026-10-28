@@ -151,7 +151,15 @@ def run_discover() -> None:
             jobs = {pool.submit(pipeline.discover, c, use_osm=USE_OSM, common_words=common): c
                     for c in prepared}
             for job in as_completed(jobs):
-                company, result = jobs[job], job.result()
+                company = jobs[job]
+                try:
+                    result = job.result()
+                except Exception:  # noqa: BLE001  one bad page must not discard the batch
+                    # Raising here left the pool finishing every other company and threw all of
+                    # their results away. Nothing is written, so a later batch tries it again.
+                    log.exception("Discovery failed for company %s; retried in a later batch", company.id)
+                    errors += 1
+                    continue
                 found += bool(result.website)
                 errors += bool(result.errors)
                 with connection, connection.cursor() as cur:

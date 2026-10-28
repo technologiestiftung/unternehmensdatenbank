@@ -31,3 +31,43 @@ def test_officers_become_comparison_keys_people_only() -> None:
     ])
     assert keys == frozenset({"erika muster", "max beispiel"})
     assert officer_keys(None) == frozenset()
+
+
+def test_one_failing_company_does_not_discard_the_batch(monkeypatch) -> None:
+    """A page that crashes discovery used to end the batch and throw away every other result."""
+    from contextlib import nullcontext
+    from types import SimpleNamespace
+    from unittest.mock import MagicMock
+
+    from source_enrichment_common import CompanyCandidate
+    from website_discovery import main
+
+    companies = [CompanyCandidate(id=str(i), company_name=f"Firma {i}", address=None, postcode=None,
+                                  city=None, registration_number=None) for i in range(5)]
+
+    def discover(company, **_):
+        if company.id == "2":
+            raise ValueError("a page bs4 cannot read")
+        return SimpleNamespace(website=f"https://firma{company.id}.de", errors=[])
+
+    connection = MagicMock()
+    connection.__enter__.return_value = connection
+    connection.cursor.return_value = nullcontext(MagicMock())
+    written, finished = [], {}
+    monkeypatch.setenv(main.ENABLED_FLAG, "true")
+    monkeypatch.setattr(main, "fetch_companies_without_source", lambda *a, **k: companies)
+    monkeypatch.setattr(main, "get_connection", lambda: connection)
+    monkeypatch.setattr(main, "ensure_source", lambda *a, **k: "source")
+    monkeypatch.setattr(main, "start_sync_run", lambda *a, **k: "run")
+    monkeypatch.setattr(main, "load_officers", lambda *a, **k: {})
+    monkeypatch.setattr(main, "_common_words", lambda cur: set())
+    monkeypatch.setattr(main.pipeline, "discover", discover)
+    monkeypatch.setattr(main.dataclasses, "asdict", vars)
+    monkeypatch.setattr(main, "write_company_result", lambda cur, *, company, **k: written.append(company.id))
+    monkeypatch.setattr(main, "finish_sync_run", lambda cur, **k: finished.update(k))
+
+    main.run_discover()
+
+    assert sorted(written) == ["0", "1", "3", "4"]
+    assert finished["records_created"] == 4
+    assert finished["records_failed"] == 1

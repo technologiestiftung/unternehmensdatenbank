@@ -385,7 +385,7 @@ def page_text(html: str) -> str:
     one line. Only element boundaries produce a break.
     """
     try:
-        soup = BeautifulSoup(html, "lxml")
+        soup = BeautifulSoup(html, "lxml", multi_valued_attributes=None)  # see http_client.SOUP_OPTIONS
         for tag in soup(["script", "style", "nav", "header", "footer"]):
             tag.decompose()
         text = soup.get_text(separator="\n", strip=True)
