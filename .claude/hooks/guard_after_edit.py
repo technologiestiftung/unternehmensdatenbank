@@ -120,7 +120,15 @@ def main() -> int:
     if not any(part in path for part in WATCHED):
         return 0
 
-    for guard in guards():
+    listed = guards()
+    if not listed:
+        # Loud on purpose, like a missing guard: an empty list must not look like guards that passed.
+        sys.stderr.write(
+            f"after editing {path}: no `python scripts/check_*.py` line found in {FREE_CHECKS}. "
+            "The guards are not running; fix the script or this hook's pattern.\n"
+        )
+        return 2
+    for guard in listed:
         failure = run_guard(guard)
         if failure:
             sys.stderr.write(f"after editing {path}: {failure}")

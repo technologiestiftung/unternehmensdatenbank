@@ -5,10 +5,9 @@ The edit-time hook (`guard_after_edit.py`) catches a breakage in the turn it hap
 edits under the watched directories. A commit is the moment the change becomes history, so this is
 where everything runs:
 
-1. **ruff** on the `.py` files the commit would contain — staged files, plus the modified tracked
-   files when the command carries `-a`/`--all`, since those are staged only when git runs.
-2. **`scripts/free_checks.sh`**: ruff over the repo, the unit tests and the seven rule guards. The
-   same script CI and no-mistakes run (decided 2026-10-28). No database, no network: until then
+**`scripts/free_checks.sh`**: ruff over the whole repo, the unit tests and the seven rule guards.
+The same script CI and no-mistakes run (decided 2026-10-28). It lints everything, so there is no
+separate pass over the staged files. No database, no network: until then
    this hook also ran tests pinned to the Osnabrück example data, which needed Postgres; they went
    with that data.
 
@@ -18,7 +17,7 @@ What passes straight through, in well under a second: any Bash command that is n
 Exit codes: 0 lets the command run, 2 blocks it and shows stderr to Claude as feedback. Success
 prints nothing.
 
-The commit regex and the ruff runner are IMPORTED from the sibling hooks, never copied — a copy
+The commit regex and the script's path are IMPORTED from the sibling hooks, never copied — a copy
 would agree with itself no matter what the real hook does (docs/guards-and-tests.md, rule 1).
 """
 from __future__ import annotations
@@ -28,6 +27,7 @@ import os
 import shlex
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
 HOOKS = Path(__file__).resolve().parent
@@ -35,7 +35,7 @@ REPO = HOOKS.parents[1]
 sys.path.insert(0, str(HOOKS))
 
 from check_commit_message import _GIT_COMMIT  # noqa: E402  the one definition of "a git commit"
-from guard_after_edit import FREE_CHECKS, ruff_check  # noqa: E402
+from guard_after_edit import FREE_CHECKS  # noqa: E402
 
 
 def _git(*args: str) -> subprocess.CompletedProcess:
@@ -52,15 +52,6 @@ def _commits_all(argv: list[str]) -> bool:
     return False
 
 
-def python_files_to_lint(argv: list[str]) -> list[str]:
-    staged = _git("diff", "--cached", "--name-only", "--diff-filter=ACMR", "--", "*.py")
-    files = set(line.strip() for line in staged.stdout.splitlines() if line.strip())
-    if _commits_all(argv):
-        unstaged = _git("diff", "--name-only", "--diff-filter=ACMR", "--", "*.py")
-        files.update(line.strip() for line in unstaged.stdout.splitlines() if line.strip())
-    return sorted(f for f in files if (REPO / f).exists())
-
-
 def anything_to_commit(argv: list[str]) -> bool:
     if _commits_all(argv):
         return True
@@ -68,9 +59,18 @@ def anything_to_commit(argv: list[str]) -> bool:
 
 
 def free_checks_failure() -> str | None:
-    """Run free_checks.sh with this interpreter first on PATH, so `python` means the same Python."""
-    env = {**os.environ, "PATH": f"{Path(sys.executable).parent}{os.pathsep}{os.environ.get('PATH', '')}"}
-    result = subprocess.run(["sh", str(FREE_CHECKS)], cwd=REPO, capture_output=True, text=True, env=env)
+    """Run free_checks.sh with `python` meaning this hook's interpreter.
+
+    The script calls `python`. An interpreter's own folder may have only `python3` or `python3.12`,
+    so a small `python` wrapper goes first on PATH. A wrapper, not a symlink: a virtualenv finds its
+    packages through the path it was called by, and a symlink elsewhere would lose them.
+    """
+    with tempfile.TemporaryDirectory() as shim:
+        wrapper = Path(shim) / "python"
+        wrapper.write_text(f'#!/bin/sh\nexec "{sys.executable}" "$@"\n')
+        wrapper.chmod(0o755)
+        env = {**os.environ, "PATH": f"{shim}{os.pathsep}{os.environ.get('PATH', '')}"}
+        result = subprocess.run(["sh", str(FREE_CHECKS)], cwd=REPO, capture_output=True, text=True, env=env)
     if result.returncode == 0:
         return None
     output = ((result.stdout or "") + (result.stderr or "")).strip()
@@ -108,7 +108,7 @@ def main() -> int:
         sys.stderr.write(f"BLOCKED before commit: {text}")
         return 2
 
-    failure = ruff_check(python_files_to_lint(argv)) or free_checks_failure()
+    failure = free_checks_failure()
     if failure:
         return blocked(failure)
     return 0
