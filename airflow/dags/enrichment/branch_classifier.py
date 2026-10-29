@@ -11,7 +11,7 @@ its Impressum, or the purpose it registered.
 
 ## What must never write a branch
 
-A **WZ code** — the official German industry classification, in `public.companies.wz_code` for 8,483
+A **WZ code** — the official German industry classification, in the `wz_code` register field for 8,483
 of 14,443 companies — says what a company is *registered as*. That is a different question, answered
 by a different authority, and it is **not** a technology field. It gets its own column, built by
 `wz_cluster.py`, and this module never sees it: `classify()` takes no WZ argument, and

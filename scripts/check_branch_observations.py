@@ -42,6 +42,7 @@ twice, most memorably finding `Handel` inside `Handelsregister`.
 from __future__ import annotations
 
 import ast
+import re
 import sys
 from pathlib import Path
 
@@ -60,7 +61,7 @@ REPO = Path(__file__).resolve().parent.parent
 
 from enrichment import branch_observations as bo  # noqa: E402
 from enrichment import purpose_branch as pb  # noqa: E402
-from pipeline_coordinator.resolver import _FIELD_MIN_CONF  # noqa: E402
+from pipeline_coordinator.resolver import _FIELD_MIN_CONF, REGISTER_FIELDS  # noqa: E402
 
 FAILURES: list[str] = []
 
@@ -139,10 +140,12 @@ def main() -> int:
     sql_text = defining[-1].read_text(encoding="utf-8") if defining else index_sql + " ;"
     index_block = sql_text[sql_text.index(index_sql):]
     index_block = index_block[: index_block.index(";")]
-    index_names = {p.strip() for p in index_block.split("'") if p.strip() and "," not in p.strip()
-                   and " " not in p.strip()}
+    index_names = set(re.findall(r"'([a-z_]+)'", index_block))
     for field in CLASSIFICATION_FIELDS:
         check(f"the upsert index predicate covers {field}", field in index_names, True)
+    # A register import re-delivers every value; without the key each run would append a copy.
+    check("the upsert index predicate covers every register field",
+          sorted(set(REGISTER_FIELDS) - index_names), [])
 
     conflict_names = _on_conflict_names()
     for field in CLASSIFICATION_FIELDS:
@@ -151,8 +154,7 @@ def main() -> int:
     # The two lists are the same predicate written twice, and Postgres infers the partial index from
     # the second one. A name in one and not the other cannot be upserted at all.
     check("the index predicate and the ON CONFLICT clause list the same names",
-          sorted(index_names & set(CLASSIFICATION_FIELDS)),
-          sorted(conflict_names & set(CLASSIFICATION_FIELDS)))
+          sorted(index_names), sorted(conflict_names))
 
     # -----------------------------------------------------------------------------------
     section("2. every confidence the policy can produce is strictly above the resolver's bar")

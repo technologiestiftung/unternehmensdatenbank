@@ -26,7 +26,7 @@ to a caller**, or the callers drift apart.
 |---|---|
 | `check_branch_classifier.py` | the compound rule and hyphen knob, keyword weights, WZ lookup, services-page choice |
 | `check_purpose_branch.py` | disjoint outcomes, the website gate, no WZ code or register status, the 40-character floor, `DISCOVERY_ACTIVE_ONLY` as a constant SQL fragment |
-| `check_branch_observations.py` | every field the emitter writes is covered by the upsert index predicate *and* `insert_text_observation`'s `ON CONFLICT`; no `resolve_*` names a `_withheld` field |
+| `check_branch_observations.py` | every field the emitter writes and every register field (`REGISTER_FIELDS`) is covered by the upsert index predicate; that predicate and `insert_text_observation`'s `ON CONFLICT` list the same names; no `resolve_*` names a `_withheld` field |
 | `check_website_discovery.py` | URL guessing, the confidence ladder, `_page_evidence`, JSON-LD, postcodes, register numbers |
 | `check_own_site_filter.py` | real URLs: directories, registers and portals are never a company's own site |
 | `check_imprint_owner_extraction.py` | real Impressum layouts guarding the Geschäftsführer regex |

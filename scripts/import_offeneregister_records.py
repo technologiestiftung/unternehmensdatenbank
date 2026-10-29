@@ -1,32 +1,43 @@
 #!/usr/bin/env python3
-"""Everything OffeneRegister knows about a Berlin company, kept as its source record.
+"""OffeneRegister's SQLite dump into the database, Berlin only: companies, source records, register fields.
 
-`prepare_offeneregister_import.py` fills the identity columns of `companies`. This script keeps the
-rest, so nothing in the dump is lost: one `company_source_records` row per company under the source
-`offeneregister`, with the whole record in `source_payload`:
+OffeneRegister is a snapshot of the German Handelsregister retrieved between June 2017 and January
+2019: 5.3 million companies, 296,486 of them at the Berlin court (Charlottenburg), 142,571 of
+those still registered at the time. It is example data until Fusionbase delivers the real set.
+
+Per company, three things:
+
+1. **The company**, found by its register number, created if we do not have it. A company is
+   identity only: an id, the register number, `metadata` (V3).
+2. **Its source record**, one `company_source_records` row under the source `offeneregister`, with
+   everything the dump knows in `source_payload`, so nothing is lost:
 
   register      court, type, number, suffix, OpenCorporates number, registered seat, status,
                 retrieved_at, and the seven document flags (AD, CD, DK, HD, SI, UT, VÖ)
   former_names  the names the company was registered under before (32,170 Berlin companies) —
                 useful to discovery, since a domain often still carries the old name
   registrations register moves: earlier or later numbers, with dates (25,584 companies)
-
-It also fills `companies.city` from the registered seat where the address gave none: every Berlin
-row has a seat, but only 116,527 have an address. Rows that already have a city are not touched.
-
   officers      every officer the register lists (348,904 entries for 143,355 companies): name,
                 position, start and end date, place, flags
   address       the cleaned address, and the raw register text it came from
+
+3. **Its register fields as observations** (`to_row`): name, legal form (read from the end of the
+   name; the dump has no field for it), address, postcode, city and status, confidence 1.0. The
+   dump has no WZ code, purpose or founding date. The city is the registered seat where the address
+   has none: every Berlin row has a seat, only 116,527 an address. `pipeline_coordinator` decides
+   what is shown; this script runs that step for the register fields itself, so the app is current
+   when it ends.
 
 PERSONAL DATA. Officers and the raw address (which in some rows names managers with their birth
 dates) are personal data under the GDPR. They stay in `company_source_records`, which Hasura does
 not expose. Only the current Geschäftsführer is shown in the app, through
 `import_register_managers.py`. The data is a 2017–2019 snapshot, so much of it is out of date.
 
-Matches companies by `registration_number`, so run it after the CSV load. The match is recorded on
-the source record (`match_method = 'identifier'`, confidence 1.0), and the register number and the
-OpenCorporates number become the company's `company_identifiers`. Safe to re-run: the record is
-upserted on (source, external_id), an identifier on (scheme, value).
+The match is recorded on the source record (`match_method` 'identifier' or 'created', confidence
+1.0), and the register number and the OpenCorporates number become the company's
+`company_identifiers`. Safe to re-run: the record is upserted on (source, external_id), an
+identifier on (scheme, value), an observation on its upsert key. A value the dump no longer
+delivers drops to confidence 0 and is un-published; it is never deleted.
 
 Usage:
     python scripts/import_offeneregister_records.py openregister.db     # PG_DSN to override the target
@@ -35,19 +46,21 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import sqlite3
 import sys
 from collections import defaultdict
 from pathlib import Path
+from typing import Any
 
 REPO = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO / "airflow" / "dags"))
 
 import psycopg2  # noqa: E402
 from psycopg2.extras import Json, execute_values  # noqa: E402
+from enrichment.register_names import legal_form  # noqa: E402
+from pipeline_coordinator.resolver import REGISTER_FIELDS, resolve_register_fields  # noqa: E402
 from source_enrichment_common import ensure_source  # noqa: E402
-
-from prepare_offeneregister_import import FEDERAL_STATE, parse_address  # noqa: E402
 
 SOURCE_KEY = "offeneregister"
 FLAGS = {"AD": "register_flag_AD", "CD": "register_flag_CD", "DK": "register_flag_DK",
@@ -64,6 +77,64 @@ REGISTRATION_FIELDS = (
     "subsequent_jurisdiction_code", "subsequent_entity_type", "subsequent_registration_start_date",
     "alternate_company_number", "alternate_jurisdiction_code", "alternate_entity_type",
 )
+
+
+FEDERAL_STATE = "Berlin"
+
+# OffeneRegister's status, in the register's own German words that `register_status` uses everywhere
+# else (the discovery filter is `= 'aktiv'`).
+STATUS = {"currently registered": "aktiv", "removed": "erloschen"}
+
+# The address ends at "<postcode> <city>". What follows in some rows is register text, sometimes with
+# managers' names and dates of birth, which must not land in `address`.
+# shortcut: the city is one word, so "Frankfurt am Main" becomes "Frankfurt"; fine for Berlin.
+_ADDRESS = re.compile(r"^(.*?\b(\d{5})\s+([^\s,.:;]+))")
+# "c/o Muster, Erika, Weg 1, 10115 Berlin": a segment naming who receives the post is a person or another
+# company, not a place. 10,423 of the 116,527 Berlin addresses have one. Before the postcode, only
+# segments with a digit (house number, building, postcode) and no such marker are kept.
+_CARE_OF = re.compile(r"c/o|c\.o\.|\bbei\b|z\.\s*hd\.|zu händen", re.IGNORECASE)
+_DIGIT = re.compile(r"\d")
+
+
+def parse_address(raw: str) -> tuple[str | None, str | None, str | None]:
+    """"Street 1, 10119 Berlin. Gegenstand: …" → ("Street 1, 10119 Berlin", "10119", "Berlin").
+
+    No postcode, no address: what is left is register text, not a place. Before the postcode, a
+    comma-separated segment is kept only if it has a digit and no "c/o", "bei" or "z. Hd." (10,423 of
+    the 116,527 Berlin addresses have one); the postcode's own segment then starts at the postcode.
+    """
+    match = _ADDRESS.match(raw.strip())
+    if not match:
+        return None, None, None
+    address = match.group(1)
+    *rest, last = address.split(",")
+    if _CARE_OF.search(last):
+        last = address[match.start(2):]
+    kept = [part.strip() for part in rest if _DIGIT.search(part) and not _CARE_OF.search(part)]
+    return ", ".join([*kept, last.strip()]), match.group(2), match.group(3)
+
+
+def to_row(record: dict) -> dict:
+    """The register number, `metadata` and register fields of one dump row; a field it lacks is None."""
+    name = record["name"].strip()
+    address, postcode, city = parse_address(record["registered_address"] or "")
+    return {
+        # Northdata's format, so both datasets key companies the same way.
+        "registration_number": f"Amtsgericht {record['native_company_number']}",
+        "metadata": {
+            "source_file": "openregister.db",
+            "opencorporates_number": record["company_number"],
+            "status": record["current_status"],
+            "retrieved_at": record["retrieved_at"],
+        },
+        "name": name,
+        "legal_form": legal_form(name),
+        "address": address,
+        "postcode": postcode,
+        # The registered seat when the address has none: every row has a seat, a third an address.
+        "city": city or (record.get("registered_office") or "").strip() or None,
+        "register_status": STATUS.get(record["current_status"]),
+    }
 
 
 def grouped(db: sqlite3.Connection, sql: str) -> dict[str, list[sqlite3.Row]]:
@@ -119,6 +190,8 @@ def main() -> int:
     names = grouped(lite, f"SELECT company_id, company_name FROM name WHERE company_id IN ({berlin})")
     registrations = grouped(lite, f"SELECT * FROM registrations WHERE company_id IN ({berlin})")
     officers = grouped(lite, f"SELECT * FROM officer WHERE company_id IN ({berlin}) ORDER BY id")
+    companies = [(dict(c), to_row(dict(c))) for c in
+                 lite.execute("SELECT * FROM company WHERE federal_state = ? AND name <> ''", (FEDERAL_STATE,))]
 
     dsn = os.getenv("PG_DSN", "host=localhost port=5433 dbname=unternehmensdatenbank user=app password=app")
     with psycopg2.connect(dsn) as pg, pg.cursor() as cur:
@@ -128,21 +201,25 @@ def main() -> int:
         )
         cur.execute("SELECT registration_number, id FROM public.companies WHERE registration_number IS NOT NULL")
         company_ids = dict(cur.fetchall())
+        new = {row["registration_number"]: row for _, row in companies if row["registration_number"] not in company_ids}
+        created = execute_values(cur, """
+            INSERT INTO public.companies (registration_number, metadata) VALUES %s
+            RETURNING registration_number, id
+        """, [(number, Json(row["metadata"])) for number, row in new.items()], page_size=5000, fetch=True)
+        company_ids.update(created)
 
-        rows, identifiers, missing = [], [], 0
-        for company in lite.execute("SELECT * FROM company WHERE federal_state = ? AND name <> ''", (FEDERAL_STATE,)):
-            company_id = company_ids.get(f"Amtsgericht {company['native_company_number']}")
-            if company_id is None:
-                missing += 1
-                continue
+        records, identifiers = [], []
+        for company, row in companies:
+            company_id = company_ids[row["registration_number"]]
             number = company["company_number"]
             identifiers += [(company_id, "register", company["native_company_number"], source_id),
                             (company_id, "opencorporates", number, source_id)]
-            rows.append((company_id, source_id, number, company["name"],
-                         Json(payload(company, names.get(number, []), registrations.get(number, []),
-                                      officers.get(number, [])))))
+            records.append((company_id, source_id, number, company["name"],
+                            Json(payload(company, names.get(number, []), registrations.get(number, []),
+                                         officers.get(number, []))),
+                            "created" if row["registration_number"] in new else "identifier"))
 
-        execute_values(cur, """
+        record_ids = dict(execute_values(cur, """
             INSERT INTO public.company_source_records
               (company_id, source_id, external_id, source_company_name, source_payload,
                match_method, match_confidence, matched_at)
@@ -156,7 +233,8 @@ def main() -> int:
               matched_at = EXCLUDED.matched_at,
               last_seen_at = now(),
               last_synced_at = now()
-        """, rows, template="(%s, %s, %s, %s, %s, 'identifier', 1.0, now())", page_size=2000)
+            RETURNING external_id, id
+        """, records, template="(%s, %s, %s, %s, %s, %s, 1.0, now())", page_size=2000, fetch=True))
 
         # Matched by register number, so both numbers become identifiers of that company. An
         # identifier already held by ANOTHER company is a conflict to look at, never overwritten.
@@ -172,25 +250,61 @@ def main() -> int:
         """, (source_id,))
         conflicts = cur.fetchone()[0]
 
-        # Cities may have been filled in, which changes which grants find their company.
+        observations = write_register_fields(cur, source_id, [
+            (company_ids[row["registration_number"]], record_ids[company["company_number"]], row)
+            for company, row in companies
+        ])
+        published = resolve_register_fields(cur)
+        # Names and cities may have changed, which changes which grants find their company.
         cur.execute("SELECT public.refresh_company_funding_links()")
         linked_grants = cur.fetchone()[0]
         # The app reads a stored copy of every profile (V5).
         cur.execute("SELECT public.refresh_company_profile()")
 
-        cur.execute("""
-            UPDATE public.companies c
-            SET city = r.source_payload #>> '{register,registered_office}'
-            FROM public.company_source_records r
-            WHERE r.company_id = c.id AND r.source_id = %s
-              AND c.city IS NULL AND r.source_payload #>> '{register,registered_office}' IS NOT NULL
-        """, (source_id,))
-        cities = cur.rowcount
-
-    print(json.dumps({"source_records": len(rows), "identifiers": len(identifiers),
-                      "identifier_conflicts": conflicts, "not_in_companies": missing,
-                      "cities_filled_from_seat": cities, "grants_linked": linked_grants}, indent=2))
+    print(json.dumps({"source_records": len(records), "companies_created": len(new),
+                      "identifiers": len(identifiers), "identifier_conflicts": conflicts,
+                      "register_field_observations": observations, "published": published,
+                      "grants_linked": linked_grants}, indent=2))
     return 0
+
+
+def write_register_fields(cur: Any, source_id: str, rows: list[tuple[str, str, dict]]) -> int:
+    """Every register field of every company as an observation at confidence 1.0; returns how many.
+
+    A value this source delivered before and no longer does drops to 0, which un-publishes it at the
+    next resolution. `ON CONFLICT DO NOTHING` without a target uses whichever unique index fires,
+    so the upsert key's predicate is not written out a third time (see `insert_text_observation`).
+    """
+    values = [
+        (company_id, record_id, source_id, field, row[field], row["metadata"]["retrieved_at"],
+         Json({"decided_by": "read from the end of the registered name"} if field == "legal_form" else {}))
+        for company_id, record_id, row in rows
+        for field in REGISTER_FIELDS
+        if row.get(field)
+    ]
+    cur.execute("CREATE TEMP TABLE _delivered (company_id uuid, field_name text, value_text text) ON COMMIT DROP")
+    execute_values(cur, "INSERT INTO _delivered VALUES %s", [v[0:1] + v[3:5] for v in values], page_size=10000)
+    execute_values(cur, """
+        INSERT INTO public.company_field_observations
+          (company_id, company_source_record_id, source_id, field_name, value_text, observed_at,
+           confidence, metadata)
+        VALUES %s
+        ON CONFLICT DO NOTHING
+    """, values, template="(%s, %s, %s, %s, %s, %s::timestamptz, 1.0, %s)", page_size=5000)
+    cur.execute("""
+        WITH target AS (
+          SELECT o.id, CASE WHEN d.company_id IS NULL THEN 0 ELSE 1.0 END AS confidence
+          FROM public.company_field_observations o
+          LEFT JOIN _delivered d
+            ON d.company_id = o.company_id AND d.field_name = o.field_name AND d.value_text = o.value_text
+          WHERE o.source_id = %s AND o.field_name = ANY(%s)
+        )
+        UPDATE public.company_field_observations o
+        SET confidence = t.confidence, updated_at = now()
+        FROM target t
+        WHERE o.id = t.id AND o.confidence IS DISTINCT FROM t.confidence
+    """, (source_id, list(REGISTER_FIELDS)))
+    return len(values)
 
 
 if __name__ == "__main__":

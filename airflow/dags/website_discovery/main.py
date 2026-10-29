@@ -122,7 +122,7 @@ def run_rescore() -> None:
 
 def _common_words(cur: Any) -> set[str]:
     """Name words too common to identify a company, measured over the whole table."""
-    cur.execute("SELECT company_name FROM public.companies")
+    cur.execute("SELECT company_name FROM public.v_companies_enriched")
     return name_frequency.common_words([row[0] for row in cur.fetchall()])
 
 

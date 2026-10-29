@@ -1,7 +1,7 @@
 """What does the commercial register say this company was set up to do? A third industry column.
 
 Germany's *Handelsregister* records, for every registered company, a **Gegenstand des Unternehmens** —
-a sentence or two saying what the company is for. It arrives here as `public.companies.business_purpose`
+a sentence or two saying what the company is for. It arrives here as the `business_purpose` register field
 and reads like this:
 
     Erbringung physiotherapeutischer Dienstleistungen und Anwendungen und die damit im

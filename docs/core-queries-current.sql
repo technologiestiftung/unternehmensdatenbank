@@ -146,7 +146,7 @@ WHERE conname = 'uq_company_managers_company_name';
 SELECT
   left(wz_code, 2)                  AS wz_division,
   count(*)                          AS companies
-FROM public.companies
+FROM public.v_companies_enriched
 WHERE wz_code IS NOT NULL AND wz_code <> ''
 GROUP BY 1
 ORDER BY companies DESC
@@ -158,7 +158,7 @@ LIMIT 20;
 SELECT
   count(*)                                                          AS companies,
   count(*) FILTER (WHERE wz_code IS NOT NULL AND wz_code <> '')      AS with_wz_code
-FROM public.companies;
+FROM public.v_companies_enriched;
 
 
 -- ================================================================================================
@@ -242,7 +242,7 @@ SELECT
 -- the table is dissolved. Pinned nowhere -- it comes straight from the import.
 
 SELECT coalesce(register_status, '(null)') AS register_status, count(*)
-FROM public.companies
+FROM public.v_companies_enriched
 GROUP BY 1
 ORDER BY 2 DESC;
 

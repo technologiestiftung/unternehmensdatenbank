@@ -24,12 +24,12 @@ company by register number through `company_identifiers`. On 2026-10-28, 451 of 
 company we had, every one of them `aktiv` in the 2017–2019 snapshot. An unknown register number can
 still be a company we have, under its old number (a change of legal form gets a new one), so the name
 comes second (`name_match`): when exactly one company that is not merged and not `erloschen` has the
-same `normalized_name` and city, it is linked (`match_method = 'fuzzy'`, confidence 0.9) and gets the
+same name key (`normalize_company_name` in SQL) and city, it is linked (`match_method = 'fuzzy'`, confidence 0.9) and gets the
 register number as an identifier. A deleted company is never linked by name: a firm name must only be
 distinguishable at its place (§ 30 HGB, to be checked), so a deleted firm's name can be used again.
-Otherwise the company is **created**: name, legal form, city and register number, the
-same `normalized_name` and `legal_form` the OffeneRegister import writes (`enrichment.register_names`),
-`match_method = 'created'`; every company that shared name and city (several live ones, or deleted
+Otherwise the company is **created**: its register number, and name, legal form and city as
+observations of this source (the legal form read as the OffeneRegister import reads it,
+`enrichment.register_names`), `match_method = 'created'`; every company that shared name and city (several live ones, or deleted
 ones) becomes an open `match_candidates` row for a person to decide. On 2026-10-28, 14 of the 425
 companies created without this rule shared name key and city with a company we had (11 `aktiv`),
 and 66 grant links by name and city would have been lost, because those need a unique name per city.
@@ -50,6 +50,7 @@ from datetime import date, datetime, timezone
 from typing import Any
 from urllib.parse import urljoin
 
+from pipeline_coordinator.resolver import resolve_register_fields
 from source_enrichment_common import (
     ensure_source,
     finish_sync_run,
@@ -185,9 +186,10 @@ def name_match(
 
 
 def _company_for(cur: Any, item: Announcement, source_id: str) -> tuple[str, str, list[tuple[str, str | None]]]:
-    """The company's id, how it was found ("identifier" | "fuzzy" | "created"), and candidates for a person."""
-    from enrichment.register_names import legal_form, normalize_company_name
+    """The company's id, how it was found ("identifier" | "fuzzy" | "created"), and candidates for a person.
 
+    A created company is only its identity here; `write_announcement` gives it its register fields.
+    """
     cur.execute(
         "SELECT company_id FROM public.company_identifiers WHERE scheme = 'register' AND value = %s",
         (item.register,),
@@ -199,15 +201,25 @@ def _company_for(cur: Any, item: Announcement, source_id: str) -> tuple[str, str
     cur.execute("SELECT id FROM public.companies WHERE registration_number = %s", (item.registration_number,))
     row = cur.fetchone()
     method, candidates = "identifier", []
-    key = normalize_company_name(item.name)
-    if row is None and key and item.city:
+    if row is None and item.city:
+        # The name key is computed in SQL, by the function the name index and the grant links use.
+        # Straight on the published observations, not `v_companies_enriched`: the view computes every
+        # company's register fields before it filters, about 10 s per announcement.
         cur.execute(
             """
-            SELECT id, register_status FROM public.companies
-            WHERE normalized_name = %s AND lower(city) = lower(%s) AND merged_into IS NULL
-            ORDER BY id
+            SELECT n.company_id, st.value_text
+            FROM public.company_field_observations n
+            JOIN public.companies c ON c.id = n.company_id AND c.merged_into IS NULL
+            JOIN public.company_field_observations ci
+              ON ci.company_id = n.company_id AND ci.field_name = 'city' AND ci.is_canonical
+             AND lower(ci.value_text) = lower(%s)
+            LEFT JOIN public.company_field_observations st
+              ON st.company_id = n.company_id AND st.field_name = 'register_status' AND st.is_canonical
+            WHERE n.field_name = 'name' AND n.is_canonical
+              AND public.normalize_company_name(n.value_text) = public.normalize_company_name(%s)
+            ORDER BY n.company_id
             """,
-            (key, item.city),
+            (item.city, item.name),
         )
         match, candidates = name_match([(r[0], r[1]) for r in cur.fetchall()])
         if match:
@@ -216,12 +228,11 @@ def _company_for(cur: Any, item: Announcement, source_id: str) -> tuple[str, str
         method = "created"
         cur.execute(
             """
-            INSERT INTO public.companies (company_name, normalized_name, legal_form, registration_number,
-                                          city, metadata)
-            VALUES (%s, %s, %s, %s, %s, jsonb_build_object('created_by', %s::text))
+            INSERT INTO public.companies (registration_number, metadata)
+            VALUES (%s, jsonb_build_object('created_by', %s::text))
             RETURNING id
             """,
-            (item.name, key, legal_form(item.name), item.registration_number, item.city, SOURCE_KEY),
+            (item.registration_number, SOURCE_KEY),
         )
         row = cur.fetchone()
     company_id = row[0]
@@ -234,6 +245,14 @@ def _company_for(cur: Any, item: Announcement, source_id: str) -> tuple[str, str
         (company_id, item.register, source_id),
     )
     return company_id, method, candidates
+
+
+def register_fields(item: Announcement) -> dict[str, str]:
+    """What an announcement says about a company it creates: name, legal form, city."""
+    from enrichment.register_names import legal_form
+
+    fields = {"name": item.name, "legal_form": legal_form(item.name), "city": item.city}
+    return {field: value for field, value in fields.items() if value}
 
 
 def write_announcement(cur: Any, item: Announcement, *, source_id: str, sync_run_id: str) -> tuple[bool, str]:
@@ -268,6 +287,13 @@ def write_announcement(cur: Any, item: Announcement, *, source_id: str, sync_run
             """,
             (record_id, candidate_id, register_status),
         )
+    if method == "created":
+        for field, value in register_fields(item).items():
+            insert_text_observation(
+                cur, company_id=company_id, source_record_id=record_id, source_id=source_id,
+                sync_run_id=sync_run_id, field_name=field, value_text=value, confidence=1.0,
+                metadata={"decided_by": "read from the end of the registered name"} if field == "legal_form" else {},
+            )
     if is_new:
         insert_text_observation(
             cur, company_id=company_id, source_record_id=record_id, source_id=source_id,
@@ -321,6 +347,9 @@ def run_read() -> None:
                 created += method == "created"
                 linked += method == "fuzzy"
             changed = mark_latest(cur, source_id)
+            if created:
+                # The grant links read the published name and city, which a new company only has once resolved.
+                resolve_register_fields(cur)
             if created or linked:
                 # A new company or a new register number can be the recipient of a grant that names it.
                 cur.execute("SELECT public.refresh_company_funding_links()")
