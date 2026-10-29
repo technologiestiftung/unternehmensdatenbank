@@ -42,3 +42,12 @@ def test_a_pod_hands_the_return_value_to_airflow_only_when_asked(monkeypatch, tm
     monkeypatch.setattr(run_task, "XCOM_FILE", tmp_path / "return.json")
     assert run_task.main(["website_discovery.main:run_discover"]) == 0
     assert json.loads((tmp_path / "return.json").read_text()) == 500
+
+
+def test_a_docker_task_gets_the_dag_settings_and_nothing_else() -> None:
+    from pipeline_task import pipeline_environment
+
+    worker = {"PG_DSN": "host=db", "ENABLE_FOERDERKATALOG": "true", "WEBSITE_DISCOVERY_OSM": "false",
+              "PATH": "/usr/bin", "PYTHONPATH": "/opt/airflow", "AIRFLOW__CORE__FERNET_KEY": "x"}
+    assert pipeline_environment(worker) == {
+        "PG_DSN": "host=db", "ENABLE_FOERDERKATALOG": "true", "WEBSITE_DISCOVERY_OSM": "false"}
