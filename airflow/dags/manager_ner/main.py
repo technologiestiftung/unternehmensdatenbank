@@ -62,7 +62,6 @@ from source_enrichment_common import (
 log = logging.getLogger(__name__)
 
 SOURCE_KEY = "spacy_ner"
-ENABLED_FLAG = "ENABLE_MANAGER_NER"
 MODEL_DIR = Path(os.getenv("MANAGER_NER_MODEL_DIR", "/opt/airflow/data/models/manager_ner"))
 BASE_MODEL = os.getenv("MANAGER_NER_BASE_MODEL", "de_core_news_md")
 BATCH_SIZE = int(os.getenv("MANAGER_NER_BATCH_SIZE", "50"))
@@ -71,11 +70,6 @@ EPOCHS = int(os.getenv("MANAGER_NER_EPOCHS", "10"))
 #: spaCy gives no calibrated score per entity. 0.6 clears the resolver's 0.5 floor and stays below
 #: names with register or Impressum evidence from other sources.
 CONFIDENCE = float(os.getenv("MANAGER_NER_CONFIDENCE", "0.6"))
-
-
-def _require_enabled() -> None:
-    if os.getenv(ENABLED_FLAG, "false").lower() != "true":
-        raise RuntimeError(f"{ENABLED_FLAG} is not set to true.")
 
 
 def current_version() -> str | None:
@@ -162,7 +156,6 @@ def _mark_register_officers(cur: Any) -> int:
 
 
 def run_extract() -> None:
-    _require_enabled()
     version = current_version()
     nlp = load_model(version)
     connection = get_connection()
@@ -239,7 +232,6 @@ def _score(nlp: Any, held_out: list[tuple[str, Labels]]) -> Score:
 
 
 def run_train() -> None:
-    _require_enabled()
     from spacy.training import Example
     from enrichment.imprint_extractor import extract_ceo_names
 

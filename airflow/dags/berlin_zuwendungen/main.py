@@ -24,7 +24,6 @@ from source_enrichment_common import get_connection
 log = logging.getLogger(__name__)
 
 DAG_ID = "berlin_zuwendungen"
-ENABLED_FLAG = "ENABLE_BERLIN_ZUWENDUNGEN"
 SOURCE_KEY = "berlin_zuwendungen"
 URL = os.getenv(
     "BERLIN_ZUWENDUNGEN_URL",
@@ -55,11 +54,6 @@ _UPSERT_SQL = """
       policy_area = EXCLUDED.policy_area,
       last_seen_at = NOW()
 """
-
-
-def _require_enabled() -> None:
-    if os.getenv(ENABLED_FLAG, "false").lower() != "true":
-        raise RuntimeError(f"{ENABLED_FLAG} is not set to true.")
 
 
 def register_entry(recipient_id: str | None) -> str | None:
@@ -106,7 +100,6 @@ def to_funding_rows(grants: list[dict[str, Any]]) -> list[tuple]:
 
 
 def run_berlin_zuwendungen() -> None:
-    _require_enabled()
     import requests
     from psycopg2.extras import execute_values
 

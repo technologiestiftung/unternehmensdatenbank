@@ -11,7 +11,6 @@ grants to companies by name and city (the Förderkatalog carries no register num
 from __future__ import annotations
 
 import logging
-import os
 from datetime import date, datetime, timezone
 
 from source_enrichment_common import get_connection
@@ -19,7 +18,6 @@ from source_enrichment_common import get_connection
 log = logging.getLogger(__name__)
 
 DAG_ID = "foerderkatalog"
-ENABLED_FLAG = "ENABLE_FOERDERKATALOG"
 
 _UPSERT_SQL = """
     INSERT INTO public.company_fundings
@@ -36,11 +34,6 @@ _UPSERT_SQL = """
       funding_type = EXCLUDED.funding_type,
       last_seen_at = NOW()
 """
-
-
-def _require_enabled() -> None:
-    if os.getenv(ENABLED_FLAG, "false").lower() != "true":
-        raise RuntimeError(f"{ENABLED_FLAG} is not set to true.")
 
 
 def _german_date(value: str) -> date | None:
@@ -75,7 +68,6 @@ def to_funding_rows(grants: list[dict[str, str]]) -> list[tuple]:
 
 
 def run_foerderkatalog() -> None:
-    _require_enabled()
     # Imported here, not at module top: scraper.py reads config.toml at import and warns when it is
     # missing, which it always is in Airflow, so a top-level import would warn on every DAG parse.
     from psycopg2.extras import execute_values

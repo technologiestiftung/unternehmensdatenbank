@@ -174,7 +174,7 @@ configured to override them. Columns 5 and 13 are vendor AI output and are check
 | `pipeline_coordinator` | all of the above | DAG | picks the winning values |
 | Technologiefeld | website text | to rebuild on `enrichment/` (#18) | none |
 
-Every DAG is off by default: it needs its `ENABLE_*` flag and must be unpaused in Airflow.
+Every DAG starts paused; unpausing it in Airflow is the only switch.
 Details per DAG: [airflow/dags/README.md](../airflow/dags/README.md).
 
 ## 8. AI and models

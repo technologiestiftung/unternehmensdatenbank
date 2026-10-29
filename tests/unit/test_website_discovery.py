@@ -54,7 +54,6 @@ def test_one_failing_company_does_not_discard_the_batch(monkeypatch) -> None:
     connection.__enter__.return_value = connection
     connection.cursor.return_value = nullcontext(MagicMock())
     written, finished = [], {}
-    monkeypatch.setenv(main.ENABLED_FLAG, "true")
     monkeypatch.setattr(main, "fetch_companies_without_source", lambda *a, **k: companies)
     monkeypatch.setattr(main, "get_connection", lambda: connection)
     monkeypatch.setattr(main, "ensure_source", lambda *a, **k: "source")

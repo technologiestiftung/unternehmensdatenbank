@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import logging
 import os
 import re
 from dataclasses import dataclass
@@ -9,9 +8,6 @@ from typing import Any
 
 import psycopg2
 from psycopg2.extras import Json
-
-
-log = logging.getLogger(__name__)
 
 PG_DSN = os.getenv(
     "PG_DSN",
@@ -765,13 +761,6 @@ def build_search_queries(
 
 def now_iso() -> str:
     return datetime.now(tz=timezone.utc).isoformat()
-
-
-def log_and_skip_if_disabled(flag_name: str) -> bool:
-    enabled = os.getenv(flag_name, "false").lower() == "true"
-    if not enabled:
-        log.info("%s is disabled; DAG run will no-op until configured.", flag_name)
-    return enabled
 
 
 def dump_preview_payload(company: CompanyCandidate, source_key: str) -> dict[str, Any]:

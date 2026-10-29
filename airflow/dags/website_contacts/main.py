@@ -51,7 +51,6 @@ log = logging.getLogger(__name__)
 
 DAG_ID = "website_contacts"
 SOURCE_KEY = "impressum_contacts"
-ENABLED_FLAG = "ENABLE_WEBSITE_CONTACTS"
 BATCH_SIZE = int(os.getenv("WEBSITE_CONTACTS_BATCH_SIZE", "50"))
 #: Nothing has measured how often these are right. 0.6 is what `manager_ner` gives an unmeasured
 #: Impressum reading: above the resolver's 0.5 floor, below anything with register evidence.
@@ -60,11 +59,6 @@ RULE = "own-domain-no-person-2026-10-28"
 
 #: The separators that join a first and a last name in a mailbox: `max.mustermann`, `m_mustermann`.
 _LOCAL_PART_SPLIT = re.compile(r"[._\-]")
-
-
-def _require_enabled() -> None:
-    if os.getenv(ENABLED_FLAG, "false").lower() != "true":
-        raise RuntimeError(f"{ENABLED_FLAG} is not set to true.")
 
 
 def site_domain(website: str) -> str:
@@ -130,7 +124,6 @@ def read_impressum(website: str) -> tuple[str, str | None]:
 
 
 def run_read() -> None:
-    _require_enabled()
     connection = get_connection()
     try:
         with connection, connection.cursor() as cur:
