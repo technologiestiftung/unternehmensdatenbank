@@ -9,13 +9,15 @@ Two tasks:
    - else the same name key as exactly one company that is not dissolved -> `'fuzzy'`, confidence
      0.9. Never a dissolved one: its name may be in use again (the rule register_announcements uses).
    Each match is a source record, `external_id` = the Wikidata id.
-   Measured on 2026-10-28 (#26): 65 by register number and name, 960 by name alone.
+   Measured on 2026-10-30 on the local Berlin database: 531 of 4,174 items matched, 31 of them by
+   register number and name.
 2. **verify**, in batches, chaining itself while proposals wait. Every listed website goes through
    `pipeline.verify_proposed`, the same page reading and `confidence.score` as an OSM website tag.
-   Nothing on the page ties it to the company -> below the bar, never shown. On 2026-10-28, 394 of
-   1,025 companies passed `identifies_company`; no result was hand-checked.
+   Nothing on the page ties it to the company -> below the bar, never shown. On 2026-10-30, 229 of
+   the 531 were proven, 139 of them new to website_discovery; no result was hand-checked.
 
-A website that no longer verifies on a later check drops to confidence 0; nothing is deleted.
+A website that no longer verifies on a later check, or whose item no longer matches that company,
+drops to confidence 0; nothing is deleted.
 Register officers are loaded per batch as comparison keys, in memory only, as in website_discovery.
 """
 from __future__ import annotations
@@ -63,15 +65,15 @@ def _source_id(cur: Any) -> str:
 
 def run_match() -> int:
     """Query Wikidata and link its items to companies. Returns how many items matched; skipped
-    (0) when the last match is less than a day old, so a chain of verify batches queries once."""
+    (0) when the last match is less than 20 hours old, so a chain of verify batches queries once."""
     connection = get_connection()
     try:
         with connection, connection.cursor() as cur:
             source_id = _source_id(cur)
-            cur.execute("SELECT last_synced_at > now() - interval '1 day' FROM public.sources WHERE id = %s",
+            cur.execute("SELECT last_synced_at > now() - interval '20 hours' FROM public.sources WHERE id = %s",
                         (source_id,))
             if cur.fetchone()[0]:
-                log.info("Matched less than a day ago; not querying Wikidata again.")
+                log.info("Matched less than 20 hours ago; not querying Wikidata again.")
                 return 0
         items = wikidata.fetch()
         with connection, connection.cursor() as cur:
@@ -138,9 +140,12 @@ def match_items(cur: Any, items: list[wikidata.Item], *, source_id: str) -> int:
         ON CONFLICT (source_id, external_id) DO UPDATE SET
           company_id = EXCLUDED.company_id,
           source_company_name = EXCLUDED.source_company_name,
-          -- Keep when it was last verified; the websites may have changed, so they are checked again.
+          -- Keep when it was last verified; new websites, another company or a
+          -- record that was inactive (its websites dropped to 0) are checked again.
           source_payload = EXCLUDED.source_payload || jsonb_build_object('verified_at',
             CASE WHEN public.company_source_records.source_payload -> 'websites' = EXCLUDED.source_payload -> 'websites'
+                  AND public.company_source_records.company_id = EXCLUDED.company_id
+                  AND public.company_source_records.is_active
                  THEN public.company_source_records.source_payload -> 'verified_at' END),
           match_method = EXCLUDED.match_method,
           match_confidence = EXCLUDED.match_confidence,
@@ -150,6 +155,17 @@ def match_items(cur: Any, items: list[wikidata.Item], *, source_id: str) -> int:
     cur.execute("UPDATE public.company_source_records SET is_active = false"
                 " WHERE source_id = %s AND is_active AND NOT (external_id = ANY(%s))",
                 (source_id, [m[0] for m in matches]))
+    # Its websites drop to 0 as well, and so do those it gave a company it no longer matches.
+    cur.execute(
+        """
+        UPDATE public.company_field_observations o SET confidence = 0, updated_at = now()
+        FROM public.company_source_records r
+        WHERE o.company_source_record_id = r.id AND r.source_id = %s
+          AND (NOT r.is_active OR o.company_id <> r.company_id)
+          AND o.field_name = ANY(%s) AND o.confidence > 0
+        """,
+        (source_id, _URL_FIELDS),
+    )
     return len(matches)
 
 
@@ -244,10 +260,10 @@ def write_answers(cur: Any, *, company_id: str, record_id: str, source_id: str, 
     cur.execute(
         """
         UPDATE public.company_field_observations SET confidence = 0, updated_at = now()
-        WHERE source_id = %s AND company_id = %s AND field_name = ANY(%s)
+        WHERE company_id = %s AND company_source_record_id = %s AND field_name = ANY(%s)
           AND NOT (id = ANY(%s::uuid[])) AND confidence > 0
         """,
-        (source_id, company_id, _URL_FIELDS, [str(w) for w in written]),
+        (company_id, record_id, _URL_FIELDS, [str(w) for w in written]),
     )
     cur.execute(
         "UPDATE public.company_source_records SET source_payload = source_payload || jsonb_build_object("
@@ -273,7 +289,7 @@ def _make_dag():  # noqa: ANN201
         return None
 
     # Like website_discovery: a full verify batch starts the next run; matching inside it queries
-    # Wikidata at most once a day.
+    # Wikidata at most once a day (20 hours, so the next @daily run is not skipped).
     with DAG(
         dag_id=DAG_ID,
         description="Websites Wikidata lists for Berlin companies, verified like a guessed domain",
