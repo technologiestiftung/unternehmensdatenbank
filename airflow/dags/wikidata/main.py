@@ -173,23 +173,42 @@ def moved_from(previous: dict[str, str], current: dict[str, str]) -> set[str]:
     return {company_id for qid, company_id in previous.items() if current.get(qid, company_id) != company_id}
 
 
-def demote_unproven(cur: Any, *, source_id: str, company_ids: list[str]) -> int:
-    """Set these companies' Wikidata URLs to 0 unless a record of theirs still proves them."""
+def unproven(observations: list[tuple[str, str, str]], proven: set[tuple[str, str]],
+             written: frozenset[str] = frozenset()) -> list[str]:
+    """Ids of (id, company_id, url) observations to drop to 0: not just written, and no record of
+    their company lists their URL as proven."""
+    return [obs_id for obs_id, company_id, url in observations
+            if obs_id not in written and (company_id, url) not in proven]
+
+
+def demote_unproven(cur: Any, *, source_id: str, company_ids: list[str],
+                    written: frozenset[str] = frozenset()) -> int:
+    """Set these companies' Wikidata URLs to 0, except those just written and those a record of
+    theirs still proves. Returns how many it demoted."""
     if not company_ids:
         return 0
     cur.execute(
         """
-        UPDATE public.company_field_observations o SET confidence = 0, updated_at = now()
-        WHERE o.source_id = %s AND o.company_id = ANY(%s::uuid[]) AND o.field_name = ANY(%s)
-          AND o.confidence > 0
-          AND NOT EXISTS (
-            SELECT 1 FROM public.company_source_records r
-            WHERE r.source_id = o.source_id AND r.company_id = o.company_id
-              AND r.source_payload -> 'proven_urls' ? o.value_text)
+        SELECT id::text, company_id::text, value_text FROM public.company_field_observations
+        WHERE source_id = %s AND company_id = ANY(%s::uuid[]) AND field_name = ANY(%s) AND confidence > 0
         """,
         (source_id, company_ids, _URL_FIELDS),
     )
-    return cur.rowcount
+    observations = cur.fetchall()
+    cur.execute(
+        """
+        SELECT company_id::text, jsonb_array_elements_text(source_payload -> 'proven_urls')
+        FROM public.company_source_records
+        WHERE source_id = %s AND company_id = ANY(%s::uuid[])
+          AND jsonb_typeof(source_payload -> 'proven_urls') = 'array'
+        """,
+        (source_id, company_ids),
+    )
+    demote = unproven(observations, set(cur.fetchall()), written)
+    if demote:
+        cur.execute("UPDATE public.company_field_observations SET confidence = 0, updated_at = now()"
+                    " WHERE id = ANY(%s::uuid[])", (demote,))
+    return len(demote)
 
 
 # --- verify ---------------------------------------------------------------------------------
@@ -266,9 +285,10 @@ def _companies(cur: Any, company_ids: list[str]) -> dict[str, CompanyCandidate]:
 def write_answers(cur: Any, *, company_id: str, record_id: str, source_id: str, sync_run_id: str,
                   qid: str, answers: list[dict[str, Any]]) -> None:
     """Every verified URL as an observation, filed like discovery's; earlier ones no record of this
-    company proves any more drop to 0."""
+    company proves any more drop to 0. Only a URL filed as `website` counts as proven."""
+    written = set()
     for answer in answers:
-        insert_text_observation(
+        written.add(str(insert_text_observation(
             cur, company_id=company_id, source_record_id=record_id, source_id=source_id,
             sync_run_id=sync_run_id, field_name=field_name_for(answer), value_text=answer["url"],
             confidence=answer["confidence"],
@@ -279,13 +299,13 @@ def write_answers(cur: Any, *, company_id: str, record_id: str, source_id: str, 
                 "matched_url": answer["imprint_url"] or answer["url"], "imprint_url": answer["imprint_url"],
                 "register_number_seen": answer["register_number_seen"],
             },
-        )
+        )))
     cur.execute(
         "UPDATE public.company_source_records SET source_payload = source_payload || jsonb_build_object("
         "'verified_at', now(), 'proven_urls', %s), last_synced_at = now() WHERE id = %s",
-        (Json(sorted({answer["url"] for answer in answers})), record_id),
+        (Json(sorted({a["url"] for a in answers if field_name_for(a) == "website"})), record_id),
     )
-    demote_unproven(cur, source_id=source_id, company_ids=[company_id])
+    demote_unproven(cur, source_id=source_id, company_ids=[company_id], written=frozenset(written))
 
 
 def is_full_batch(taken: int | None) -> bool:

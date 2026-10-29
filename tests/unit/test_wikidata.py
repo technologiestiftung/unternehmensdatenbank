@@ -1,10 +1,10 @@
 """`enrichment.wikidata`: SPARQL rows become one item per Wikidata id; only commercial register digits.
-`wikidata.main`: which companies lose what an item proved for them."""
+`wikidata.main`: which companies lose what an item proved for them, and which URLs drop to 0."""
 from __future__ import annotations
 
 from enrichment.confidence import METHOD_WIKIDATA, UNVERIFIED_CAP, WEBSITE_MIN_CONFIDENCE, score
 from enrichment.wikidata import parse, register_digits
-from wikidata.main import moved_from
+from wikidata.main import moved_from, unproven
 
 
 def row(qid: str, website: str, label: str | None = None, register: str | None = None) -> dict:
@@ -46,3 +46,14 @@ def test_only_an_item_that_now_matches_another_company_takes_its_websites_away()
     previous = {"Q1": "a", "Q2": "b", "Q3": "c"}
     # Q1 moved to company d; Q2 matches b again; Q3 stopped matching and keeps what its page proved.
     assert moved_from(previous, {"Q1": "d", "Q2": "b", "Q4": "e"}) == {"a"}
+
+
+def test_a_url_the_page_no_longer_proves_drops_unless_another_record_proves_it() -> None:
+    observations = [
+        ("old-website", "c", "https://a.de"),   # proven 90 days ago, now only a candidate
+        ("new-candidate", "c", "https://a.de"),  # just written below the bar: keeps its confidence
+        ("down", "c", "https://down.de"),        # unreachable now, nobody proves it
+        ("other", "c", "https://b.de"),          # another item of company c still proves it
+    ]
+    proven = {("c", "https://b.de"), ("d", "https://a.de")}
+    assert unproven(observations, proven, frozenset({"new-candidate"})) == ["old-website", "down"]
