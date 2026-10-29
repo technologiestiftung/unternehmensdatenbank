@@ -64,6 +64,12 @@ def _ensure_tmp(cur: Any) -> None:
         ) ON COMMIT DELETE ROWS
         """
     )
+    # With the register fields (V3) this holds up to 296,897 winners. Without indexes, one stale row
+    # estimate (statistics from before a bulk load) made the planner scan all of it once per published
+    # row: the stale-pointer DELETE for `name` ran over 10 minutes on a fresh copy. Indexed, a bad
+    # estimate costs a lookup per row.
+    cur.execute(f"CREATE INDEX IF NOT EXISTS {_TMP_TABLE}_company ON {_TMP_TABLE} (company_id)")
+    cur.execute(f"CREATE INDEX IF NOT EXISTS {_TMP_TABLE}_obs ON {_TMP_TABLE} (obs_id)")
     cur.execute(f"TRUNCATE {_TMP_TABLE}")
 
 
@@ -412,6 +418,16 @@ def resolve_register_fields(cur: Any) -> int:
             min_confidence=_FIELD_MIN_CONF,
         )
         for field in REGISTER_FIELDS
+    )
+
+
+def resolve_deeptech_and_ai(cur: Any) -> int:
+    """`deeptech_class` and `is_ai`. The profile has shown both since V1, but no pipeline writes them
+    yet; until one does, only people's corrections (`feedback_observations`) fill them."""
+    return sum(
+        _apply_canonical(cur, logical_field=field, obs_field_names=[field], value_col="value_text",
+                         min_confidence=_FIELD_MIN_CONF)
+        for field in ("deeptech_class", "is_ai")
     )
 
 
