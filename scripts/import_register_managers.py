@@ -74,11 +74,12 @@ def main() -> int:
                     (source_id, FIELD))
         replaced = cur.rowcount
         cur.execute(
-            "SELECT id, company_id, source_payload -> 'officers' FROM public.company_source_records WHERE source_id = %s",
+            "SELECT id, company_id, source_payload -> 'officers', source_payload #>> '{register,retrieved_at}'"
+            " FROM public.company_source_records WHERE source_id = %s",
             (source_id,),
         )
         written = companies = 0
-        for record_id, company_id, officers in cur.fetchall():
+        for record_id, company_id, officers, retrieved_at in cur.fetchall():
             names = current_managers(officers)
             companies += bool(names)
             for name in names:
@@ -86,6 +87,8 @@ def main() -> int:
                     cur, company_id=company_id, source_record_id=record_id, source_id=source_id,
                     sync_run_id=sync_run_id, field_name=FIELD, value_text=name, confidence=CONFIDENCE,
                     metadata={"position": POSITION},
+                    # When the register listed them (2017-2019), not when we imported them (#49).
+                    source_updated_at=retrieved_at,
                 )
                 written += 1
         finish_sync_run(cur, sync_run_id=sync_run_id, records_seen=companies, records_created=written,

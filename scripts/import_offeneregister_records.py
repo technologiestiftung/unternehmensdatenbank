@@ -287,10 +287,11 @@ def write_register_fields(cur: Any, source_id: str, rows: list[tuple[str, str, d
     execute_values(cur, """
         INSERT INTO public.company_field_observations
           (company_id, company_source_record_id, source_id, field_name, value_text, observed_at,
-           confidence, metadata)
+           source_updated_at, confidence, metadata)
         VALUES %s
         ON CONFLICT DO NOTHING
-    """, values, template="(%s, %s, %s, %s, %s, %s::timestamptz, 1.0, %s)", page_size=5000)
+    """, [v[:6] + (v[5],) + v[6:] for v in values],
+       template="(%s, %s, %s, %s, %s, %s::timestamptz, %s::timestamptz, 1.0, %s)", page_size=5000)
     cur.execute("""
         WITH target AS (
           SELECT o.id, CASE WHEN d.company_id IS NULL THEN 0 ELSE 1.0 END AS confidence
