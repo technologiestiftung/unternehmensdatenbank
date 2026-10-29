@@ -91,10 +91,10 @@ python scripts/import_register_managers.py
 ## Migration strategy
 
 `V1__baseline.sql` is the whole schema as of 2026-10-28; everything before it was squashed while
-nothing was deployed. `V2__source_overview.sql` came after. Forward-only from here: never edit a
-migration that has run anywhere shared, add new ones as `V{N}__description.sql`, and run Flyway
-before Airflow touches the changed schema. The headings below keep the pre-squash migration numbers
-(V3–V10) so git history finds the reasoning.
+nothing was deployed. `V2__source_overview.sql` and `V3__register_fields_as_observations.sql` came
+after. Forward-only from here: never edit a migration that has run anywhere shared, add new ones as
+`V{N}__description.sql`, and run Flyway before Airflow touches the changed schema.
+The headings below keep the pre-squash migration numbers (V3–V10) so git history finds the reasoning.
 
 **A local database migrated before the squash** still has the old files in its Flyway history, and
 Flyway refuses to run until that is reset. Only for a database with every migration up to V10
@@ -123,7 +123,7 @@ How a record from any source finds its company, in this order:
 Merging never deletes: the duplicate keeps `merged_into`, and its records and observations move to
 the survivor.
 
-## Feedback and provenance (V3)
+## Feedback and provenance (V3 before the squash)
 
 **Every field the app shows can be voted on** (`extraction_feedback`), under the app's column keys.
 A vote on an empty field has `value = ''` and must be `wrong`, with the missing value as its
