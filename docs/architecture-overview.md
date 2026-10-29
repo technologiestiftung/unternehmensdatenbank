@@ -153,7 +153,7 @@ flowchart TD
 | 17 | isAI | `is_ai` | not delivered | classifier to build | empty |
 | 18 | Timestamp | `updated_at` | delivery date | resolver timestamps | filled |
 | 19 | Amazon-Effekt (optional) | `amazon_effect` | not delivered | not defined yet | empty |
-| 20 | Schließung / Liquidation (optional) | `register_status`, `register_announcement` | only active companies are delivered | `register_announcements` (weekly, a hint); a company missing from the next delivery is a candidate | register status; announcements for 860 companies |
+| 20 | Schließung / Liquidation (optional) | `register_status`, `register_announcement` | only active companies are delivered | `register_announcements` (weekly, a hint); a company missing from the next delivery is a candidate | register status; announcements for 854 companies |
 
 Proposal: import Fusionbase as a high-priority source, so its values win unless a check of ours is
 configured to override them. Columns 5 and 13 are vendor AI output and are checked like our own.
