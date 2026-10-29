@@ -92,8 +92,8 @@ python scripts/import_register_managers.py
 ## Migration strategy
 
 `V1__baseline.sql` is the whole schema as of 2026-10-28; everything before it was squashed while
-nothing was deployed. `V2__source_overview.sql`, `V3__register_fields_as_observations.sql` and
-`V4__user_feedback_source.sql` came after. Forward-only from here: never edit a migration that has
+nothing was deployed. `V2__source_overview.sql`, `V3__register_fields_as_observations.sql`,
+`V4__user_feedback_source.sql` and `V5__profile_cleanup_tags_english.sql` came after. Forward-only from here: never edit a migration that has
 run anywhere shared, add new ones as `V{N}__description.sql`, and run Flyway before Airflow
 touches the changed schema.
 The headings below keep the pre-squash migration numbers (V3–V10) so git history finds the reasoning.
