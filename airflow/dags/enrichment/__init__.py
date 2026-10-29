@@ -1,14 +1,16 @@
 """The building blocks that fill a company's fields from the open web. No API, no key, no bill.
 
-This package is a library, not a DAG. `website_discovery`, `website_contacts`, `website_keywords`,
-`register_announcements` and `manager_ner` run it; the Technologiefeld DAG is still to be rebuilt on it (issue #18).
+This package is a library, not a DAG. `website_discovery`, `wikidata`, `website_contacts`,
+`website_keywords`, `register_announcements` and `manager_ner` run it; the Technologiefeld DAG is still to be rebuilt on it (issue #18).
 
 Website discovery
   url_patterns.py     guess domains from the company name, check DNS, download the live ones
   osm_snapshot.py,    match the company to OpenStreetMap; shops and offices there often carry a
   osm_lookup.py       `website` tag. `overpass_client.py` and `osm_scorer.py` do the querying
                       and the name matching
-  pipeline.py         runs both methods for one company and merges what they say
+  wikidata.py         one SPARQL query: official websites (P856) of Berlin organisations
+  pipeline.py         runs both methods for one company and merges what they say;
+                      `verify_proposed` checks a URL another source proposes (Wikidata)
   confidence.py       the ONLY place that turns evidence into a number between 0 and 1
   own_site.py         the single predicate for "is this page the company's own site", as
                       opposed to a directory or register page ABOUT it

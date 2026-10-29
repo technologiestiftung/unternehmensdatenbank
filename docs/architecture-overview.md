@@ -144,7 +144,7 @@ flowchart TD
 | 8 | Rechtsform | `legal_form` | yes | none | 257,244 of 296,897 |
 | 9 | Cluster (n=5) | — | not delivered | column removed with #47 (it held LLM free text, not Berlin's five clusters); back as a new column once a classifier exists | — |
 | 10 | Technologiefeld | `technology_field` (English names) | not delivered | keywords on the website text; DAG to rebuild (#18) | 27 of 106 Berlin companies with a website, measured |
-| 11 | Website | `website` | yes | `website_discovery` verifies and fills gaps | 4,929 (106 among the first 1,000 active companies checked) |
+| 11 | Website | `website` | yes | `website_discovery` and `wikidata` verify and fill gaps | 4,929 (106 among the first 1,000 active companies checked) |
 | 12 | Geschäftsführung / Kontakt | `management` | contact optional | register Geschäftsführer (`import_register_managers.py`); `manager_ner` (spaCy) on the Impressum; `website_contacts` for email and phone | names from register and Impressum; email and phone stored, not shown |
 | 13 | Tätigkeitsbeschreibung | `business_purpose`, `activity_keywords` | written by Fusionbase's AI | `website_keywords` | keywords published once 500 companies are read |
 | 14 | Kommentar | `comments` | not delivered | app users | live |
@@ -165,6 +165,7 @@ configured to override them. Columns 5 and 13 are vendor AI output and are check
 | Fusionbase import | Fusionbase API | DAG, quarterly, to build | none yet |
 | OffeneRegister import | Handelsregister snapshot 2017–2019 | scripts, once | 296,486 Berlin companies |
 | `website_discovery` | URL patterns, Impressum and register check (OSM step in code, off) | DAG, priority 100 | 4,929 websites |
+| `wikidata` | official websites (P856) Wikidata lists for Berlin organisations, verified like a guessed domain | DAG, daily | 229 websites proven for 531 matched companies (local copy, 2026-10-30) |
 | `website_contacts` | Impressum of the proven website | DAG | 27 emails, 25 phones from 37 websites; not shown |
 | `website_keywords` | services/products pages of the proven website | DAG | 22 of 37 websites gave candidates |
 | `manager_ner_extract` / `_train` | Impressum pages, app votes | DAGs, spaCy | measured on 222 Impressum pages |
