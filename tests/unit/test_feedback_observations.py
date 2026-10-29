@@ -135,7 +135,7 @@ def test_values_are_cleaned_to_what_the_coordinator_and_the_profile_read() -> No
     assert clean("number", "-3") is None
     assert clean("boolean", "Ja") == "true" and clean("boolean", "vielleicht") is None
     assert clean("register_status", "active") == "active" and clean("register_status", "pleite") is None
-    assert clean("register_status", "Aktiv") == "active" and clean("register_status", "in Liquidation") == "in_liquidation"
+    assert clean("register_status", "Aktiv") is None and clean("register_status", "in Liquidation") is None
     assert clean("wz_code", "62.01") == "62.01" and clean("wz_code", "Software") is None
 
 

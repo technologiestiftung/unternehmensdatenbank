@@ -371,6 +371,7 @@ UNION ALL
     i.created_at AS selected_at
    FROM public.companies c
      JOIN public.company_identifiers i ON i.company_id = c.id AND i.scheme = 'register'
+       AND c.registration_number = 'Amtsgericht ' || i.value
      LEFT JOIN public.sources s ON s.id = i.source_id
   WHERE c.registration_number IS NOT NULL;
 

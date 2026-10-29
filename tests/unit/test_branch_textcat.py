@@ -3,7 +3,10 @@ from __future__ import annotations
 
 import json
 
-from enrichment.branch_observations import confidence_for
+import pytest
+
+from enrichment.branch_classifier import load_taxonomy
+from enrichment.branch_observations import confidence_for, planned_writes
 from enrichment.branch_textcat import (
     DECIDED_BY_TEXTCAT,
     accuracy,
@@ -16,6 +19,7 @@ from enrichment.branch_textcat import (
     training_set,
 )
 from pipeline_coordinator.resolver import _FIELD_MIN_CONF
+from enrichment.purpose_branch import ASSIGNED_KEYWORDS, DECIDED_BY_KEYWORDS
 
 FIELDS = {"Energietechnik", "Gesundheitswirtschaft", "Software"}
 
@@ -111,3 +115,26 @@ def test_training_learns_to_separate_fields() -> None:
     assert predict(nlp, "Windkraft und Photovoltaik")[0] == "Energietechnik"
     assert predict(nlp, "") == (None, 0.0)
     assert accuracy([(predict(nlp, t)[0], label) for t, label in examples])[0] > 0.8
+
+
+def test_planned_writes_store_the_english_names() -> None:
+    branch_row = {"outcome": "assigned", "technology_field": "Architekturmarkt",
+                  "withheld_branch": "Additive Fertigung", "decided_by": DECIDED_BY_KEYWORDS}
+    purpose_row = {"outcome": ASSIGNED_KEYWORDS, "purpose_field": "5G- bzw. 6G Anwendungen",
+                   "withheld_by_floor": "Architekturmarkt", "decided_by": DECIDED_BY_KEYWORDS}
+
+    written = {field: value for field, value, _, _ in planned_writes(branch_row, purpose_row)}
+
+    assert written == {
+        "technology_field": "Architecture Market",
+        "technology_field_withheld": "Additive Manufacturing",
+        "purpose_field": "5G/6G Applications",
+        "purpose_field_withheld": "Architecture Market",
+    }
+
+
+def test_load_taxonomy_refuses_a_branch_without_an_english_name(tmp_path) -> None:
+    path = tmp_path / "taxonomy.yaml"
+    path.write_text('branches:\n  "Software":\n    keywords: ["Software"]\n', encoding="utf-8")
+    with pytest.raises(ValueError, match="name_en"):
+        load_taxonomy(path)

@@ -45,7 +45,7 @@ from urllib.parse import urlparse
 from psycopg2.extras import Json
 
 from enrichment.url_patterns import to_ascii_host
-from enrichment.register_names import REGISTER_STATUS_FROM_GERMAN, REGISTER_STATUSES
+from enrichment.register_names import REGISTER_STATUSES
 from source_enrichment_common import (
     ensure_source,
     finish_sync_run,
@@ -125,9 +125,7 @@ def clean(kind: str, raw: str, technology_fields: frozenset[str] = frozenset()) 
     if kind == "technology_field":
         return text if text in technology_fields else None
     if kind == "register_status":
-        # The app shows English; a German word someone types is the same status.
-        status = REGISTER_STATUS_FROM_GERMAN.get(text.casefold(), text.casefold().replace(" ", "_"))
-        return status if status in REGISTER_STATUSES else None
+        return text if text in REGISTER_STATUSES else None
     if kind == "wz_code":
         return text if _WZ_CODE.match(text) else None
     if kind == "boolean":

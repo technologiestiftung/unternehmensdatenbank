@@ -15,6 +15,9 @@ WHERE THE LABELS COME FROM
    a correction naming one of the 77 fields replaces the label, a majority "correct" confirms it,
    and a majority "wrong" without a correction REMOVES the example, so a known mistake is never
    learned. Corrections that are not one of the 77 names are ignored.
+   Since V5 (#47) these votes are stored in English (`name_en`), while `fields` and the seed are
+   Berlin's German keys, so nothing matches until the votes are translated back with `Taxonomy`.
+   That has to happen when the trainer gets a caller (#18).
 
 HOW IT IS JUDGED
 

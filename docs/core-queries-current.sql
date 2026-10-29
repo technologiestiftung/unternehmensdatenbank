@@ -64,12 +64,9 @@ ORDER BY 2 DESC;
 -- `public.v_companies_enriched` resolves every enriched field through the canonical table.
 -- `website_url` is a VIEW column here -- it is not a column of `companies` and never will be.
 --
--- THE FOUR COLUMNS BELOW ANSWER FOUR DIFFERENT QUESTIONS AND MUST NEVER BE MERGED OR COALESCED:
---   cluster          free text an LLM produced, no controlled vocabulary
---   tech_field       free text an LLM produced -- often a comma-separated list of activities,
---                    sometimes in English, up to ~130 characters
---   technologiefeld  ONE of Berlin's 77 taxonomy fields. Requires a website somebody fetched.
---   purpose_field    ONE of the same 77, from the register purpose, with NO website requirement
+-- THE TWO COLUMNS BELOW ANSWER TWO DIFFERENT QUESTIONS AND MUST NEVER BE MERGED OR COALESCED:
+--   technology_field  ONE of Berlin's 77 taxonomy fields. Requires a website somebody fetched.
+--   purpose_field     ONE of the same 77, from the register purpose, with NO website requirement
 --
 -- `technology_field` and `purpose_field` are filled by the classification write path
 -- (`enrichment/branch_observations.py`). See docs/branch-classification.md.
@@ -93,9 +90,7 @@ LIMIT 25;
 SELECT
   count(*)                          AS companies,
   count(website_url)                AS with_website,
-  count(cluster)                    AS with_cluster,
-  count(tech_field)                 AS with_tech_field,
-  count(technologiefeld)            AS with_technologiefeld,
+  count(technology_field)           AS with_technology_field,
   count(purpose_field)              AS with_purpose_field
 FROM public.v_companies_enriched;
 
