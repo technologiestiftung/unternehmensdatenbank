@@ -56,7 +56,8 @@ field claim, with a confidence) → `pipeline_coordinator` → `company_canonica
 - **`pipeline_coordinator` alone decides which observation wins.** Sources write observations, then
   trigger it.
 - **Priority sorts before confidence, so it is absolute:** nothing at priority 100 beats anything at
-  50. Within one priority, confidence decides.
+  50. Within one priority, confidence decides, **weighed by age** (`resolver.HALF_LIVES`, #49): the
+  age runs from when the source read the value (`source_updated_at`), never from when we stored it.
 - **`website_url` is a view column**, not a table column; enriched fields live in
   `company_canonical_field_sources`, read through `v_companies_enriched`.
 - **`companies` is identity only (V3).** Name, address, status and the other register facts are

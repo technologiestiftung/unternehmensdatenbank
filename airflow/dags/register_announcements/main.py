@@ -294,6 +294,7 @@ def write_announcement(cur: Any, item: Announcement, *, source_id: str, sync_run
                 cur, company_id=company_id, source_record_id=record_id, source_id=source_id,
                 sync_run_id=sync_run_id, field_name=field, value_text=value, confidence=1.0,
                 metadata={"decided_by": "read from the end of the registered name"} if field == "legal_form" else {},
+                source_updated_at=item.published_on,
             )
     if is_new:
         insert_text_observation(
@@ -301,6 +302,7 @@ def write_announcement(cur: Any, item: Announcement, *, source_id: str, sync_run
             sync_run_id=sync_run_id, field_name=FIELD_NAME, value_text=item.category, confidence=0.0,
             metadata={"published_on": payload["published_on"], "announcement_id": item.portal_id,
                       "register": item.register, "matched_url": URL},
+            source_updated_at=item.published_on,
         )
     return is_new, method
 

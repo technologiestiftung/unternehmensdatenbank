@@ -125,6 +125,27 @@ How a record from any source finds its company, in this order:
 Merging never deletes: the duplicate keeps `merged_into`, and its records and observations move to
 the survivor.
 
+## Age: older values weigh less (V6, #49)
+
+Every observation knows when its **source** read the value: `source_updated_at`, else
+`observed_at`. The register read Berlin between 2017-06-12 and 2019-01-31; a website is read the day
+a DAG downloads it; a correction is dated by the newest vote behind it.
+
+- **Decay only ranks.** Within one priority the coordinator compares `confidence × 0.5 ^ (age /
+  half-life)`. The bar still filters on the stored confidence, so an old value with nothing newer
+  stays shown, and the ⓘ (`v_field_provenance.observed_at`) says when the source read it.
+- **Half-lives** (`resolver.HALF_LIVES`, decided 2026-10-29, starting values to be measured once
+  Fusionbase overlaps with OffeneRegister): website 3 years; address, postcode and city 5;
+  register_status 2; name and legal_form 10. Fields not listed do not decay; the founding date never.
+  Manager names are a list, every name above the bar is shown, so age does not drop one.
+- **Corrections give way to newer sources.** A correction from the app (priority 50) stands until
+  another source has a qualifying value it read after the latest vote behind the correction; then
+  that source's value is shown. An older source value never beats a newer correction.
+
+Tested on a copy of the Berlin database on 2026-10-29: a new address read that day at 0.8 replaced
+the register's 2018 address at 1.0 (worth about 0.3 after decay); a source name read a day before
+two people's correction did not replace it, one read after it did.
+
 ## Tags (V5, #47)
 
 People tag companies in the app: `tags` (free text, unique ignoring case and surrounding spaces) and
