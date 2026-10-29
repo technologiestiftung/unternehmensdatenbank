@@ -22,7 +22,7 @@ Four things, each with the cost that earns it:
    the margin is ever lost again — including by somebody raising `_FIELD_MIN_CONF` for one of the
    five OTHER logical fields that share it.
 
-3. **A `_withheld` name reaching a resolver.** `technologiefeld_withheld` and
+3. **A `_withheld` name reaching a resolver.** `technology_field_withheld` and
    `purpose_field_withheld` hold the 552 fields the website rule and the length floor refused to
    publish. They are unpublishable because NO `resolve_*` function names them — the `directory_url`
    trick. One entry in one `obs_field_names` array publishes all of them.
@@ -67,9 +67,9 @@ FAILURES: list[str] = []
 
 #: The four names this source is allowed to write, and the two of them that must never be resolvable.
 CLASSIFICATION_FIELDS = (
-    "technologiefeld", "purpose_field", "technologiefeld_withheld", "purpose_field_withheld",
+    "technology_field", "purpose_field", "technology_field_withheld", "purpose_field_withheld",
 )
-UNRESOLVABLE_FIELDS = ("technologiefeld_withheld", "purpose_field_withheld")
+UNRESOLVABLE_FIELDS = ("technology_field_withheld", "purpose_field_withheld")
 
 
 def check(label: str, got: object, want: object) -> None:
@@ -197,8 +197,8 @@ def main() -> int:
     check("no resolve_* publishes a withheld field", offenders, [])
     check("the two new resolvers exist",
           sorted(n for n in resolvers if n in
-                 ("resolve_technologiefeld", "resolve_purpose_field")),
-          ["resolve_purpose_field", "resolve_technologiefeld"])
+                 ("resolve_technology_field", "resolve_purpose_field")),
+          ["resolve_purpose_field", "resolve_technology_field"])
 
     # -----------------------------------------------------------------------------------
     section("4. the assigned-outcome list is imported, not restated")

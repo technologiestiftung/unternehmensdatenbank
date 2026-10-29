@@ -31,13 +31,11 @@ confidence of 0.35. It ignores `directory_url` entirely. So a directory page fil
 happened here before. `confidence.score` already refuses those URLs outright, giving them 0.0,
 and this file files them under `directory_url` as well. Two independent guards, on purpose.
 
-## Two rows every company gets, whatever happened
+## Rows every company gets, whatever happened
 
-- `search_query` — a "we looked at this company" marker. Counting these is how a report tells
-  "looked and found nothing" from "never looked", so a source
-  that does not write one is invisible in the platform's own reporting. `url_discovery` does
-  not write one, which is why it is missing from the scorecard despite having found more
-  websites than any other source.
+"Looked at" is the company's source record of this source, written first and always. (A
+`search_query` marker observation said the same and was removed with #47.)
+
 - `discovery_tier`, two of them, one per method — what each method did. The value is the
   method name; the metadata says whether it ran. Without these, "we asked OpenStreetMap and it
   had nothing" and "we never asked OpenStreetMap" look identical in the database, and the
@@ -57,7 +55,6 @@ import logging
 from typing import Any
 
 from source_enrichment_common import (
-    build_search_queries,
     insert_text_observation,
     now_iso,
     upsert_source_record,
@@ -202,26 +199,7 @@ def write_company_result(
         source_payload=payload,
     )
 
-    # 1. The "we looked" marker. Written first, and unconditionally.
-    insert_text_observation(
-        cur,
-        company_id=company.id,
-        source_record_id=source_record_id,
-        source_id=source_id,
-        sync_run_id=sync_run_id,
-        field_name="search_query",
-        value_text=build_search_queries(company)["website"],
-        metadata={
-            "provider": SOURCE_KEY,
-            "note": (
-                "attempt marker. Neither method uses a search engine; "
-                "this row exists so the company counts as looked-at in the platform's views."
-            ),
-        },
-        confidence=1.0,
-    )
-
-    # 2. One row per method, so "never ran" is a value and not a missing row.
+    # 1. One row per method, so "never ran" is a value and not a missing row.
     for stage, name in TIER_NAMES:
         insert_text_observation(
             cur,
@@ -235,7 +213,7 @@ def write_company_result(
             confidence=1.0,
         )
 
-    # 3. Every URL any method proposed, filed by how much we trust it.
+    # 2. Every URL any method proposed, filed by how much we trust it.
     for answer in result.get("answers") or []:
         url = answer.get("url")
         if not url:
@@ -277,7 +255,7 @@ def write_company_result(
             confidence=answer.get("confidence") or 0.0,
         )
 
-    # 4. The OpenStreetMap object, when one matched. Useful on its own: it is a stable handle
+    # 3. The OpenStreetMap object, when one matched. Useful on its own: it is a stable handle
     #    for the business on the map, whether or not the map knew a website.
     if result.get("osm_id"):
         insert_text_observation(

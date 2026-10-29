@@ -20,9 +20,9 @@ Three vocabulary notes, because these words are invented by this codebase:
 
 | field_name | holds | resolver |
 |---|---|---|
-| `technologiefeld` | one of Berlin's 77 fields, from words the company published | `resolve_technologiefeld` |
+| `technology_field` | one of Berlin's 77 fields, from words the company published | `resolve_technology_field` |
 | `purpose_field` | one of the same 77, from the register's Gegenstand | `resolve_purpose_field` |
-| `technologiefeld_withheld` | the field the website rule refused to publish | **none, ever** |
+| `technology_field_withheld` | the field the website rule refused to publish | **none, ever** |
 | `purpose_field_withheld` | the field the 40-character floor cost | **none, ever** |
 
 The `_withheld` pair reuses the `directory_url` trick: a field name no `resolve_*` function reads
@@ -44,7 +44,7 @@ fit has given a real answer, and that answer is NONE. It is not a field.
 
 ## What this does NOT write, and why that differs from observations.py
 
-No `search_query` marker and no `discovery_tier` ledger. `observations.py` writes those because for
+No `discovery_tier` ledger. `observations.py` writes one because for
 combined discovery "OpenStreetMap had nothing for this company" and "OpenStreetMap was never asked"
 are otherwise the same absence in the database, and the second reads as evidence that a company has
 no website.
@@ -57,6 +57,7 @@ nothing the files do not already say.
 from __future__ import annotations
 
 import logging
+from functools import lru_cache
 from typing import Any
 
 from source_enrichment_common import (
@@ -216,7 +217,7 @@ def _metadata(row: dict[str, Any], *, column: str, withheld: bool) -> dict[str, 
         # Why it was withheld, so the two rules can be argued with from the database alone rather
         # than by re-deriving which gate bit.
         meta["withheld_by"] = (
-            "website_gate" if column == "technologiefeld" else "purpose_length_floor"
+            "website_gate" if column == "technology_field" else "purpose_length_floor"
         )
     # Last, and over the whole structure: `evidence` is page text and one company's carries a NUL.
     return _strip_nul(meta)
@@ -238,9 +239,9 @@ def build_payload(
         "company_id": company.id,
         "company_name": company.company_name,
         "generated_at": now_iso(),
-        "technologiefeld": {
+        "technology_field": {
             "outcome": (branch_row or {}).get("outcome"),
-            "value": (branch_row or {}).get("technologiefeld"),
+            "value": (branch_row or {}).get("technology_field"),
             "withheld": (branch_row or {}).get("withheld_branch"),
             "decided_by": (branch_row or {}).get("decided_by") or None,
         },
@@ -255,6 +256,18 @@ def build_payload(
             or (purpose_row or {}).get("taxonomy_version")
         ),
     }
+
+
+@lru_cache(maxsize=1)
+def _taxonomy() -> Any:
+    from enrichment.branch_classifier import load_taxonomy
+
+    return load_taxonomy()
+
+
+def english(branch: str) -> str:
+    """The name the database stores: the classifiers speak Berlin's German key, the app shows `name_en`."""
+    return _taxonomy().english(branch)
 
 
 def planned_writes(
@@ -272,33 +285,33 @@ def planned_writes(
     writes: list[tuple[str, str, float, dict[str, Any]]] = []
 
     if branch_row:
-        if branch_row.get("outcome") == BRANCH_ASSIGNED and branch_row.get("technologiefeld"):
+        if branch_row.get("outcome") == BRANCH_ASSIGNED and branch_row.get("technology_field"):
             writes.append((
-                "technologiefeld",
-                branch_row["technologiefeld"],
+                "technology_field",
+                english(branch_row["technology_field"]),
                 confidence_for(branch_row.get("decided_by")),
-                _metadata(branch_row, column="technologiefeld", withheld=False),
+                _metadata(branch_row, column="technology_field", withheld=False),
             ))
         if branch_row.get("withheld_branch"):
             writes.append((
-                "technologiefeld_withheld",
-                branch_row["withheld_branch"],
+                "technology_field_withheld",
+                english(branch_row["withheld_branch"]),
                 _KEYWORD_CONFIDENCE,
-                _metadata(branch_row, column="technologiefeld", withheld=True),
+                _metadata(branch_row, column="technology_field", withheld=True),
             ))
 
     if purpose_row:
         if purpose_row.get("outcome") in ASSIGNED_OUTCOMES and purpose_row.get("purpose_field"):
             writes.append((
                 "purpose_field",
-                purpose_row["purpose_field"],
+                english(purpose_row["purpose_field"]),
                 confidence_for(purpose_row.get("decided_by")),
                 _metadata(purpose_row, column="purpose_field", withheld=False),
             ))
         if purpose_row.get("withheld_by_floor"):
             writes.append((
                 "purpose_field_withheld",
-                purpose_row["withheld_by_floor"],
+                english(purpose_row["withheld_by_floor"]),
                 _KEYWORD_CONFIDENCE,
                 _metadata(purpose_row, column="purpose_field", withheld=True),
             ))

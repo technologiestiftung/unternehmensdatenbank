@@ -56,7 +56,7 @@ x-airflow-common: &airflow-common
     # default to the owner `app`; see docs/datahub-emulation.md.
     PG_DSN: host=postgres port=5432 dbname=${APP_DB_NAME:-unternehmensdatenbank} user=${APP_DB_WRITER_USER:-writer} password=${APP_DB_WRITER_PASSWORD:-writer}
     SOURCE_ENRICHMENT_BATCH_SIZE: ${SOURCE_ENRICHMENT_BATCH_SIZE:-50}
-    # Skip companies whose register_status is not 'aktiv' (153,915 of the 296,486 Berlin companies).
+    # Skip companies whose register_status is not 'active' (153,915 of the 296,486 Berlin companies).
     # See source_enrichment_common.ACTIVE_ONLY.
     DISCOVERY_ACTIVE_ONLY: ${DISCOVERY_ACTIVE_ONLY:-true}
     DISCOVERY_SKIP_RESOLVED_WEBSITE: ${DISCOVERY_SKIP_RESOLVED_WEBSITE:-false}

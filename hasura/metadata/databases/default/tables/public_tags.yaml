@@ -1,0 +1,21 @@
+table:
+  name: tags
+  schema: public
+insert_permissions:
+  # created_by comes from the JWT, never from the client. Free text; the database keeps names unique
+  # ignoring case and surrounding spaces (V5). Renaming and deleting tags waits for an admin role.
+  - role: user
+    permission:
+      check: {}
+      set:
+        created_by: x-hasura-User-Id
+      columns:
+        - name
+select_permissions:
+  - role: user
+    permission:
+      columns:
+        - id
+        - name
+        - created_at
+      filter: {}

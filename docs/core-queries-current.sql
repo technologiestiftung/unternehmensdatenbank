@@ -64,14 +64,11 @@ ORDER BY 2 DESC;
 -- `public.v_companies_enriched` resolves every enriched field through the canonical table.
 -- `website_url` is a VIEW column here -- it is not a column of `companies` and never will be.
 --
--- THE FOUR COLUMNS BELOW ANSWER FOUR DIFFERENT QUESTIONS AND MUST NEVER BE MERGED OR COALESCED:
---   cluster          free text an LLM produced, no controlled vocabulary
---   tech_field       free text an LLM produced -- often a comma-separated list of activities,
---                    sometimes in English, up to ~130 characters
---   technologiefeld  ONE of Berlin's 77 taxonomy fields. Requires a website somebody fetched.
---   purpose_field    ONE of the same 77, from the register purpose, with NO website requirement
+-- THE TWO COLUMNS BELOW ANSWER TWO DIFFERENT QUESTIONS AND MUST NEVER BE MERGED OR COALESCED:
+--   technology_field  ONE of Berlin's 77 taxonomy fields. Requires a website somebody fetched.
+--   purpose_field     ONE of the same 77, from the register purpose, with NO website requirement
 --
--- `technologiefeld` and `purpose_field` are filled by the classification write path
+-- `technology_field` and `purpose_field` are filled by the classification write path
 -- (`enrichment/branch_observations.py`). See docs/branch-classification.md.
 -- ================================================================================================
 
@@ -81,11 +78,8 @@ SELECT
   website_url,
   round(website_confidence, 4)      AS website_confidence,
   website_source,
-  cluster,
-  tech_field,
-  technologiefeld,                  -- NULL until the write path lands
-  purpose_field,                    -- NULL until the write path lands
-  data_quality_score
+  technology_field,                 -- NULL until the write path lands
+  purpose_field                     -- NULL until the write path lands
 FROM public.v_companies_enriched
 WHERE website_url IS NOT NULL
 ORDER BY website_confidence DESC NULLS LAST
@@ -96,9 +90,7 @@ LIMIT 25;
 SELECT
   count(*)                          AS companies,
   count(website_url)                AS with_website,
-  count(cluster)                    AS with_cluster,
-  count(tech_field)                 AS with_tech_field,
-  count(technologiefeld)            AS with_technologiefeld,
+  count(technology_field)           AS with_technology_field,
   count(purpose_field)              AS with_purpose_field
 FROM public.v_companies_enriched;
 
@@ -205,7 +197,7 @@ ORDER BY priority, key;
 -- Every observation name in the table, with how many rows carry it. Useful for spotting a field
 -- name nothing resolves: `directory_url` is deliberately one of those -- it holds third-party pages
 -- so they stay queryable as evidence while being out of contention for `website`. Same trick is
--- reserved for `technologiefeld_withheld` and `purpose_field_withheld`.
+-- reserved for `technology_field_withheld` and `purpose_field_withheld`.
 --
 -- Observations are never deleted, only un-canonicalised, so these counts may rise and never fall.
 -- Pinned as a FLOOR by WEBSITE_OBSERVATION_FLOOR for the two website-ish names.
@@ -245,12 +237,3 @@ SELECT coalesce(register_status, '(null)') AS register_status, count(*)
 FROM public.v_companies_enriched
 GROUP BY 1
 ORDER BY 2 DESC;
-
--- The spend guard, which has never fired. Discovery skips companies at `data_quality_score >= 0.90`,
--- but the weights cannot sum above 0.85, so the guard is unreachable. Pinned by test_spend_guard.
-
-SELECT
-  max(data_quality_score)                                        AS ceiling,
-  count(*) FILTER (WHERE data_quality_score >= 0.90)             AS at_the_guard,
-  count(*) FILTER (WHERE data_quality_score < 0.50)              AS under_half
-FROM public.companies;

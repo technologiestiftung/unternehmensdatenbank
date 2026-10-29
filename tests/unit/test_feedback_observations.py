@@ -8,7 +8,7 @@ from feedback_observations import main
 from feedback_observations.main import clean, confidence, planned_observations
 
 COMPANY = "00000000-0000-0000-0000-000000000001"
-FIELDS_77 = frozenset({"Künstliche Intelligenz", "Gesundheitswirtschaft"})
+FIELDS_77 = frozenset({"Artificial Intelligence", "Healthcare & Nursing"})
 
 
 def vote(author: str, field: str = "name", verdict: str = "wrong", correction: str | None = "Muster GmbH",
@@ -106,12 +106,12 @@ def test_the_app_key_becomes_the_coordinators_field_name() -> None:
 
 def test_invalid_and_uncorrectable_corrections_are_counted_and_skipped() -> None:
     planned, skipped = planned_observations([
-        vote("b", field="technologiefeld", correction="Raketenbau"),
+        vote("b", field="technology_field", correction="Raketenbau"),
         vote("a", field="fundings", correction="01AB2345"),
-        vote("a", field="technologiefeld", correction="Künstliche Intelligenz"),
+        vote("a", field="technology_field", correction="Artificial Intelligence"),
     ], FIELDS_77)
-    assert skipped == {"invalid technologiefeld": 1, "not correctable: fundings": 1}
-    assert [row["value"] for row in planned] == ["Künstliche Intelligenz"]
+    assert skipped == {"invalid technology_field": 1, "not correctable: fundings": 1}
+    assert [row["value"] for row in planned] == ["Artificial Intelligence"]
 
 
 def test_a_wrong_vote_without_a_correction_writes_nothing() -> None:
@@ -134,7 +134,8 @@ def test_values_are_cleaned_to_what_the_coordinator_and_the_profile_read() -> No
     assert clean("number", "1.200.000,50") == 1200000.5
     assert clean("number", "-3") is None
     assert clean("boolean", "Ja") == "true" and clean("boolean", "vielleicht") is None
-    assert clean("register_status", "aktiv") == "aktiv" and clean("register_status", "pleite") is None
+    assert clean("register_status", "active") == "active" and clean("register_status", "pleite") is None
+    assert clean("register_status", "Aktiv") is None and clean("register_status", "in Liquidation") is None
     assert clean("wz_code", "62.01") == "62.01" and clean("wz_code", "Software") is None
 
 
@@ -200,7 +201,7 @@ def test_a_different_earliest_spelling_updates_the_stored_claim_instead_of_addin
     monkeypatch.setattr(main, "start_sync_run", lambda *a, **k: "run")
     monkeypatch.setattr(main, "finish_sync_run", lambda *a, **k: None)
     monkeypatch.setattr(main, "upsert_source_record", lambda *a, **k: ("record", False))
-    monkeypatch.setattr(main, "_technologiefelder", frozenset)
+    monkeypatch.setattr(main, "_technology_fields", frozenset)
     assert main.run_publish() == 0
     assert cur.inserts == []
 

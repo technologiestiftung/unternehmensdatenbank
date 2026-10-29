@@ -1,5 +1,7 @@
 - "!include public_v_company_profile.yaml"
 - "!include public_company_comments.yaml"
+- "!include public_tags.yaml"
+- "!include public_company_tags.yaml"
 - "!include public_v_company_fundings.yaml"
 - "!include public_extraction_feedback.yaml"
 - "!include public_v_field_provenance.yaml"

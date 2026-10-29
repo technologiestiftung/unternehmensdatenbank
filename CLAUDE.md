@@ -107,11 +107,11 @@ Read [website-verification](docs/website-verification.md) before touching `confi
 
 ## Industry classification: THREE columns, never mixed
 
-| | Technologiefeld | WZ cluster | purpose_field |
+| | Technologiefeld (`technology_field`) | WZ cluster | purpose_field |
 |---|---|---|---|
 | question | what field does it **work in**? | what is it **registered as**? | what was it **set up to do**? |
 | from | words the company published | its official WZ code | the register's business purpose |
-| values | one of Berlin's 77, or `NONE` | 76 divisions in 20 sections | one of the same 77, or `NONE` |
+| values | one of Berlin's 77 in English (`name_en`), or `NONE` | 76 divisions in 20 sections | one of the same 77, or `NONE` |
 
 Details: [branch-classification](docs/branch-classification.md),
 [purpose-classification](docs/purpose-classification.md). OffeneRegister has no WZ code and no
@@ -130,7 +130,7 @@ purpose, so for Berlin only the Technologiefeld can be filled today.
 ## Migrations
 
 `V1__baseline.sql` is the whole schema as of 2026-10-28 (squashed while nothing was deployed), plus
-`V2__source_overview.sql`, `V3__register_fields_as_observations.sql` and `V4__user_feedback_source.sql`. A database migrated before the squash needs its Flyway history reset once
+`V2__source_overview.sql`, `V3__register_fields_as_observations.sql`, `V4__user_feedback_source.sql` and `V5__profile_cleanup_tags_english.sql`. A database migrated before the squash needs its Flyway history reset once
 ([data-model](docs/data-model.md), "Migration strategy"). **Forward-only:** never edit a migration
 that ran anywhere shared. Flyway runs under `--profile tools`, not with `docker compose up`; on the
 hub as the app's initContainer ([release](docs/release.md)).

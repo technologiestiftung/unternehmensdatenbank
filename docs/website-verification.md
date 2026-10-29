@@ -37,8 +37,8 @@ domains or words by hand.
 
 ## Most companies are not worth asking about
 
-On the Osnabrück data, 53% of companies were `erloschen` (dissolved) and returned 4% of the websites.
-`DISCOVERY_ACTIVE_ONLY=true` skips every company whose register status is not `aktiv`; for Berlin it is
+On the Osnabrück data, 53% of companies were `dissolved` (erloschen) and returned 4% of the websites.
+`DISCOVERY_ACTIVE_ONLY=true` skips every company whose register status is not `active`; for Berlin it is
 on. A dissolved company's domain is the classic resold-domain case, so a website found for one deserves
 extra suspicion.
 

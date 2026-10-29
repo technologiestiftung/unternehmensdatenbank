@@ -9,6 +9,12 @@ from __future__ import annotations
 
 import re
 
+#: `register_status` in English (#47, 2026-10-29). The register says aktiv, erloschen, in Liquidation;
+#: sources map their own words to these, and nothing else spells them out.
+ACTIVE, DISSOLVED, IN_LIQUIDATION = "active", "dissolved", "in_liquidation"
+REGISTER_STATUSES = frozenset({ACTIVE, DISSOLVED, IN_LIQUIDATION})
+
+
 # Longest first: "GmbH & Co. KG" must win over "KG", "UG (haftungsbeschränkt)" over "UG".
 LEGAL_FORMS = [
     ("GmbH & Co. KG", r"gmbh\s*&\s*co\.?\s*kg"),

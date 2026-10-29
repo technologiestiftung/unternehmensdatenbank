@@ -215,6 +215,13 @@ class Taxonomy:
     def branch_names(self) -> list[str]:
         return sorted(self.branches)
 
+    def english(self, branch: str) -> str:
+        """The English name the database stores for a branch (`name_en` in the YAML)."""
+        return self.branches[branch]["name_en"]
+
+    def english_names(self) -> list[str]:
+        return sorted(self.english(branch) for branch in self.branches)
+
 
 def load_taxonomy(path: Path | None = None) -> Taxonomy:
     """Read `branch_taxonomy.yaml`. Raises rather than returning an empty taxonomy.
@@ -230,6 +237,9 @@ def load_taxonomy(path: Path | None = None) -> Taxonomy:
     branches = data.get("branches") or {}
     if not branches:
         raise ValueError(f"{target} contains no branches")
+    missing = [name for name, meta in branches.items() if not (meta or {}).get("name_en")]
+    if missing:
+        raise ValueError(f"{target}: branches without name_en: {missing}")
 
     keyword_branches: dict[str, set[str]] = {}
     clean: dict[str, dict[str, Any]] = {}

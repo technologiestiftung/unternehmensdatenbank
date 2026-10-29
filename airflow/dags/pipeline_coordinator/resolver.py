@@ -1,45 +1,36 @@
 """
-Canonical resolution and quality scoring for the 6 target enrichment fields.
+Canonical resolution: which observation each field of each company shows.
 
-Architecture: enriched field values live in company_field_observations and are
-promoted through company_canonical_field_sources (one row per logical field per
-company). The companies table holds only identity + pipeline metadata.
-Application code queries through the v_companies_enriched view.
+Architecture: every shown value lives in company_field_observations and is promoted through
+company_canonical_field_sources (one row per logical field per company). The companies table holds
+identity only. Application code queries through the v_companies_enriched view.
 
 Logical field names → observation field_name aliases:
-  website        ← candidate_url, website
-  cluster        ← cluster
-  tech_field     ← tech_field
-  ceo_contact    → company_managers (not canonical field sources)
-  revenue        ← revenue
-  employee_count ← employee_count, number_of_employees
-  technologiefeld← technologiefeld        (Berlin's 77 fields, website-gated)
-  purpose_field  ← purpose_field          (the same 77, from the register purpose)
-  activity_keywords ← activity_keywords   (product/service words from the website)
+  website           ← candidate_url, website
+  ceo_contact       → company_managers (not canonical field sources)
+  revenue           ← revenue
+  employee_count    ← employee_count, number_of_employees
+  technology_field  ← technology_field  (Berlin's 77 fields in English, website-gated)
+  purpose_field     ← purpose_field     (the same 77, from the register purpose)
+  activity_keywords ← activity_keywords (product/service words from the website)
   register_announcement ← register_announcement (latest kind of court announcement; a hint, not the status)
+  REGISTER_FIELDS   name, legal_form, address, postcode, city, register_status, ... (V3)
+  deeptech_class, is_ai (only corrections from the app fill them so far)
 
 `email` and `phone` (the `website_contacts` DAG) are stored, never resolved: a resolved value
 reaches the app and `v_field_provenance`.
 
-Two field names are resolved by NOTHING and must stay that way: `technologiefeld_withheld` and
+Two field names are resolved by NOTHING and must stay that way: `technology_field_withheld` and
 `purpose_field_withheld`, which hold the fields the website rule and the length floor refused to
 publish. Naming either one in an `obs_field_names` array publishes every withheld row at once.
 `directory_url` is the third name in that category, for third-party pages.
 
-`cluster`/`tech_field` and `technologiefeld`/`purpose_field` are FOUR different questions and must
-never be merged or coalesced -- the first two are free text an LLM typed, the last two are a
-controlled vocabulary. A WZ code may never fill `technologiefeld`.
+`technology_field` and `purpose_field` are two different questions and must never be merged or
+coalesced. A WZ code may never fill `technology_field`. (`cluster` and `tech_field`, free text an
+LLM typed, were removed with #47.)
 
 Source priority: lower integer wins. Cross-source agreement bonus: +0.10 per
 additional source agreeing on the same value, capped at 1.0.
-
-Quality score weights (sum = 1.0):
-  website        0.30
-  cluster        0.20
-  tech_field     0.20
-  ceo_contact    0.15  (presence in company_managers)
-  revenue        0.10
-  employee_count 0.05
 """
 from __future__ import annotations
 
@@ -236,26 +227,6 @@ def resolve_website(cur: Any) -> int:
     )
 
 
-def resolve_cluster(cur: Any) -> int:
-    return _apply_canonical(
-        cur,
-        logical_field="cluster",
-        obs_field_names=["cluster"],
-        value_col="value_text",
-        min_confidence=_FIELD_MIN_CONF,
-    )
-
-
-def resolve_tech_field(cur: Any) -> int:
-    return _apply_canonical(
-        cur,
-        logical_field="tech_field",
-        obs_field_names=["tech_field"],
-        value_col="value_text",
-        min_confidence=_FIELD_MIN_CONF,
-    )
-
-
 def resolve_revenue(cur: Any) -> int:
     return _apply_canonical(
         cur,
@@ -338,10 +309,10 @@ def resolve_ceo_contact(cur: Any) -> int:
     return removed + cur.rowcount
 
 
-def resolve_technologiefeld(cur: Any) -> int:
+def resolve_technology_field(cur: Any) -> int:
     """Berlin's 77-field taxonomy, from words the company published on its own site.
 
-    No alias list, and there must never be one. `technologiefeld_withheld` holds the 535 fields the
+    No alias list, and there must never be one. `technology_field_withheld` holds the 535 fields the
     website rule refused to publish, and it is a field name **nothing resolves** -- the same trick
     `directory_url` uses. Adding it here, or to any other `obs_field_names` array, would publish
     every withheld row at once and no threshold change could take it back.
@@ -352,8 +323,8 @@ def resolve_technologiefeld(cur: Any) -> int:
     """
     return _apply_canonical(
         cur,
-        logical_field="technologiefeld",
-        obs_field_names=["technologiefeld"],
+        logical_field="technology_field",
+        obs_field_names=["technology_field"],
         value_col="value_text",
         min_confidence=_FIELD_MIN_CONF,
     )
@@ -431,125 +402,30 @@ def resolve_deeptech_and_ai(cur: Any) -> int:
     )
 
 
-def compute_quality_scores(cur: Any) -> int:
-    """
-    Recompute data_quality_score for every company from company_canonical_field_sources
-    and company_managers (for ceo_contact). Binary presence per field, weighted sum.
-
-    **`technologiefeld` and `purpose_field` are deliberately absent from these weights.** The six
-    below sum to 1.00, so adding two more means either giving them no weight -- nothing moves and
-    every stored score stays valid -- or re-weighting all eight, which invalidates all 14,443 stored
-    `data_quality_score` values and shifts the tier histogram. `test_spend_guard` pins the ceiling at
-    0.850 with 0 companies at the 0.90 spend guard, so a re-weighting would fail that test for a
-    reason having nothing to do with the industry columns.
-
-    The choice is open, not settled: whoever wants these two to count towards data quality should
-    make it as its own change, with the new histogram measured and the pinned numbers moved in the
-    same commit.
-    """
-    cur.execute(
-        """
-        UPDATE public.companies c
-        SET
-          data_quality_score = ROUND((
-            CASE WHEN EXISTS (
-              SELECT 1 FROM public.company_canonical_field_sources
-              WHERE company_id = c.id AND field_name = 'website'
-            ) THEN 0.30 ELSE 0 END
-            +
-            CASE WHEN EXISTS (
-              SELECT 1 FROM public.company_canonical_field_sources
-              WHERE company_id = c.id AND field_name = 'cluster'
-            ) THEN 0.20 ELSE 0 END
-            +
-            CASE WHEN EXISTS (
-              SELECT 1 FROM public.company_canonical_field_sources
-              WHERE company_id = c.id AND field_name = 'tech_field'
-            ) THEN 0.20 ELSE 0 END
-            +
-            CASE WHEN EXISTS (
-              SELECT 1 FROM public.company_managers m
-              WHERE m.company_id = c.id AND m.is_current = true
-              LIMIT 1
-            ) THEN 0.15 ELSE 0 END
-            +
-            CASE WHEN EXISTS (
-              SELECT 1 FROM public.company_canonical_field_sources
-              WHERE company_id = c.id AND field_name = 'revenue'
-            ) THEN 0.10 ELSE 0 END
-            +
-            CASE WHEN EXISTS (
-              SELECT 1 FROM public.company_canonical_field_sources
-              WHERE company_id = c.id AND field_name = 'employee_count'
-            ) THEN 0.05 ELSE 0 END
-          )::NUMERIC, 3),
-          canonical_updated_at = now(),
-          updated_at = now()
-        WHERE true
-        """
-    )
-    return cur.rowcount
+#: The fields the coordinator reports coverage for, one list for the SQL and the Python.
+COVERAGE_FIELDS = ("website", "revenue", "employee_count", "technology_field", "purpose_field")
 
 
 def report_field_coverage(cur: Any) -> dict[str, Any]:
-    """Return per-field fill rates (via canonical tables) and quality score distribution."""
+    """Per-field fill rates, from the canonical table, and the number of companies."""
+    cur.execute("SELECT COUNT(*) FROM public.companies WHERE merged_into IS NULL")
+    total = cur.fetchone()[0]
     cur.execute(
         """
-        SELECT
-          COUNT(*)                                                          AS total,
-          COUNT(CASE WHEN data_quality_score >= 0.90 THEN 1 END)           AS tier_complete,
-          COUNT(CASE WHEN data_quality_score >= 0.50
-                      AND data_quality_score <  0.90 THEN 1 END)           AS tier_partial,
-          COUNT(CASE WHEN data_quality_score <  0.50
-                      OR  data_quality_score IS NULL  THEN 1 END)          AS tier_minimal,
-          ROUND(AVG(data_quality_score)::NUMERIC, 3)                       AS avg_score
-        FROM public.companies
-        """
-    )
-    row = cur.fetchone()
-    total, tier_complete, tier_partial, tier_minimal, avg_score = row
-
-    cur.execute(
-        """
-        SELECT field_name, COUNT(DISTINCT company_id) AS cnt
+        SELECT field_name, COUNT(DISTINCT company_id)
         FROM public.company_canonical_field_sources
-        WHERE field_name = ANY(ARRAY['website','cluster','tech_field','revenue','employee_count',
-                                     'technologiefeld','purpose_field'])
+        WHERE field_name = ANY(%s)
         GROUP BY field_name
-        """
+        """,
+        (list(COVERAGE_FIELDS),),
     )
-    field_counts: dict[str, int] = {r[0]: r[1] for r in cur.fetchall()}
-
-    cur.execute(
-        """
-        SELECT COUNT(DISTINCT company_id)
-        FROM public.company_managers
-        WHERE is_current = true
-        """
-    )
+    field_counts: dict[str, int] = dict(cur.fetchall())
+    cur.execute("SELECT COUNT(DISTINCT company_id) FROM public.company_managers WHERE is_current")
     ceo_count: int = cur.fetchone()[0]
 
     def pct(n: int) -> str:
         return f"{n / total * 100:.1f}%" if total else "0%"
 
-    # This tuple and the SQL ARRAY above are the same list written twice, and they MUST move
-    # together. Widen one and not the other and this function under-reports with no error: the SQL
-    # counts a field the Python never prints, or the Python prints a field the SQL never counted and
-    # it silently reads 0.
-    fields = {
-        f: {"filled": field_counts.get(f, 0), "pct": pct(field_counts.get(f, 0))}
-        for f in ("website", "cluster", "tech_field", "revenue", "employee_count",
-                  "technologiefeld", "purpose_field")
-    }
+    fields = {f: {"filled": field_counts.get(f, 0), "pct": pct(field_counts.get(f, 0))} for f in COVERAGE_FIELDS}
     fields["ceo_contact"] = {"filled": ceo_count, "pct": pct(ceo_count)}
-
-    return {
-        "total_companies": total,
-        "fields": fields,
-        "tiers": {
-            "complete (≥0.90)": tier_complete,
-            "partial  (≥0.50)": tier_partial,
-            "minimal  (<0.50)": tier_minimal,
-        },
-        "avg_quality_score": float(avg_score or 0),
-    }
+    return {"total_companies": total, "fields": fields}

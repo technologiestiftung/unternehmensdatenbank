@@ -50,6 +50,7 @@ for candidate in (
 
 from enrichment import branch_classifier as bc  # noqa: E402
 from enrichment import purpose_branch as pb  # noqa: E402
+from enrichment.register_names import ACTIVE  # noqa: E402
 
 FAILURES: list[str] = []
 
@@ -424,8 +425,8 @@ def main() -> int:
               all(isinstance(part, ast.Constant) and isinstance(part.value, str)
                   for part in (fragment_node.body, fragment_node.orelse)), True)
         check("…the off branch is empty", fragment_node.orelse.value, "")
-        check("…the on branch filters on aktiv",
-              fragment_node.body.value, "AND c.register_status = 'aktiv'")
+        check("…the on branch filters on active",
+              fragment_node.body.value, f"AND c.register_status = '{ACTIVE}'")
 
     # -----------------------------------------------------------------------------------
     section("DISCOVERY_SKIP_RESOLVED_WEBSITE obeys the same three rules")

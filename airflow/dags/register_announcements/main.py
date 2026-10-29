@@ -21,9 +21,9 @@ allow 60 an hour.
 
 **Every announcement becomes a source record** (`external_id` = the portal's id), linked to its
 company by register number through `company_identifiers`. On 2026-10-28, 451 of the 900 matched a
-company we had, every one of them `aktiv` in the 2017–2019 snapshot. An unknown register number can
+company we had, every one of them `active` in the 2017–2019 snapshot. An unknown register number can
 still be a company we have, under its old number (a change of legal form gets a new one), so the name
-comes second (`name_match`): when exactly one company that is not merged and not `erloschen` has the
+comes second (`name_match`): when exactly one company that is not merged and not `dissolved` has the
 same name key (`normalize_company_name` in SQL) and city, it is linked (`match_method = 'fuzzy'`, confidence 0.9) and gets the
 register number as an identifier. A deleted company is never linked by name: a firm name must only be
 distinguishable at its place (§ 30 HGB, to be checked), so a deleted firm's name can be used again.
@@ -31,12 +31,12 @@ Otherwise the company is **created**: its register number, and name, legal form 
 observations of this source (the legal form read as the OffeneRegister import reads it,
 `enrichment.register_names`), `match_method = 'created'`; every company that shared name and city (several live ones, or deleted
 ones) becomes an open `match_candidates` row for a person to decide. On 2026-10-28, 14 of the 425
-companies created without this rule shared name key and city with a company we had (11 `aktiv`),
+companies created without this rule shared name key and city with a company we had (11 `active`),
 and 66 grant links by name and city would have been lost, because those need a unique name per city.
 Only Berlin's court is read, so only Berlin companies are created.
 
 **What the app shows** is a hint, never the status: `register_announcement` is the latest announcement's
-kind, with its date. A deletion announcement does not make a company `erloschen`; the court deletes it
+kind, with its date. A deletion announcement does not make a company `dissolved`; the court deletes it
 later, or not. One observation per announcement; the latest has confidence 1.0, older ones 0, so
 `pipeline_coordinator` publishes the latest.
 """
@@ -50,6 +50,7 @@ from datetime import date, datetime, timezone
 from typing import Any
 from urllib.parse import urljoin
 
+from enrichment.register_names import DISSOLVED
 from pipeline_coordinator.resolver import resolve_register_fields
 from source_enrichment_common import (
     ensure_source,
@@ -176,10 +177,10 @@ def name_match(
     """Fuzzy second: (the company, candidates for a person) from (id, register_status) of the companies
     sharing name key and city.
 
-    Exactly one that is not `erloschen` is the company. Otherwise all of them are candidates: the
+    Exactly one that is not `dissolved` is the company. Otherwise all of them are candidates: the
     announcement's company is created, and a person decides which, if any, it is. None: it is created.
     """
-    live = [company_id for company_id, status in same_name_and_city if status != "erloschen"]
+    live = [company_id for company_id, status in same_name_and_city if status != DISSOLVED]
     if len(live) == 1:
         return live[0], []
     return None, same_name_and_city

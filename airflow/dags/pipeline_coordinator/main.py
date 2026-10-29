@@ -8,19 +8,16 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from datetime import datetime, timezone
 from resolver import (
-    compute_quality_scores,
     report_field_coverage,
     resolve_activity_keywords,
     resolve_ceo_contact,
-    resolve_cluster,
     resolve_deeptech_and_ai,
     resolve_employee_count,
     resolve_purpose_field,
     resolve_register_announcement,
     resolve_register_fields,
     resolve_revenue,
-    resolve_tech_field,
-    resolve_technologiefeld,
+    resolve_technology_field,
     resolve_website,
 )
 from source_enrichment_common import get_connection
@@ -30,120 +27,43 @@ log = logging.getLogger(__name__)
 DAG_ID = "pipeline_coordinator"
 
 
+def _log_coverage(when: str, coverage: dict) -> None:
+    fields = " ".join(f"{name}={field['pct']}" for name, field in coverage["fields"].items())
+    log.info("Coverage %s resolution — %d companies | %s", when, coverage["total_companies"], fields)
+
+
 def run_pipeline_coordinator() -> None:
     conn = get_connection()
     try:
-        with conn:
-            with conn.cursor() as cur:
-                # Snapshot before
-                before = report_field_coverage(cur)
+        with conn, conn.cursor() as cur:
+            _log_coverage("BEFORE", report_field_coverage(cur))
 
-        log.info(
-            "Pipeline status BEFORE resolution — %d companies | "
-            "website=%s cluster=%s tech_field=%s ceo=%s revenue=%s employees=%s | "
-            "technologiefeld=%s purpose_field=%s | avg_score=%.3f",
-            before["total_companies"],
-            before["fields"]["website"]["pct"],
-            before["fields"]["cluster"]["pct"],
-            before["fields"]["tech_field"]["pct"],
-            before["fields"]["ceo_contact"]["pct"],
-            before["fields"]["revenue"]["pct"],
-            before["fields"]["employee_count"]["pct"],
-            before["fields"]["technologiefeld"]["pct"],
-            before["fields"]["purpose_field"]["pct"],
-            before["avg_quality_score"],
-        )
-        log.info(
-            "Tiers BEFORE — complete=%d partial=%d minimal=%d",
-            before["tiers"]["complete (≥0.90)"],
-            before["tiers"]["partial  (≥0.50)"],
-            before["tiers"]["minimal  (<0.50)"],
-        )
-
-        # Resolve each target field
-        with conn:
-            with conn.cursor() as cur:
-                n_website   = resolve_website(cur)
-                n_cluster   = resolve_cluster(cur)
-                n_tech      = resolve_tech_field(cur)
-                n_revenue   = resolve_revenue(cur)
-                n_employees = resolve_employee_count(cur)
-                n_ceo       = resolve_ceo_contact(cur)
+        with conn, conn.cursor() as cur:
+            changed = {
+                "website": resolve_website(cur),
+                "revenue": resolve_revenue(cur),
+                "employee_count": resolve_employee_count(cur),
+                "ceo_contact": resolve_ceo_contact(cur),
                 # The two industry columns. Neither has an alias list, and the two `_withheld`
                 # field names are deliberately resolved by nothing at all — see resolver.py.
-                n_tfeld     = resolve_technologiefeld(cur)
-                n_purpose   = resolve_purpose_field(cur)
-                n_keywords  = resolve_activity_keywords(cur)
-                n_announce  = resolve_register_announcement(cur)
-                n_register  = resolve_register_fields(cur)
-                n_deeptech  = resolve_deeptech_and_ai(cur)
+                "technology_field": resolve_technology_field(cur),
+                "purpose_field": resolve_purpose_field(cur),
+                "activity_keywords": resolve_activity_keywords(cur),
+                "register_announcement": resolve_register_announcement(cur),
+                "register fields": resolve_register_fields(cur),
+                "deeptech/is_ai": resolve_deeptech_and_ai(cur),
+            }
+        log.info("Resolution complete, canonical records changed — %s",
+                 " ".join(f"{name}={n}" for name, n in changed.items()))
 
-        log.info(
-            "Resolution complete — website=%d cluster=%d tech_field=%d "
-            "revenue=%d employee_count=%d ceo_contact=%d "
-            "technologiefeld=%d purpose_field=%d activity_keywords=%d register_announcement=%d "
-            "register fields=%d deeptech/is_ai=%d canonical records changed",
-            n_website, n_cluster, n_tech, n_revenue, n_employees, n_ceo, n_tfeld, n_purpose,
-            n_keywords, n_announce, n_register, n_deeptech,
-        )
-
-        # Recompute quality scores
-        with conn:
-            with conn.cursor() as cur:
-                n_scored = compute_quality_scores(cur)
-
-        log.info("Quality scores recomputed for %d companies.", n_scored)
-
-        # The app reads a stored copy of every profile (`company_profile_mv`); bring it up to date with what was
-        # just resolved. About 3 seconds for 296,486 companies.
-        with conn:
-            with conn.cursor() as cur:
-                cur.execute("SELECT public.refresh_company_profile()")
+        # The app reads a stored copy of every profile (`company_profile_mv`); bring it up to date
+        # with what was just resolved.
+        with conn, conn.cursor() as cur:
+            cur.execute("SELECT public.refresh_company_profile()")
         log.info("Company profiles refreshed for the app.")
 
-        # Snapshot after
-        with conn:
-            with conn.cursor() as cur:
-                after = report_field_coverage(cur)
-
-        log.info(
-            "Pipeline status AFTER resolution — %d companies | "
-            "website=%s cluster=%s tech_field=%s ceo=%s revenue=%s employees=%s | "
-            "technologiefeld=%s purpose_field=%s | avg_score=%.3f",
-            after["total_companies"],
-            after["fields"]["website"]["pct"],
-            after["fields"]["cluster"]["pct"],
-            after["fields"]["tech_field"]["pct"],
-            after["fields"]["ceo_contact"]["pct"],
-            after["fields"]["revenue"]["pct"],
-            after["fields"]["employee_count"]["pct"],
-            after["fields"]["technologiefeld"]["pct"],
-            after["fields"]["purpose_field"]["pct"],
-            after["avg_quality_score"],
-        )
-        log.info(
-            "Tiers AFTER — complete=%d partial=%d minimal=%d",
-            after["tiers"]["complete (≥0.90)"],
-            after["tiers"]["partial  (≥0.50)"],
-            after["tiers"]["minimal  (<0.50)"],
-        )
-
-        # Identify which layer to run next
-        needs_website = (
-            before["total_companies"]
-            - before["fields"]["website"]["filled"]
-        )
-        needs_llm = (
-            before["total_companies"]
-            - before["tiers"]["complete (≥0.90)"]
-            - before["tiers"]["partial  (≥0.50)"]
-        )
-        log.info(
-            "Next steps — ~%d companies still need website discovery | "
-            "~%d companies below partial threshold (priority LLM targets)",
-            needs_website,
-            needs_llm,
-        )
+        with conn, conn.cursor() as cur:
+            _log_coverage("AFTER", report_field_coverage(cur))
     finally:
         conn.close()
 
@@ -157,14 +77,11 @@ def _make_dag():  # noqa: ANN201
 
     with DAG(
         dag_id=DAG_ID,
-        description=(
-            "Resolve canonical observations → companies table, "
-            "compute quality scores, report pipeline status"
-        ),
+        description="Decide which observation every field shows, then refresh the stored profile",
         schedule=None,
         start_date=datetime(2026, 8, 4, tzinfo=timezone.utc),
         catchup=False,
-        tags=["pipeline", "coordinator", "quality"],
+        tags=["pipeline", "coordinator"],
     ) as dag:
         pipeline_task("resolve_and_score", run_pipeline_coordinator)
     return dag
