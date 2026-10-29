@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from contextlib import nullcontext
+from datetime import date
 from types import SimpleNamespace
 
 from feedback_observations import main
@@ -205,3 +206,14 @@ def test_a_different_earliest_spelling_updates_the_stored_claim_instead_of_addin
     assert main.run_publish() == 0
     assert cur.inserts == []
 
+
+
+def test_a_correction_is_dated_by_the_newest_vote_behind_it() -> None:
+    planned, _ = planned_observations([{**vote("a"), "updated_at": date(2026, 1, 1)},
+                                       {**vote("b"), "updated_at": date(2026, 3, 1)}])
+    assert [row["voted_at"] for row in planned] == [date(2026, 3, 1)]
+
+
+def test_votes_without_a_date_give_a_correction_no_date() -> None:
+    planned, _ = planned_observations([vote("a"), vote("b")])
+    assert [row["voted_at"] for row in planned] == [None]

@@ -19,7 +19,7 @@ value: their latest vote on it wins. The difference sets the confidence (`confid
 
 The source has priority 50, ahead of every other source (V4), so a shown correction replaces the
 register's or a website's value; that value stays stored and wins again when people withdraw their
-votes. Nothing is ever deleted: a correction nobody stands behind any more drops to confidence 0.
+votes, or when a source delivers a value it read after the newest vote (#49, `resolver`). Nothing is ever deleted: a correction nobody stands behind any more drops to confidence 0.
 
 **Checked before it is written** (`clean`): a website must be a URL, a Technologiefeld one of
 Berlin's 77, a number a number, a date a date. A correction that fails is counted and skipped.
@@ -45,6 +45,7 @@ from urllib.parse import urlparse
 from psycopg2.extras import Json
 
 from enrichment.url_patterns import to_ascii_host
+from pipeline_coordinator.resolver import PEOPLE_SOURCE
 from enrichment.register_names import REGISTER_STATUSES
 from source_enrichment_common import (
     ensure_source,
@@ -57,7 +58,7 @@ from source_enrichment_common import (
 log = logging.getLogger(__name__)
 
 DAG_ID = "feedback_observations"
-SOURCE_KEY = "user_feedback"
+SOURCE_KEY = PEOPLE_SOURCE
 
 #: App field key -> (observation field name, kind of value). The app votes under its column keys;
 #: the observation names are the coordinator's.
@@ -165,7 +166,8 @@ def planned_observations(
     per company, field and cleaned value, ignoring case, so "Muster GmbH" and "muster gmbh" are one
     claim (the spelling seen first wins; the stored observation keeps its own).
     `filled` holds the (company, observation field) pairs another source has a value for
-    (`filled_fields`); None treats every field as filled.
+    (`filled_fields`); None treats every field as filled. `voted_at` is the newest vote of the
+    people behind a claim (`updated_at`): the coordinator lets a source's value read after it win (#49).
     """
     latest: dict[tuple[str, str, str, str | None], Mapping[str, Any]] = {}
     for vote in votes:
@@ -179,6 +181,11 @@ def planned_observations(
     confirmed: dict[tuple[str, str], dict[Any, set[str]]] = defaultdict(lambda: defaultdict(set))
     rejected: dict[tuple[str, str, Any], set[str]] = defaultdict(set)
     skipped: dict[str, int] = defaultdict(int)
+    voted_at: dict[tuple[str, str, str], Any] = {}
+    for (company, key, author, _), vote in latest.items():
+        when = vote.get("updated_at")
+        if when is not None and (voted_at.get((company, key, author)) is None or when > voted_at[(company, key, author)]):
+            voted_at[(company, key, author)] = when
     for (company, key, _, _), vote in latest.items():
         if key in NOT_CORRECTABLE or key not in FIELDS:
             if vote.get("correction"):
@@ -218,6 +225,8 @@ def planned_observations(
             "confidence": confidence(len(people), len(against),
                                      filled=filled is None or (company, FIELDS[key][0]) in filled),
             "agree": len(people), "disagree": len(against),
+            "voted_at": max((voted_at[(company, key, a)] for a in people if (company, key, a) in voted_at),
+                            default=None),
         })
     return planned, dict(skipped)
 
@@ -267,7 +276,7 @@ def run_publish() -> int:
             source_id = ensure_source(cur, key=SOURCE_KEY, name="Corrections from the app",
                                       source_type="user_feedback", metadata={"dag_id": DAG_ID})
             sync_run_id = start_sync_run(cur, source_id=source_id)
-            cur.execute("SELECT company_id, field_name, value, verdict, correction, author_id"
+            cur.execute("SELECT company_id, field_name, value, verdict, correction, author_id, updated_at"
                         " FROM public.extraction_feedback ORDER BY updated_at, created_at, id")
             columns = [c.name for c in cur.description]
             votes = [dict(zip(columns, row)) for row in cur.fetchall()]
@@ -305,13 +314,13 @@ def run_publish() -> int:
                         """
                         INSERT INTO public.company_field_observations
                           (company_id, company_source_record_id, source_id, source_sync_run_id,
-                           field_name, value_text, value_number, confidence, metadata)
-                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+                           field_name, value_text, value_number, confidence, metadata, source_updated_at)
+                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                         RETURNING id
                         """,
                         (company, records[company], source_id, sync_run_id, row["field_name"],
                          None if is_number else value, value if is_number else None,
-                         row["confidence"], Json(metadata)),
+                         row["confidence"], Json(metadata), row["voted_at"]),
                     )
                     written.add(str(cur.fetchone()[0]))
                     created += 1
@@ -319,9 +328,12 @@ def run_publish() -> int:
                 obs_id = stored[0]
                 written.add(str(obs_id))
                 cur.execute(
-                    "UPDATE public.company_field_observations SET confidence = %s, metadata = %s, updated_at = now()"
-                    " WHERE id = %s AND (confidence IS DISTINCT FROM %s OR metadata IS DISTINCT FROM %s)",
-                    (row["confidence"], Json(metadata), obs_id, row["confidence"], Json(metadata)),
+                    "UPDATE public.company_field_observations"
+                    " SET confidence = %s, metadata = %s, source_updated_at = %s, updated_at = now()"
+                    " WHERE id = %s AND (confidence IS DISTINCT FROM %s OR metadata IS DISTINCT FROM %s"
+                    "                    OR source_updated_at IS DISTINCT FROM %s)",
+                    (row["confidence"], Json(metadata), row["voted_at"], obs_id, row["confidence"],
+                     Json(metadata), row["voted_at"]),
                 )
                 changed += cur.rowcount
 

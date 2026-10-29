@@ -378,6 +378,7 @@ def insert_text_observation(
     value_text: str,
     metadata: dict[str, Any] | None = None,
     confidence: float | None = None,
+    source_updated_at: Any = None,
 ) -> str:
     """Write one claim by one source about one text field of one company. Returns the row's id.
 
@@ -400,6 +401,11 @@ def insert_text_observation(
     (a replay guard had to be written because of it). A conditional `DO UPDATE ... WHERE` would
     also return no row when it declined to fire, and the `RETURNING id` below would then raise.
 
+    `source_updated_at` is when the SOURCE recorded the value (the register's read date, an
+    announcement's publication date). Left None it means a fresh read: it is set to now(), on insert
+    and on conflict, so a website re-verified today ages from today. The coordinator weighs values by
+    this age (#49).
+
     Two things it deliberately does not refresh on conflict: `observed_at` and `source_sync_run_id`
     keep the values from the first write, so a row updated by a later run still points at the run that
     created it. Add them to the SET list if run attribution ever matters more than the original
@@ -420,10 +426,11 @@ def insert_text_observation(
           observed_at,
           confidence,
           metadata,
+          source_updated_at,
           created_at,
           updated_at
         )
-        VALUES (%s, %s, %s, %s, %s, %s, now(), %s, %s, now(), now())
+        VALUES (%s, %s, %s, %s, %s, %s, now(), %s, %s, COALESCE(%s, now()), now(), now())
         ON CONFLICT (company_id, field_name, source_id, value_text)
           WHERE field_name IN (
             'website', 'candidate_url', 'directory_url',
@@ -435,6 +442,7 @@ def insert_text_observation(
           )
         DO UPDATE SET
           confidence = EXCLUDED.confidence,
+          source_updated_at = EXCLUDED.source_updated_at,
           metadata   = EXCLUDED.metadata,
           updated_at = now()
         RETURNING id
@@ -448,6 +456,7 @@ def insert_text_observation(
             value_text,
             confidence,
             Json(metadata or {}),
+            source_updated_at,
         ),
     )
     return cur.fetchone()[0]
