@@ -93,7 +93,7 @@ python scripts/import_register_managers.py
 
 `V1__baseline.sql` is the whole schema as of 2026-10-28; everything before it was squashed while
 nothing was deployed. `V2__source_overview.sql`, `V3__register_fields_as_observations.sql`,
-`V4__user_feedback_source.sql` and `V5__profile_cleanup_tags_english.sql` came after. Forward-only from here: never edit a migration that has
+`V4__user_feedback_source.sql`, `V5__profile_cleanup_tags_english.sql` and `V6__source_dates.sql` came after. Forward-only from here: never edit a migration that has
 run anywhere shared, add new ones as `V{N}__description.sql`, and run Flyway before Airflow
 touches the changed schema.
 The headings below keep the pre-squash migration numbers (V3–V10) so git history finds the reasoning.
@@ -168,7 +168,8 @@ correction of their own), count against it. Nobody counts both ways: only a pers
 on a field counts. On the list fields (managers, keywords) that is per shown value, and confirming
 one value counts against no other. One person net gives confidence 0.30, below every bar (0.50,
 websites 0.35), so nothing shows; two give 0.60 and three or more 0.75, which the coordinator
-publishes over any other source, the register included. **A field no other source fills takes the
+publishes over any other source, the register included, until a source reads a newer value
+("Age", above). **A field no other source fills takes the
 first correction**: one person then gives 0.60. Asked on every run, so when a source delivers a
 value later, a single person's correction steps back to 0.30 and the source's value is shown.
 Priority 50 is deliberate: register values carry 1.0 and verified websites up to 0.99, so at
