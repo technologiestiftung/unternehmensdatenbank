@@ -16,8 +16,10 @@ Two tasks:
    Nothing on the page ties it to the company -> below the bar, never shown. On 2026-10-30, 229 of
    the 531 were proven, 139 of them new to website_discovery; no result was hand-checked.
 
-A website that no longer verifies on a later check, or whose item no longer matches that company,
-drops to confidence 0; nothing is deleted.
+The page, not the match, proves a website. An item that no longer matches keeps its record,
+inactive, and is still verified every 90 days. A website drops to confidence 0 only when no record
+of this source for that company still proves it (`proven_urls`): its page stopped naming the
+company, or its item now matches another company. Nothing is deleted.
 Register officers are loaded per batch as comparison keys, in memory only, as in website_discovery.
 """
 from __future__ import annotations
@@ -64,8 +66,9 @@ def _source_id(cur: Any) -> str:
 
 
 def run_match() -> int:
-    """Query Wikidata and link its items to companies. Returns how many items matched; skipped
-    (0) when the last match is less than 20 hours old, so a chain of verify batches queries once."""
+    """Query Wikidata and link its items to companies. Returns how many websites it demoted, so the
+    coordinator runs; skipped (0) when the last match is less than 20 hours old, so a chain of verify
+    batches queries once."""
     connection = get_connection()
     try:
         with connection, connection.cursor() as cur:
@@ -78,19 +81,20 @@ def run_match() -> int:
         items = wikidata.fetch()
         with connection, connection.cursor() as cur:
             sync_run_id = start_sync_run(cur, source_id=source_id)
-            matched = match_items(cur, items, source_id=source_id)
+            matched, demoted = match_items(cur, items, source_id=source_id)
             cur.execute("UPDATE public.sources SET last_synced_at = now() WHERE id = %s", (source_id,))
             finish_sync_run(cur, sync_run_id=sync_run_id, records_seen=len(items), records_created=matched,
                             records_updated=0, records_failed=0)
-        log.info("%d Wikidata items with a Berlin headquarters and a website; %d matched a company.",
-                 len(items), matched)
-        return matched
+        log.info("%d Wikidata items with a Berlin headquarters and a website; %d matched a company;"
+                 " %d websites demoted.", len(items), matched, demoted)
+        return demoted
     finally:
         connection.close()
 
 
-def match_items(cur: Any, items: list[wikidata.Item], *, source_id: str) -> int:
-    """Link items to companies (see the module docstring) and keep each match as a source record."""
+def match_items(cur: Any, items: list[wikidata.Item], *, source_id: str) -> tuple[int, int]:
+    """Link items to companies (see the module docstring) and keep each match as a source record.
+    Returns (items matched, websites demoted)."""
     cur.execute("CREATE TEMP TABLE _wd (qid text PRIMARY KEY, label text, register_digits text,"
                 " websites jsonb) ON COMMIT DROP")
     execute_values(cur, "INSERT INTO _wd VALUES %s",
@@ -126,6 +130,9 @@ def match_items(cur: Any, items: list[wikidata.Item], *, source_id: str) -> int:
     matches = cur.fetchall()
     cur.execute("SELECT qid, label, register_digits, websites FROM _wd")
     item_by_qid = {row[0]: row for row in cur.fetchall()}
+    cur.execute("SELECT external_id, company_id::text FROM public.company_source_records WHERE source_id = %s",
+                (source_id,))
+    left = moved_from(dict(cur.fetchall()), {qid: str(company_id) for qid, company_id, _, _ in matches})
     rows = []
     for qid, company_id, method, confidence in matches:
         _, label, digits, websites = item_by_qid[qid]
@@ -140,33 +147,49 @@ def match_items(cur: Any, items: list[wikidata.Item], *, source_id: str) -> int:
         ON CONFLICT (source_id, external_id) DO UPDATE SET
           company_id = EXCLUDED.company_id,
           source_company_name = EXCLUDED.source_company_name,
-          -- Keep when it was last verified; new websites, another company or a
-          -- record that was inactive (its websites dropped to 0) are checked again.
-          source_payload = EXCLUDED.source_payload || jsonb_build_object('verified_at',
+          -- Keep when it was last verified; new websites or another company are checked again.
+          -- What it proved stays only while it names the same company.
+          source_payload = EXCLUDED.source_payload || jsonb_build_object(
+            'verified_at',
             CASE WHEN public.company_source_records.source_payload -> 'websites' = EXCLUDED.source_payload -> 'websites'
                   AND public.company_source_records.company_id = EXCLUDED.company_id
-                  AND public.company_source_records.is_active
-                 THEN public.company_source_records.source_payload -> 'verified_at' END),
+                 THEN public.company_source_records.source_payload -> 'verified_at' END,
+            'proven_urls',
+            CASE WHEN public.company_source_records.company_id = EXCLUDED.company_id
+                 THEN public.company_source_records.source_payload -> 'proven_urls' END),
           match_method = EXCLUDED.match_method,
           match_confidence = EXCLUDED.match_confidence,
           matched_at = now(), last_seen_at = now(), last_synced_at = now(), is_active = true
     """, rows, template="(%s, %s, %s, %s, %s, %s, %s, %s, now(), true)", page_size=1000)
-    # An item that no longer matches keeps its record, inactive: never deleted.
+    # An item that no longer matches keeps its record, inactive: never deleted, still verified.
     cur.execute("UPDATE public.company_source_records SET is_active = false"
                 " WHERE source_id = %s AND is_active AND NOT (external_id = ANY(%s))",
                 (source_id, [m[0] for m in matches]))
-    # Its websites drop to 0 as well, and so do those it gave a company it no longer matches.
+    return len(matches), demote_unproven(cur, source_id=source_id, company_ids=sorted(left))
+
+
+def moved_from(previous: dict[str, str], current: dict[str, str]) -> set[str]:
+    """Companies an item matched before and now matches another company instead."""
+    return {company_id for qid, company_id in previous.items() if current.get(qid, company_id) != company_id}
+
+
+def demote_unproven(cur: Any, *, source_id: str, company_ids: list[str]) -> int:
+    """Set these companies' Wikidata URLs to 0 unless a record of theirs still proves them."""
+    if not company_ids:
+        return 0
     cur.execute(
         """
         UPDATE public.company_field_observations o SET confidence = 0, updated_at = now()
-        FROM public.company_source_records r
-        WHERE o.company_source_record_id = r.id AND r.source_id = %s
-          AND (NOT r.is_active OR o.company_id <> r.company_id)
-          AND o.field_name = ANY(%s) AND o.confidence > 0
+        WHERE o.source_id = %s AND o.company_id = ANY(%s::uuid[]) AND o.field_name = ANY(%s)
+          AND o.confidence > 0
+          AND NOT EXISTS (
+            SELECT 1 FROM public.company_source_records r
+            WHERE r.source_id = o.source_id AND r.company_id = o.company_id
+              AND r.source_payload -> 'proven_urls' ? o.value_text)
         """,
-        (source_id, _URL_FIELDS),
+        (source_id, company_ids, _URL_FIELDS),
     )
-    return len(matches)
+    return cur.rowcount
 
 
 # --- verify ---------------------------------------------------------------------------------
@@ -183,7 +206,7 @@ def run_verify() -> int:
                 """
                 SELECT r.id, r.company_id::text, r.source_payload
                 FROM public.company_source_records r
-                WHERE r.source_id = %s AND r.is_active
+                WHERE r.source_id = %s
                   AND (r.source_payload ->> 'verified_at' IS NULL
                        OR (r.source_payload ->> 'verified_at')::timestamptz < now() - %s * interval '1 day')
                 ORDER BY r.source_payload ->> 'verified_at' NULLS FIRST, r.id
@@ -242,10 +265,10 @@ def _companies(cur: Any, company_ids: list[str]) -> dict[str, CompanyCandidate]:
 
 def write_answers(cur: Any, *, company_id: str, record_id: str, source_id: str, sync_run_id: str,
                   qid: str, answers: list[dict[str, Any]]) -> None:
-    """Every verified URL as an observation, filed like discovery's; earlier ones not confirmed drop to 0."""
-    written = []
+    """Every verified URL as an observation, filed like discovery's; earlier ones no record of this
+    company proves any more drop to 0."""
     for answer in answers:
-        written.append(insert_text_observation(
+        insert_text_observation(
             cur, company_id=company_id, source_record_id=record_id, source_id=source_id,
             sync_run_id=sync_run_id, field_name=field_name_for(answer), value_text=answer["url"],
             confidence=answer["confidence"],
@@ -256,20 +279,13 @@ def write_answers(cur: Any, *, company_id: str, record_id: str, source_id: str, 
                 "matched_url": answer["imprint_url"] or answer["url"], "imprint_url": answer["imprint_url"],
                 "register_number_seen": answer["register_number_seen"],
             },
-        ))
-    cur.execute(
-        """
-        UPDATE public.company_field_observations SET confidence = 0, updated_at = now()
-        WHERE company_id = %s AND company_source_record_id = %s AND field_name = ANY(%s)
-          AND NOT (id = ANY(%s::uuid[])) AND confidence > 0
-        """,
-        (company_id, record_id, _URL_FIELDS, [str(w) for w in written]),
-    )
+        )
     cur.execute(
         "UPDATE public.company_source_records SET source_payload = source_payload || jsonb_build_object("
-        "'verified_at', now()), last_synced_at = now() WHERE id = %s",
-        (record_id,),
+        "'verified_at', now(), 'proven_urls', %s), last_synced_at = now() WHERE id = %s",
+        (Json(sorted({answer["url"] for answer in answers})), record_id),
     )
+    demote_unproven(cur, source_id=source_id, company_ids=[company_id])
 
 
 def is_full_batch(taken: int | None) -> bool:
@@ -296,10 +312,12 @@ def _make_dag():  # noqa: ANN201
         schedule="@daily", start_date=datetime(2026, 10, 1, tzinfo=timezone.utc), catchup=False,
         max_active_runs=1, tags=["sources", "websites", "wikidata"],
     ) as dag:
-        match = pipeline_task("match_items", run_match)
+        match = pipeline_task("match_items", run_match, returns=True)
         verify = pipeline_task("verify_websites", run_verify, returns=True)
         took_any = ShortCircuitOperator(
-            task_id="took_any", python_callable=lambda ti: bool(ti.xcom_pull(task_ids="verify_websites")),
+            task_id="took_any",
+            python_callable=lambda ti: bool(ti.xcom_pull(task_ids="match_items")
+                                            or ti.xcom_pull(task_ids="verify_websites")),
         )
         coordinate = TriggerDagRunOperator(
             task_id="trigger_pipeline_coordinator", trigger_dag_id="pipeline_coordinator",

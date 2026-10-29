@@ -87,7 +87,11 @@ Impressum pages carry managing-director names.
   bar. Measured on a copy of the Berlin database on 2026-10-30: 531 companies matched (31 by register
   number and name), 229 websites proven (209 by the register number on the page), 139 of them for
   companies discovery had found nothing for; 57 agreed with discovery's URL, 34 named another one.
-  Shown websites went from 6,015 to 6,229. No result was hand-checked.
+  Shown websites went from 6,015 to 6,229. No result was hand-checked. The page, not the match,
+  proves a website: an item that stops matching keeps its record, inactive, and is still checked
+  every 90 days. A URL drops to 0 only when no Wikidata record of that company still proves it
+  (`proven_urls` in the record): its page stopped naming the company, or its item now matches
+  another company.
 - **OpenStreetMap** stays in code but is off (`WEBSITE_DISCOVERY_OSM=false`): the public
   overpass-api.de refused our requests, and it found 3 websites in 1,000 active Berlin companies.
 
