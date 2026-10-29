@@ -1,36 +1,30 @@
 # CLAUDE.md
 
-Guidance for Claude Code working in this repository.
+This file is a map: one line per rule that cost somebody real time, plus a link to the detail.
 
-## Where the detail lives
-
-This file is a map. It holds only what has cost somebody real time when they got it wrong; detail
-goes to the repo docs and this file keeps the one-line rule plus the link.
-
-- **The target design and the order of the next PRs: issue #18.** Read it before changing the schema,
-  adding a source, or building a DAG.
-- **The app** lives in its own repo, `technologiestiftung/unternehmensdaten-app` (Next.js, reads through
-  Hasura with the user's Keycloak token). This repo owns what it reads: migrations, `hasura/metadata/`,
+- **Target design and next PRs: issue #18.** Read it before changing the schema, adding a source, or
+  building a DAG.
+- **The app** is `technologiestiftung/unternehmensdaten-app` (Next.js, reads through Hasura with the
+  user's Keycloak token). This repo owns what it reads: migrations, `hasura/metadata/`,
   `keycloak/datahub-realm.json`.
-- **Docs:** [docs/README.md](docs/README.md) is the index. The module docstrings are long on purpose
-  and are the real documentation; `airflow/dags/enrichment/__init__.py` maps the library.
+- **Docs:** [docs/README.md](docs/README.md). The module docstrings are the real documentation;
+  `airflow/dags/enrichment/__init__.py` maps the library.
 
-Every `.md` here is written for a smart 18-year-old who has never seen this project, German company
-registers, or Airflow: explain a thing before naming it, short sentences, **numbers not adjectives**,
-and keep the caveat — if a number came from 1,000 companies, say so.
+Every `.md` is written for a smart 18-year-old who has never seen this project, German registers or
+Airflow: explain before naming, short sentences, **numbers not adjectives**, and keep the caveat (if
+a number came from 1,000 companies, say so).
 
 ## What this is
 
-A Postgres database of **Berlin** companies, filled from several sources, every value traceable.
-Airflow orchestrates, Flyway owns all schema, Python writes with psycopg2. It runs on the Berlin Data
-Hub (CIVITAS/CORE); this repo emulates the hub locally ([datahub-emulation](docs/datahub-emulation.md)).
+A Postgres database of **Berlin** companies from several sources, every value traceable. Airflow
+orchestrates, Flyway owns all schema, Python writes with psycopg2. It runs on the Berlin Data Hub
+(CIVITAS/CORE); this repo emulates the hub locally ([datahub-emulation](docs/datahub-emulation.md)).
 
-**The data is example data.** `unternehmensdatenbank` holds 296,486 companies registered in
-Berlin from OffeneRegister (a Handelsregister snapshot from 2017–2019; 142,571 active then). The final
-source is Fusionbase (not delivered yet). The Osnabrück example data was removed on 2026-10-28; the
-rules in the docs still apply, the numbers measured on it do not.
+**The data is example data:** 296,486 Berlin companies from OffeneRegister (a 2017–2019 snapshot;
+142,571 active then). The final source is Fusionbase (not delivered yet). The numbers in the rule
+docs were measured on the removed Osnabrück data; the rules still apply.
 
-Postgres 15 + PostGIS (port **5433**) · Airflow 3.2.0 (Airflow 3 API — `airflow.providers.standard`,
+Postgres 15 + PostGIS (port **5433**) · Airflow 3.2.0 (Airflow 3 API: `airflow.providers.standard`,
 not `airflow.operators`) · Flyway 12.
 
 ## Commands and access
@@ -43,92 +37,69 @@ scripts/free_checks.sh                              # every free check, as CI ru
 ```
 
 - Airflow UI **http://localhost:8082** (`airflow`/`airflow`). **Not 8080**: another Airflow on the
-  developer's machine owns that port, and logging in there gives "invalid login".
-- Postgres `localhost:5433`, user `app`/`app`. Databases: `unternehmensdatenbank` (the Berlin example
-  data) and `unternehmensdatenbank_staging` (empty). Airflow and Hasura use the one named by
-  `APP_DB_NAME` in `.env`. **Port 5432 on this machine is a different
-  Postgres** — a tool pointed there sees an empty or foreign database.
-- Optional profiles: `geo` (local Overpass for OSM matching), `debug`, `datahub` (Keycloak, Hasura, S3).
-
-**Three DB roles, as on the hub:** `app` owns the schema (Flyway, host scripts), DAGs run as `writer`
-(rows only, no DDL), Hasura as `reader`. A DAG that needs DDL is wrong, not the grant.
-
-## Environment
-
-`cp .env.example .env`; `dev-up.sh` fills in a Fernet key. All DAGs are **disabled by default** via
-`ENABLE_*` flags checked at task runtime, so a missing flag fails the task rather than hiding the
-DAG. A DAG needs **two** switches: its flag *and* unpausing in Airflow.
+  developer's machine owns it.
+- Postgres `localhost:5433`, `app`/`app`. Databases `unternehmensdatenbank` (the data) and
+  `unternehmensdatenbank_staging` (empty); Airflow and Hasura use `APP_DB_NAME` from `.env`.
+  **Port 5432 is a different Postgres.**
+- Profiles: `debug`, `datahub` (Keycloak, Hasura, S3).
+- **Three DB roles, as on the hub:** `app` owns the schema (Flyway, host scripts), DAGs run as
+  `writer` (rows only, no DDL), Hasura as `reader`. A DAG that needs DDL is wrong, not the grant.
+- `cp .env.example .env`; `dev-up.sh` fills in a Fernet key. Every DAG is **off by default** via an
+  `ENABLE_*` flag checked at task runtime, and needs **two** switches: the flag *and* unpausing.
 
 ## Architecture
 
-Multi-source canonical resolution, detail in [data-model](docs/data-model.md):
-`sources` → `company_source_records` (the whole record a source delivered) →
-`company_field_observations` (one row per field claim, with a confidence) →
-`pipeline_coordinator` → `company_canonical_field_sources` → views (`v_companies_enriched`,
-`v_company_profile` for the app).
+`sources` → `company_source_records` (the whole record) → `company_field_observations` (one row per
+field claim, with a confidence) → `pipeline_coordinator` → `company_canonical_field_sources` → views
+(`v_companies_enriched`, `v_company_profile`). Detail: [data-model](docs/data-model.md).
 
-- **`pipeline_coordinator` is the only thing that decides which observation wins a field.** Sources
-  write observations and nothing else, then trigger it.
-- **Priority is sorted before confidence, so it is absolute** (decided again 2026-10-28): nothing at
-  priority 100 beats anything at 50, at any confidence. Within one priority, confidence decides.
-- **`website_url` is a view column, not a table column.** Enriched fields live in
+- **`pipeline_coordinator` alone decides which observation wins.** Sources write observations, then
+  trigger it.
+- **Priority sorts before confidence, so it is absolute:** nothing at priority 100 beats anything at
+  50. Within one priority, confidence decides.
+- **`website_url` is a view column**, not a table column; enriched fields live in
   `company_canonical_field_sources`, read through `v_companies_enriched`.
-- **Company identity is a random UUID, never the name.** Names repeat and change (32,170 Berlin
-  companies have a former name). Matching across sources is by identifiers first, fuzzy second (#18).
-- **OffeneRegister's full record, officers and raw address included, sits in its source record.**
-  That is personal data: `company_source_records` is not exposed through Hasura, and nothing of it
-  leaves local development without a privacy review (TSB rules). Reviewed so far (2026-10-28, #18):
-  comparing officers in memory, and showing current Geschäftsführer in the app
-  (`scripts/import_register_managers.py`). Not the hub, not an export.
+- **Company identity is a random UUID, never the name** (32,170 Berlin companies have a former name).
+  Matching: identifiers first, fuzzy second; `match_method`/`match_confidence` on the source record.
+  Merging never deletes (`companies.merged_into`).
+- **`company_source_records` is not exposed through Hasura.** OffeneRegister's full record (officers,
+  raw address) sits there.
 
 ## DAGs
 
-[airflow/dags/README.md](airflow/dags/README.md): `pipeline_coordinator`, `website_discovery`,
-`website_contacts` and `website_keywords` (contacts and keywords from the proven website),
-`register_announcements` (Berlin's register announcements, `@weekly`; creates companies it does not find),
-`manager_ner_extract` / `manager_ner_train` (spaCy, retrained from the app's votes),
-`foerderkatalog` and `berlin_zuwendungen` (grants, `@monthly`), and the library `enrichment/`.
-`berlin_gewerbedaten` was removed on 2026-10-28: Berlin's open trade data is anonymised (no name,
-no street, no register number), so it cannot be linked to a company. The Technologiefeld has no DAG
-yet; it is rebuilt on the library next (#18).
+[airflow/dags/README.md](airflow/dags/README.md).
 
-- **`email` and `phone` are stored, never resolved.** `website_contacts` writes them, but a resolved
-  value reaches the app and `v_field_provenance`, and a sole trader's phone is personal data. They
-  stay unresolved until a privacy review clears them.
-- **A register announcement is a hint, never the status.** A deletion announcement does not make a
-  company `erloschen`; `register_announcement` stands next to `register_status`. The DAG reads only the
-  result list, never a detail page: those name liquidators and officers.
-- **A keyword is never a person's name.** `activity_keywords.is_candidate` drops anything
-  `imprint_extractor.looks_like_person_name` accepts, at the cost of some real two-word keywords.
-
-- DAG packages import their own modules **by package name** (`from enrichment.confidence import …`).
-  A bare `from scorer import` after a `sys.path` insert once handed one package another's module.
-- On the hub, DAG tasks run as **KubernetesPodOperator** pods from our pipelines image, so code
-  must not rely on a shared disk: state belongs in Postgres, not in `airflow/data/` files. Build a task
-  with `pipeline_task(task_id, run_function)`, never a bare `PythonOperator` ([release](docs/release.md)).
+- **`email` and `phone` are stored, never resolved.** A resolved value reaches the app and
+  `v_field_provenance`.
+- **A register announcement is a hint, never the status.** `register_announcement` stands next to
+  `register_status`. The DAG reads only the result list, never a detail page.
+- **A keyword is never a person's name:** `activity_keywords.is_candidate` drops anything
+  `imprint_extractor.looks_like_person_name` accepts.
+- **Import DAG modules by package name** (`from enrichment.confidence import …`). A bare import
+  after a `sys.path` insert once handed one package another's module.
+- **On the hub, tasks are KubernetesPodOperator pods** from our pipelines image, with no shared disk:
+  state belongs in Postgres (`pipeline_state`), never in `airflow/data/`. Build a task with
+  `pipeline_task(task_id, run_function)`, never a bare `PythonOperator` ([release](docs/release.md)).
 
 ## Website discovery rules (`enrichment/`)
 
 Read [website-verification](docs/website-verification.md) before touching `confidence.py`,
 `own_site.py`, or anything that reads a page.
 
-- **A register number on a page proves the page is *about* a company, never that it *is* that
-  company's site.** Registry pages, insolvency trackers and directories all quote them.
-  `own_site.is_own_site_candidate` is the single predicate for that call; a looser one anywhere else
-  is the recurring bug.
-- **"A real business site" is not "THAT company's site."** Every German business site has an
-  Impressum, a VAT number and a contact email at its own domain. That evidence may add score but
-  never makes a page the company's website: only `confidence.identifies_company` does, and it asks
-  for the own register number, a Geschäftsführer who is a register officer, or name AND postcode
-  together. Letting the Impressum alone count once promoted 190 wrong websites.
-- **Never grow a list of bad domains or words.** Genericness is *measured*:
-  `name_frequency.common_words` counts company names, `common_email_domains` counts mapped businesses.
-- **`enrichment/observations.py` is the write path for discovery results.** Its `evidence` set must be
-  `sorted()` before `Json()`: a live `set` is not serialisable.
-- Search-engine discovery (paid APIs, SearXNG, Ollama) was measured and removed; a new search source
-  must feed the same verification and `confidence.py`, never a scorer of its own.
+- **A register number on a page proves the page is *about* a company, not that it *is* its site.**
+  `own_site.is_own_site_candidate` is the single predicate; a looser one elsewhere is the recurring bug.
+- **"A real business site" is not "THAT company's site."** Impressum, VAT number and own-domain email
+  may add score, never decide. Only `confidence.identifies_company` does: own register number, a
+  Geschäftsführer who is a register officer, or name AND postcode. The Impressum alone once promoted
+  190 wrong websites.
+- **Never grow a list of bad domains or words.** Genericness is measured
+  (`name_frequency.common_words`, `common_email_domains`).
+- **`enrichment/observations.py` is the write path for discovery.** `sorted()` the `evidence` set
+  before `Json()`.
+- Search-engine discovery was measured and removed; a new search source must feed the same
+  verification and `confidence.py`. The OpenStreetMap step is off (`WEBSITE_DISCOVERY_OSM=false`).
 
-## Industry classification — THREE columns, never mixed
+## Industry classification: THREE columns, never mixed
 
 | | Technologiefeld | WZ cluster | purpose_field |
 |---|---|---|---|
@@ -140,64 +111,49 @@ Details: [branch-classification](docs/branch-classification.md),
 [purpose-classification](docs/purpose-classification.md). OffeneRegister has no WZ code and no
 purpose, so for Berlin only the Technologiefeld can be filled today.
 
-1. **A WZ code may never fill the Technologiefeld.** `classify()` has no WZ parameter; the guard fails
-   if one reappears.
-2. **A Technologiefeld requires a website somebody downloaded**, and the gate is Postgres, not a file.
-3. **`NONE` has four reasons kept apart**: `no_website`, `torn`, `no_keyword`, `no_text`. Never add two.
+1. **A WZ code may never fill the Technologiefeld.** `classify()` has no WZ parameter; a guard checks it.
+2. **A Technologiefeld requires a downloaded website**, and the gate is Postgres, not a file.
+3. **`NONE` has four reasons kept apart:** `no_website`, `torn`, `no_keyword`, `no_text`.
 4. **Never match a keyword inside a German compound.** `BRANCH_HYPHEN_IS_BOUNDARY` is **off**, measured.
 5. **A keyword wrong for its field is deleted from the YAML with the count in a comment**, never a
    stop-list in code.
-6. **Keywords decide; the spaCy text classifier only fills gaps**, and is promoted only when it beats
-   the keywords on companies people have voted on.
+6. **Keywords decide; the spaCy classifier only fills gaps**, promoted only when it beats the
+   keywords on companies people voted on.
 7. **No row of any column is hand-checked yet.** Agreement is not correctness.
 
-## Migrations — one baseline, V1
+## Migrations
 
-`V1__baseline.sql` is the whole schema as of 2026-10-28: everything before it was squashed three times
-while nothing was deployed (last: V1 + V10), and a database built from it matches one built from the old files exactly
-(schema, grants, seed rows). A local database migrated before the squash needs its Flyway history
-reset once ([data-model](docs/data-model.md), "Migration strategy"). From here on forward-only: never edit a migration that has run anywhere shared. Flyway is a one-shot
-service under `--profile tools` and does **not** run with `docker compose up`. On the hub it runs as
-the app's initContainer from the migration image ([release](docs/release.md)).
+`V1__baseline.sql` is the whole schema as of 2026-10-28 (squashed while nothing was deployed), plus
+`V2__source_overview.sql`. A database migrated before the squash needs its Flyway history reset once
+([data-model](docs/data-model.md), "Migration strategy"). **Forward-only:** never edit a migration
+that ran anywhere shared. Flyway runs under `--profile tools`, not with `docker compose up`; on the
+hub as the app's initContainer ([release](docs/release.md)).
 
-- **Matching:** a source record finds its company through `company_identifiers` first, a fuzzy
-  score second, and records `match_method`/`match_confidence` on its source record. Merging never
-  deletes (`companies.merged_into`).
-- **Pipeline state** goes into `pipeline_state`, never a file: the hub's pods share no disk.
-- **The company profile is stored.** `v_company_profile` reads `company_profile_mv`; anything
-  that changes companies or their published values must end with `refresh_company_profile()`
-  (the coordinator does). A filter on the live view took up to 45 s.
-- **Grant links** are a table, refreshed by `refresh_company_funding_links()` after grants or
-  companies load. Never link grants on read again: it made the company list take 71 s.
-- **The sources page reads stored counts (`V2__source_overview.sql`)**, refreshed by
-  `refresh_company_profile()` too. Counts only: a value a source may not show yet stays unexposed.
-- **A new profile column means rebuilding `company_profile_mv`.** It froze `p.*` when it was
-  created, so `CREATE OR REPLACE` on `v_company_profile_live` alone never reaches the app. The
-  activity-keywords migration (`V8__activity_keywords.sql` in git history, before the squash) shows how.
-- **Feedback and provenance:** users can vote on every shown field, and `v_field_provenance`
-  says where every shown value came from. A new shown field needs its key in both.
-
-**The observation upsert key is a partial unique index (`uq_obs_company_field_source_value`), and
-`insert_text_observation` in `source_enrichment_common.py` repeats its predicate verbatim in its
-`ON CONFLICT (...) WHERE`.
-The two must stay identical** — Postgres infers the partial index from the predicate. Widen one,
-widen the other, same commit.
+- **The company profile is stored.** `v_company_profile` reads `company_profile_mv`; anything that
+  changes companies or published values ends with `refresh_company_profile()` (the coordinator does).
+  A filter on the live view took up to 45 s.
+- **A new profile column means rebuilding `company_profile_mv`:** it froze `p.*`, so
+  `CREATE OR REPLACE` on `v_company_profile_live` alone never reaches the app.
+- **Grant links are a table**, refreshed by `refresh_company_funding_links()`. Linking on read made
+  the company list take 71 s.
+- **The sources page reads stored counts** (`V2`), refreshed by `refresh_company_profile()`. Counts
+  only, never a value.
+- **A new shown field needs its key in feedback and `v_field_provenance`.**
+- **The observation upsert key is a partial unique index (`uq_obs_company_field_source_value`), and
+  `insert_text_observation` repeats its predicate verbatim in `ON CONFLICT (...) WHERE`.** Widen one,
+  widen the other, same commit.
 
 ## Checks
 
-`scripts/free_checks.sh` is the one list: ruff, the unit tests, and seven rule guards. No database,
-no network, no model. CI, no-mistakes and both Claude hooks run it (the edit hook runs its guard
-lines, the commit hook the whole script). What each guard defends:
-[guards-and-tests](docs/guards-and-tests.md). Two rules that keep being got wrong:
+`scripts/free_checks.sh`: ruff, unit tests, seven guards. No database, network or model. CI,
+no-mistakes and both Claude hooks run it ([guards-and-tests](docs/guards-and-tests.md)).
 
-1. **Import the rule a guard checks, never restate it** — a check that rebuilds the logic agrees with
-   itself no matter what the real code does.
+1. **Import the rule a guard checks, never restate it.**
 2. **Assert on the syntax tree, not the source text**, when the forbidden thing is discussed in a
-   docstring. A plain `in` test once found `Handel` inside `Handelsregister`.
+   docstring (a plain `in` test found `Handel` inside `Handelsregister`).
 
-**Shipping:** if `no-mistakes` is installed (`command -v no-mistakes`), validate and open the PR with
-`/no-mistakes`. Without it, the normal branch + PR flow. It is optional for contributors.
+**Shipping:** with `no-mistakes` installed, validate and open the PR with `/no-mistakes`; otherwise
+the normal branch + PR flow.
 
-**Git Bash caveat:** `docker compose exec -e PYTHONPATH=/opt/airflow/dags` fails under Git Bash,
-which rewrites the path to `C:/Program Files/Git/opt/airflow/dags`. Use PowerShell, or prefix
-`MSYS_NO_PATHCONV=1`.
+**Git Bash:** `docker compose exec -e PYTHONPATH=/opt/airflow/dags` breaks (path rewritten to
+`C:/Program Files/Git/...`). Use PowerShell or `MSYS_NO_PATHCONV=1`.

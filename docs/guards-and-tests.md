@@ -1,73 +1,56 @@
-# Guards and tests — what checks what, and what each one is defending
+# Guards and tests
 
-This project has two kinds of automated check, and they are easy to confuse.
+**Guards** (`scripts/check_*.py`) check the **rules**: does the code still refuse a directory page,
+does a keyword still fail to match inside a German compound. **Unit tests** (`tests/unit/`) check
+that a function does what it says. Both are free: no API, no model, no database, no network; about
+15 seconds together.
 
-**Guards** are scripts in `scripts/check_*.py`. They check the **rules**: does the code still refuse
-a directory page, does a keyword still fail to match inside a German compound word. **Unit tests**
-are pytest modules in `tests/unit/`. They check that a function does what it says.
-
-Both are free: no API call, no language model, no database, no network. All of them together take
-about 15 seconds.
-
-Neither kind checks whether the answers are *correct*. Nothing in this repo does, because **not one
-row of the industry columns has ever been hand-labelled.**
+Neither checks whether the answers are *correct*: not one row of the industry columns has been
+hand-labelled.
 
 ## One list, four callers
 
-`scripts/free_checks.sh` runs ruff, the unit tests and the seven guards. It is the only list:
+`scripts/free_checks.sh` runs ruff, the unit tests and the seven guards. **Add a check there, never
+to a caller**, or the callers drift apart.
 
 | caller | how |
 |---|---|
-| CI (`.github/workflows/checks.yml`) | on every pull request and every push to `main` |
+| CI (`.github/workflows/checks.yml`) | every pull request and every push to `main` |
 | no-mistakes (`.no-mistakes.yaml`) | its test step, in a `python:3.12-slim` container |
-| the commit hook (`.claude/hooks/run_checks_before_commit.py`) | the whole script, before Claude commits |
-| the edit hook (`.claude/hooks/guard_after_edit.py`) | ruff on the edited file, then the guard lines of the script |
-
-**Add a check to `free_checks.sh`, never to one of its callers**, or the callers drift apart.
-
-Until 2026-10-28 two more test modules pinned the numbers of the Osnabrück example data and needed
-a running Postgres. They were removed with that data.
+| commit hook (`run_checks_before_commit.py`) | the whole script, before Claude commits |
+| edit hook (`guard_after_edit.py`) | ruff on the edited file, then the guard lines |
 
 ## The seven guards
 
-| guard | what it defends |
+| guard | defends |
 |---|---|
-| `check_branch_classifier.py` | the compound rule and the hyphen knob, keyword weights, the WZ lookup, the services-page choice |
-| `check_purpose_branch.py` | column 3: outcomes stay disjoint, the website gate, WZ code and register status cannot get in, the 40-character floor, `DISCOVERY_ACTIVE_ONLY` is a constant SQL fragment |
-| `check_branch_observations.py` | the classification write path: every field the emitter writes is covered by the upsert index predicate *and* `insert_text_observation`'s `ON CONFLICT`; no `resolve_*` names a `_withheld` field |
-| `check_website_discovery.py` | URL guessing, the confidence ladder, what `_page_evidence` takes from a page, JSON-LD, postcodes, register numbers |
-| `check_own_site_filter.py` | real URLs guarding `own_site.is_own_site_candidate` — directories, registers and portals are never a company's own site |
+| `check_branch_classifier.py` | the compound rule and hyphen knob, keyword weights, WZ lookup, services-page choice |
+| `check_purpose_branch.py` | disjoint outcomes, the website gate, no WZ code or register status, the 40-character floor, `DISCOVERY_ACTIVE_ONLY` as a constant SQL fragment |
+| `check_branch_observations.py` | every field the emitter writes is covered by the upsert index predicate *and* `insert_text_observation`'s `ON CONFLICT`; no `resolve_*` names a `_withheld` field |
+| `check_website_discovery.py` | URL guessing, the confidence ladder, `_page_evidence`, JSON-LD, postcodes, register numbers |
+| `check_own_site_filter.py` | real URLs: directories, registers and portals are never a company's own site |
 | `check_imprint_owner_extraction.py` | real Impressum layouts guarding the Geschäftsführer regex |
 | `check_osm_match.py` | hand-checked OpenStreetMap matches guarding `osm_snapshot` |
 
-### Two rules a guard here must follow
+**Two rules for a guard**, both learned the hard way:
 
-Both were learned by writing a guard that did not.
-
-1. **Import the rule you are checking. Never restate it.** A check that rebuilds the logic agrees
-   with itself no matter what the real code does.
-2. **Assert on the syntax tree, not the source text**, when the thing you are forbidding is
-   *discussed* in a docstring. `check_purpose_branch.py` proves `purpose_branch` never calls
-   `classify()` by walking the parsed AST, because the module docstring explains the website gate at
-   length and a substring search finds the prose. The same trap caught a check for "no Berlin field
-   name in the prompt": a plain `in` test found **`Handel` inside `Handelsregister`**. Use
-   `_pattern_for`, which is the project's own compound rule.
+1. **Import the rule you check, never restate it.** A check that rebuilds the logic agrees with
+   itself no matter what the real code does.
+2. **Assert on the syntax tree, not the source text**, when the forbidden thing is discussed in a
+   docstring. A plain `in` test once found `Handel` inside `Handelsregister`. Use `_pattern_for`,
+   the project's own compound rule.
 
 ## The hooks
 
-They live in `.claude/hooks/` and are wired from `.claude/settings.json`; `settings.local.json`
-(personal permissions) stays out of git.
+In `.claude/hooks/`, wired from `.claude/settings.json` (`settings.local.json` stays out of git).
 
-- **`guard_after_edit.py`** (`PostToolUse` on Write|Edit): ruff on any edited `.py`, then the guards
-  when the file is under `airflow/dags/`, `scripts/` or `tests/`. A listed guard that does not exist
-  blocks the edit with a message: a guard that silently stops running is the failure guards exist to
-  catch. The hook timeout is 60 s, and a guard that overruns it blocks the edit.
-- **`run_checks_before_commit.py`** (`PreToolUse` on `git commit`): ruff on the staged files, then
+- **`guard_after_edit.py`** (after Write/Edit): ruff on an edited `.py`, then the guards when the
+  file is under `airflow/dags/`, `scripts/` or `tests/`. A listed guard that is missing blocks the
+  edit. Timeout 60 s.
+- **`run_checks_before_commit.py`** (before `git commit`): ruff on staged files, then
   `free_checks.sh`. A failure blocks the commit.
-- **`ask_before_push.py` and `confirm_before_commit.py`**: two prompts, no checks. Every `git push`
-  and `git commit` from Claude becomes a permission prompt showing the branch, the remote, and the
-  staged diff. Exit 0 with no output allows silently, exit 2 blocks, the JSON `ask` decision stops and
-  lets the developer decide. A block wins over an ask, so a commit that fails the checks never
-  reaches the dialog.
-- **`block_long_python.py`**: stops Claude starting the long, networked runs. The developer starts
-  those in a terminal where the log streams live.
+- **`ask_before_push.py`, `confirm_before_commit.py`**: every `git push` and `git commit` from Claude
+  becomes a prompt showing branch, remote and staged diff. A failing check blocks before the prompt.
+- **`ask_before_new_file.py`**: creating a file that does not exist yet becomes a prompt; editing an
+  existing one does not.
+- **`check_commit_message.py`**: a commit message body of at most 15 non-blank lines.

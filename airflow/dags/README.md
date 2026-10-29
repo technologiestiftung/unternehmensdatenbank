@@ -1,42 +1,38 @@
 # DAGs
 
-Eight DAG packages and one library. The Technologiefeld has no DAG yet; it is rebuilt on the
-library next (issue #18).
+Eight DAG packages and one library. Each DAG runs only with its `ENABLE_*` flag `true` **and**
+unpaused in Airflow. The flag is checked when the task runs, so a disabled DAG still shows and fails
+with a clear message.
 
 | package | DAG id | schedule | flag | what it does |
 |---|---|---|---|---|
 | `pipeline_coordinator/` | `pipeline_coordinator` | triggered | — | the ONLY thing that decides which observation wins a field |
-| `manager_ner/` | `manager_ner_extract` | triggered | `ENABLE_MANAGER_NER` | spaCy reads the Impressum of companies with a website and writes Geschäftsführer names (source `spacy_ner`) |
-| | `manager_ner_train` | `@weekly` | `ENABLE_MANAGER_NER` | turns the app's votes into training examples; promotes a model only if it beats the current one on a held-out fifth |
-| `website_discovery/` | `website_discovery` | `@hourly`, and each full batch starts the next | `ENABLE_WEBSITE_DISCOVERY` | guesses each company's domains, reads the Impressum, and keeps only websites the page proves are the company's (`confidence.identifies_company`). Works through all companies by itself; a company is checked again after `WEBSITE_DISCOVERY_RECHECK_DAYS` (90) |
-| `website_contacts/` | `website_contacts` | triggered | `ENABLE_WEBSITE_CONTACTS` | the company's own `info@`-style email and phone from the Impressum of its proven website (source `impressum_contacts`). **Stored, not published**: nothing resolves `email`/`phone` until a privacy review. A failed read (no answer, no Impressum) is tried again, 3 times at most |
-| `website_keywords/` | `website_keywords` | triggered | `ENABLE_WEBSITE_KEYWORDS` | product and service keywords from the website's meta keywords and the headings of its services/products pages; generic ones measured out over all companies read; publishes `activity_keywords` (V8) once 500 companies are read; a site that did not load is tried again, 3 times at most |
-| `register_announcements/` | `register_announcements` | `@weekly` | `ENABLE_REGISTER_ANNOUNCEMENTS` | Berlin's register announcements of the last 8 weeks from handelsregister.de (2 requests, list only, never a detail page). Linked by register number, then by name and city (never to a deleted company); a company we do not have is created. Publishes the latest as `register_announcement`, a hint next to `register_status`, never a change of it (V10) |
-| `berlin_zuwendungen/` | `berlin_zuwendungen` | `@monthly` | `ENABLE_BERLIN_ZUWENDUNGEN` | the Land Berlin's own grants (Zuwendungsdatenbank) to HRA/HRB recipients into `company_fundings`, linked by register number (V6) |
-| `foerderkatalog/` | `foerderkatalog` | `@monthly` | `ENABLE_FOERDERKATALOG` | every Berlin grant from the Förderkatalog des Bundes into `company_fundings`; linked to companies on read (`v_company_fundings`) |
-| `enrichment/` | — | — | — | the library: URL patterns, OSM matching, Impressum regex, confidence, industry classification. Its `__init__.py` is the map |
+| `website_discovery/` | `website_discovery` | `@hourly`, a full batch starts the next | `ENABLE_WEBSITE_DISCOVERY` | guesses domains, reads the Impressum, keeps only websites the page proves are the company's (`confidence.identifies_company`). Rechecks after `WEBSITE_DISCOVERY_RECHECK_DAYS` (90). The OpenStreetMap step is off (`WEBSITE_DISCOVERY_OSM=false`): the public Overpass server refused requests |
+| `website_contacts/` | `website_contacts` | triggered | `ENABLE_WEBSITE_CONTACTS` | the company's own `info@`-style email and phone from the Impressum of its proven website (source `impressum_contacts`). Stored, never resolved, so never shown. A failed read is retried, 3 times at most |
+| `website_keywords/` | `website_keywords` | triggered | `ENABLE_WEBSITE_KEYWORDS` | keywords from meta tags and services/products headings; generic ones measured out over all companies read; publishes `activity_keywords` once 500 companies are read; retried 3 times at most |
+| `register_announcements/` | `register_announcements` | `@weekly` | `ENABLE_REGISTER_ANNOUNCEMENTS` | Berlin's register announcements of the last 8 weeks from handelsregister.de (2 requests, the result list only, never a detail page). Linked by register number, then name and city (never to a deleted company); unknown companies are created. Publishes the latest as `register_announcement`, a hint next to `register_status`, never a change of it |
+| `berlin_zuwendungen/` | `berlin_zuwendungen` | `@monthly` | `ENABLE_BERLIN_ZUWENDUNGEN` | Land Berlin grants to HRA/HRB recipients into `company_fundings`, linked by register number |
+| `foerderkatalog/` | `foerderkatalog` | `@monthly` | `ENABLE_FOERDERKATALOG` | every Berlin grant from the Förderkatalog des Bundes into `company_fundings` |
+| `manager_ner/` | `manager_ner_extract` | triggered | `ENABLE_MANAGER_NER` | spaCy reads the Impressum and writes Geschäftsführer names (source `spacy_ner`) |
+| | `manager_ner_train` | `@weekly` | `ENABLE_MANAGER_NER` | turns the app's votes into training data; promotes a model only if it beats the current one on a held-out fifth |
+| `enrichment/` | — | — | — | the library: URL patterns, OSM matching, Impressum regex, confidence, classification. `__init__.py` is the map |
 
-Two locks stop a DAG running: its `ENABLE_*` flag must be `true` **and** it must be unpaused in
-Airflow. The flag is checked when the task runs, not when the file is parsed, so a disabled DAG
-still shows in the UI and fails with a clear message. `foerderkatalog` and `manager_ner_train` then
-run on their schedule by themselves.
-
-Two words you need first:
+Grants are linked to companies by `refresh_company_funding_links()` after a load.
 
 - **observation**: one claim about one field of one company, from one source, with a confidence.
-  Sources write observations and nothing else; they never overwrite each other.
-- **canonical**: the observation that won a field, which is what the app shows. Only
-  `pipeline_coordinator` decides this, by source priority first, then confidence.
+  Sources write observations and nothing else.
+- **canonical**: the observation that won a field, what the app shows. Only `pipeline_coordinator`
+  decides, by source priority first, then confidence.
 
 Shared code:
 
-- `source_enrichment_common.py`: database helpers every source uses: connection (`PG_DSN`),
-  `ensure_source`, `upsert_source_record`, `insert_text_observation`, the batch queries and
-  `DISCOVERY_ACTIVE_ONLY`. `insert_text_observation`'s `ON CONFLICT ... WHERE` repeats the partial
-  index predicate of the observation upsert key (in the baseline migration) verbatim; widen one, widen the other, in the
-  same commit.
-- DAG packages import their modules **by package name** (`from enrichment.confidence import ...`),
-  never as a bare module after a `sys.path` insert: two packages with a same-named file would
-  otherwise get each other's.
+- `source_enrichment_common.py`: the database helpers (`PG_DSN`, `ensure_source`,
+  `upsert_source_record`, `insert_text_observation`, batch queries, `DISCOVERY_ACTIVE_ONLY`).
+  `insert_text_observation`'s `ON CONFLICT ... WHERE` repeats the partial index predicate of the
+  upsert key verbatim: widen one, widen the other, same commit.
+- `pipeline_task.py`: build every task with `pipeline_task(task_id, run)`; it runs in Airflow's
+  Python locally and as a pod on the hub ([release](../../docs/release.md)).
+- Import modules **by package name** (`from enrichment.confidence import ...`), never as a bare
+  module after a `sys.path` insert: two same-named files would get each other's.
 
-Schema changes belong in `db/migrations/`, not here.
+Schema changes belong in `db/migrations/`.

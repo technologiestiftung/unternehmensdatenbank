@@ -160,29 +160,6 @@ services:
         condition: service_healthy
     restart: unless-stopped
 
-  overpass:
-    image: wiktorn/overpass-api:latest
-    profiles:
-      - geo
-    restart: unless-stopped
-    ports:
-      - "${OVERPASS_PORT:-12345}:80"
-    environment:
-      OVERPASS_META: "yes"
-      OVERPASS_MODE: ${OVERPASS_MODE:-init}
-      OVERPASS_PLANET_URL: ${OVERPASS_PLANET_URL:-https://download.geofabrik.de/europe/germany/berlin-latest.osm.pbf}
-      OVERPASS_DIFF_URL: ${OVERPASS_DIFF_URL:-https://download.geofabrik.de/europe/germany/berlin-updates/}
-      OVERPASS_RULES_LOAD: "10"
-      OVERPASS_SPACE: ${OVERPASS_SPACE:-2000000000}
-      OVERPASS_MAX_TIMEOUT: "1000"
-      # Geofabrik only provides PBF; osmium converts it to bz2 in-place before init_osm3s.sh runs.
-      # -F pbf forces input format (osmium would otherwise misread the .bz2 extension).
-      # -F pbf: force input format (osmium would misread the .bz2 extension on a PBF file).
-      # chmod: /db is created 700 by the overpass user; nginx needs +x to reach the dispatcher socket.
-      OVERPASS_PLANET_PREPROCESS: "osmium cat /db/planet.osm.bz2 -F pbf -f osm.bz2 -o /tmp/planet_converted.osm.bz2 && mv /tmp/planet_converted.osm.bz2 /db/planet.osm.bz2 && chmod o+x /db"
-    volumes:
-      - overpass-db:/db
-
   airflow-init:
     <<: *airflow-common
     entrypoint: /bin/bash
@@ -379,4 +356,3 @@ volumes:
   postgres15-data:
   s3-data:
   pgadmin-data:
-  overpass-db:
