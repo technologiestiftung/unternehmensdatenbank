@@ -127,7 +127,25 @@ the survivor.
 
 **Every field the app shows can be voted on** (`extraction_feedback`), under the app's column keys.
 A vote on an empty field has `value = ''` and must be `wrong`, with the missing value as its
-correction. Only the website, Technologiefeld and manager pipelines learn from votes so far.
+correction.
+
+**Corrections are a source** (`user_feedback`, priority 50, V4; DAG `feedback_observations`). Per
+company, field and corrected value, the people who typed it count for it and the people who voted
+the field `correct` count against it. One person net gives confidence 0.30, below every bar (0.50,
+websites 0.35), so nothing shows; two give 0.60 and three or more 0.75, which the coordinator
+publishes over any other source, the register included. Priority 50 is deliberate: register values
+carry 1.0 and verified websites up to 0.99, so at equal priority a correction could never replace a
+wrong name. Nothing is deleted: a withdrawn correction drops to 0 and the source's value is shown
+again. Each correction is checked first (a URL, one of the 77 fields, a number, a date); `fundings`,
+`register_announcement`, `cluster` and `amazon_effect` take none. Only counts are stored, never who.
+
+Tested on a copy of the Berlin database on 2026-10-29: two people correcting a name replaced the
+register's name; one person correcting an address or website changed nothing; two corrections
+against one `correct` vote changed nothing; withdrawing one of two brought the register's name back.
+
+Two models also learn from votes: `manager_ner_train` (names) and the Technologiefeld classifier.
+Each reads the votes itself, since a vote teaches each model something different. The website
+discovery does not learn from votes.
 
 **`v_field_provenance` says where each shown value came from**: source, method, confidence,
 evidence, a link and dates. Register facts carry the date the register was read.

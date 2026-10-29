@@ -74,6 +74,8 @@ field claim, with a confidence) → `pipeline_coordinator` → `company_canonica
 
 - **`email` and `phone` are stored, never resolved.** A resolved value reaches the app and
   `v_field_provenance`.
+- **A correction is a source, shown only when people agree.** `feedback_observations` writes
+  `user_feedback` (priority 50): one person 0.30, never shown; two 0.60. Counts only, never who.
 - **A register announcement is a hint, never the status.** `register_announcement` stands next to
   `register_status`. The DAG reads only the result list, never a detail page.
 - **A keyword is never a person's name:** `activity_keywords.is_candidate` drops anything

@@ -1,6 +1,6 @@
 # DAGs
 
-Eight DAG packages and one library. Every DAG starts paused (Airflow's default,
+Nine DAG packages and one library. Every DAG starts paused (Airflow's default,
 `dags_are_paused_at_creation`); unpausing it in Airflow is the only switch.
 
 | package | DAG id | schedule | what it does |
@@ -12,6 +12,7 @@ Eight DAG packages and one library. Every DAG starts paused (Airflow's default,
 | `register_announcements/` | `register_announcements` | `@weekly` | Berlin's register announcements of the last 8 weeks from handelsregister.de (2 requests, the result list only, never a detail page). Linked by register number, then name and city (never to a deleted company); unknown companies are created. Publishes the latest as `register_announcement`, a hint next to `register_status`, never a change of it |
 | `berlin_zuwendungen/` | `berlin_zuwendungen` | `@monthly` | Land Berlin grants to HRA/HRB recipients into `company_fundings`, linked by register number |
 | `foerderkatalog/` | `foerderkatalog` | `@monthly` | every Berlin grant from the Förderkatalog des Bundes into `company_fundings` |
+| `feedback_observations/` | `feedback_observations` | `@hourly` | people's corrections from the app as observations of `user_feedback` (priority 50); shown once two people agree, never who. Triggers the coordinator only when something changed |
 | `manager_ner/` | `manager_ner_extract` | triggered | spaCy reads the Impressum and writes Geschäftsführer names (source `spacy_ner`) |
 | | `manager_ner_train` | `@weekly` | turns the app's votes into training data; promotes a model only if it beats the current one on a held-out fifth |
 | `enrichment/` | — | — | the library: URL patterns, OSM matching, Impressum regex, confidence, classification. `__init__.py` is the map |

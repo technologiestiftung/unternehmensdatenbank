@@ -13,6 +13,7 @@ from resolver import (
     resolve_activity_keywords,
     resolve_ceo_contact,
     resolve_cluster,
+    resolve_deeptech_and_ai,
     resolve_employee_count,
     resolve_purpose_field,
     resolve_register_announcement,
@@ -75,14 +76,15 @@ def run_pipeline_coordinator() -> None:
                 n_keywords  = resolve_activity_keywords(cur)
                 n_announce  = resolve_register_announcement(cur)
                 n_register  = resolve_register_fields(cur)
+                n_deeptech  = resolve_deeptech_and_ai(cur)
 
         log.info(
             "Resolution complete — website=%d cluster=%d tech_field=%d "
             "revenue=%d employee_count=%d ceo_contact=%d "
             "technologiefeld=%d purpose_field=%d activity_keywords=%d register_announcement=%d "
-            "register fields=%d canonical records changed",
+            "register fields=%d deeptech/is_ai=%d canonical records changed",
             n_website, n_cluster, n_tech, n_revenue, n_employees, n_ceo, n_tfeld, n_purpose,
-            n_keywords, n_announce, n_register,
+            n_keywords, n_announce, n_register, n_deeptech,
         )
 
         # Recompute quality scores
