@@ -66,7 +66,8 @@ Airflow (the hub's)     reads our DAG files from git (the DAG bundle), keeps the
 A third runner, `pipeline_runner = docker`, is for the play server, which emulates the hub with
 docker compose and the official Airflow image: the same image and `run_task` argument, but as a
 Docker container instead of a pod. It joins the network named by `pipeline_network` and gets the
-worker's own `PG_DSN` and DAG settings instead of a secret (`airflow/dags/pipeline_task.py`).
+worker's own `PG_DSN` and DAG settings instead of a secret (`airflow/dags/pipeline_task.py`). Every
+task pulls the image first, so a merge to main reaches play without a manual `docker pull`.
 
 A pod shares no disk, so state between runs belongs in Postgres. Not solved yet: `manager_ner_train`
 keeps its spaCy models on disk (`MANAGER_NER_MODEL_DIR`) and needs S3 or a volume on the hub.
