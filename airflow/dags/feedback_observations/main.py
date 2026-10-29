@@ -6,8 +6,9 @@ of the source `user_feedback`, and `pipeline_coordinator` decides what is shown,
 
 **Agreement decides, not one person.** Per company, field and corrected value, it counts the
 distinct people who typed it or voted that value `correct` (`agree`), and the distinct people who
-voted another value of the field `correct` or this value `wrong` (`disagree`; on `LIST_FIELDS`
-only this value `wrong`). Nobody counts both ways. The difference sets the confidence (`confidence`):
+voted another value of the field `correct` or this value `wrong`, with or without a correction of
+their own (`disagree`; on `LIST_FIELDS` only this value `wrong`). Nobody counts both ways on one
+value: their latest vote on it wins. The difference sets the confidence (`confidence`):
 
     net agreement   confidence   shown?
     0 or less       0            no
@@ -183,19 +184,26 @@ def planned_observations(
             if vote.get("correction"):
                 skipped[f"not correctable: {key}"] += 1
             continue
+        author = vote["author_id"]
+        shown = clean(FIELDS[key][1], vote.get("value") or "", technologiefelder)
+        if shown is not None:
+            seen = (company, key, claim_key(shown))
+            if vote["verdict"] == "correct":
+                confirmed[(company, key)][seen[2]].add(author)
+                rejected[seen].discard(author)
+            else:
+                rejected[seen].add(author)
+                agree.get(seen, set()).discard(author)
+                confirmed.get((company, key), {}).get(seen[2], set()).discard(author)
         if not vote.get("correction"):
-            shown = clean(FIELDS[key][1], vote.get("value") or "", technologiefelder)
-            if shown is not None and vote["verdict"] == "correct":
-                confirmed[(company, key)][claim_key(shown)].add(vote["author_id"])
-            elif shown is not None:
-                rejected[(company, key, claim_key(shown))].add(vote["author_id"])
             continue
         value = clean(FIELDS[key][1], vote["correction"], technologiefelder)
         if value is None:
             skipped[f"invalid {key}"] += 1
             continue
         claim = (company, key, claim_key(value))
-        agree[claim].add(vote["author_id"])
+        agree[claim].add(author)
+        rejected[claim].discard(author)
         spelling.setdefault(claim, value)
 
     planned = []

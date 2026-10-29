@@ -84,7 +84,18 @@ def test_a_changed_mind_moves_the_person_to_the_new_correction() -> None:
     planned, _ = planned_observations([vote("a", correction="B GmbH"), vote("b", correction="B GmbH"),
                                        vote("a", value="B GmbH", correction="C GmbH")])
     counts = {row["value"]: (row["agree"], row["disagree"], row["confidence"]) for row in planned}
-    assert counts == {"B GmbH": (1, 0, 0.30), "C GmbH": (1, 0, 0.30)}
+    assert counts == {"B GmbH": (1, 1, 0.0), "C GmbH": (1, 0, 0.30)}
+
+
+def test_people_who_reject_their_own_added_manager_take_it_back() -> None:
+    planned, _ = planned_observations([
+        vote("a", field="management", value="Xaver Alt", correction="Yvonne Neu"),
+        vote("b", field="management", value="Xaver Alt", correction="Yvonne Neu"),
+        vote("a", field="management", value="Yvonne Neu", correction="Zora Neu"),
+        vote("b", field="management", value="Yvonne Neu", correction="Zora Neu"),
+    ])
+    shown = {row["value"]: row["confidence"] for row in planned}
+    assert shown == {"Yvonne Neu": 0.0, "Zora Neu": 0.60}
 
 
 def test_the_app_key_becomes_the_coordinators_field_name() -> None:

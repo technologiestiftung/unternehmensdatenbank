@@ -131,8 +131,8 @@ correction.
 
 **Corrections are a source** (`user_feedback`, priority 50, V4; DAG `feedback_observations`). Per
 company, field and corrected value, the people who typed it or voted that value `correct` count
-for it; the people who voted another value `correct`, or this one `wrong`, count against it. Nobody
-counts both ways: only a person's latest vote on a field counts. On the list fields (managers, keywords) that is per shown value, and confirming one value counts against no other. One person net gives confidence 0.30, below every bar (0.50,
+for it; the people who voted another value `correct`, or this one `wrong` (with or without a
+correction of their own), count against it. Nobody counts both ways: only a person's latest vote on a field counts. On the list fields (managers, keywords) that is per shown value, and confirming one value counts against no other. One person net gives confidence 0.30, below every bar (0.50,
 websites 0.35), so nothing shows; two give 0.60 and three or more 0.75, which the coordinator
 publishes over any other source, the register included. **A field no other source fills takes the
 first correction**: one person then gives 0.60. Asked on every run, so when a source delivers a
