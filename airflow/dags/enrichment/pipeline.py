@@ -431,6 +431,48 @@ def _remember_phone(entry: UrlAnswer, extracted: dict[str, Any] | None) -> None:
         entry.imprint_phone = extracted.get("phone")
 
 
+def _answer_dict(a: UrlAnswer) -> dict[str, Any]:
+    """One scored URL as it is stored: the shape of `CompanyResult.answers`."""
+    return {
+        "url": a.url,
+        "confidence": a.verdict.value if a.verdict else 0.0,
+        "band": a.verdict.band if a.verdict else "reject",
+        "verified_by": a.verdict.verified_by if a.verdict else "",
+        "methods": sorted(set(a.methods)),
+        "evidence": sorted(a.evidence),
+        "pattern": a.pattern,
+        "imprint_url": a.imprint_url,
+        "register_number_seen": a.register_number_seen,
+        "why": a.verdict.why if a.verdict else "",
+    }
+
+
+def verify_proposed(
+    company: Any, urls: list[str], *, method: str, common: set[str] | frozenset[str] = frozenset()
+) -> list[dict[str, Any]]:
+    """Check URLs another source proposed for this company, exactly as an OSM `website` tag is checked.
+
+    Download the page and its Impressum, read what the page says about the company, and score it with
+    `confidence.score`: never a scorer of its own (CLAUDE.md). A proposal nothing on the page ties to
+    the company stays below the bar (`confidence.UNVERIFIED_CAP`). Returns the answers, best first,
+    in the shape `discover` stores.
+    """
+    uniqueness = name_uniqueness(company.company_name)
+    answers: dict[str, UrlAnswer] = {}
+    for url in urls:
+        origin = origin_url(url)
+        if origin in answers:
+            continue
+        html, extracted, imprint_url = _fetch_and_read(url)
+        evidence, register_seen = _page_evidence(url, company, html=html, extracted=extracted, common=common)
+        entry = UrlAnswer(url=origin, methods=[method], evidence=evidence, imprint_url=imprint_url,
+                          register_number_seen=register_seen)
+        entry.verdict = conf.score(methods=[method], evidence=evidence, name_uniqueness=uniqueness)
+        answers[origin] = entry
+    ranked = sorted(answers.values(), key=lambda a: a.verdict.value if a.verdict else 0.0, reverse=True)
+    return [_answer_dict(a) for a in ranked]
+
+
 def discover(
     company: Any,
     *,
@@ -603,21 +645,7 @@ def discover(
         key=lambda a: (a.verdict.value if a.verdict else 0.0),
         reverse=True,
     )
-    result.answers = [
-        {
-            "url": a.url,
-            "confidence": a.verdict.value if a.verdict else 0.0,
-            "band": a.verdict.band if a.verdict else "reject",
-            "verified_by": a.verdict.verified_by if a.verdict else "",
-            "methods": sorted(set(a.methods)),
-            "evidence": sorted(a.evidence),
-            "pattern": a.pattern,
-            "imprint_url": a.imprint_url,
-            "register_number_seen": a.register_number_seen,
-            "why": a.verdict.why if a.verdict else "",
-        }
-        for a in ranked
-    ]
+    result.answers = [_answer_dict(a) for a in ranked]
 
     best = next((a for a in ranked if a.verdict and a.verdict.promotable), None)
     if best and best.verdict:
