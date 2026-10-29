@@ -18,8 +18,8 @@ Logical field names → observation field_name aliases:
   activity_keywords ← activity_keywords   (product/service words from the website)
   register_announcement ← register_announcement (latest kind of court announcement; a hint, not the status)
 
-`email` and `phone` (the `website_contacts` DAG) are resolved by nothing until a privacy review
-clears them: a resolved value reaches the app and `v_field_provenance`.
+`email` and `phone` (the `website_contacts` DAG) are stored, never resolved: a resolved value
+reaches the app and `v_field_provenance`.
 
 Two field names are resolved by NOTHING and must stay that way: `technologiefeld_withheld` and
 `purpose_field_withheld`, which hold the fields the website rule and the length floor refused to

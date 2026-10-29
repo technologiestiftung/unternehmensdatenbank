@@ -1,9 +1,9 @@
 """A company's register officers as comparison keys, never as names to keep.
 
-Officers are personal data (TSB rules). They are loaded per batch, compared in memory against
-names read from a page, and never written: what is stored is evidence that a name matched, never
-which officer. Privacy review of 2026-10-28, issue #18: the website's Geschäftsführer match, and the
-spaCy manager names' `register_officer` mark.
+Officers are personal data. They are loaded per batch, compared in memory against names read
+from a page, and never written: what is stored is evidence that a name matched, never which
+officer. Used by the website's Geschäftsführer match (issue #18) and the spaCy manager names'
+`register_officer` mark.
 """
 from __future__ import annotations
 

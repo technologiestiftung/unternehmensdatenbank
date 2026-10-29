@@ -19,9 +19,8 @@ source yet, and writes what it finds as `email` and `phone` observations of the 
   `vertrieb-berlin@` is dropped too.
 
 **Not published.** A phone number, and a role address of a sole trader, are still personal data.
-The privacy review of 2026-10-28 covers officer names for matching only. So `email` and `phone`
-are resolved by nothing in `pipeline_coordinator` and reach neither the app nor
-`v_field_provenance`: the observations wait in Postgres until a review clears them.
+So `email` and `phone` are stored, never resolved: nothing in `pipeline_coordinator` resolves
+them, and they reach neither the app nor `v_field_provenance`.
 
 Each company is read once, like `manager_ner`: `email` and `phone` have no upsert key, so reading
 again would append a second copy. A read that failed (the site did not answer, or no Impressum was
@@ -187,7 +186,7 @@ def _make_dag():  # noqa: ANN201
     except ImportError:
         return None
 
-    # No coordinator trigger: nothing resolves `email` or `phone` until the privacy review.
+    # No coordinator trigger: nothing resolves `email` or `phone`.
     with DAG(
         dag_id=DAG_ID,
         description="Company email and phone from the Impressum of its proven website",
