@@ -1,8 +1,10 @@
-"""`enrichment.wikidata`: SPARQL rows become one item per Wikidata id; only commercial register digits."""
+"""`enrichment.wikidata`: SPARQL rows become one item per Wikidata id; only commercial register digits.
+`wikidata.main`: which companies lose what an item proved for them."""
 from __future__ import annotations
 
 from enrichment.confidence import METHOD_WIKIDATA, UNVERIFIED_CAP, WEBSITE_MIN_CONFIDENCE, score
 from enrichment.wikidata import parse, register_digits
+from wikidata.main import moved_from
 
 
 def row(qid: str, website: str, label: str | None = None, register: str | None = None) -> dict:
@@ -38,3 +40,9 @@ def test_a_wikidata_website_with_the_register_number_on_the_page_is_published() 
     verdict = score(methods=[METHOD_WIKIDATA], evidence={"register_number_match"}, name_uniqueness=0.5)
     assert verdict.value >= WEBSITE_MIN_CONFIDENCE
     assert verdict.verified_by == "register_number_match"
+
+
+def test_only_an_item_that_now_matches_another_company_takes_its_websites_away() -> None:
+    previous = {"Q1": "a", "Q2": "b", "Q3": "c"}
+    # Q1 moved to company d; Q2 matches b again; Q3 stopped matching and keeps what its page proved.
+    assert moved_from(previous, {"Q1": "d", "Q2": "b", "Q4": "e"}) == {"a"}
