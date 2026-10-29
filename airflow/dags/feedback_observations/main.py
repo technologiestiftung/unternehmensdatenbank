@@ -6,8 +6,8 @@ of the source `user_feedback`, and `pipeline_coordinator` decides what is shown,
 
 **Agreement decides, not one person.** Per company, field and corrected value, it counts the
 distinct people who typed it or voted that value `correct` (`agree`), and the distinct people who
-voted another value of the field `correct` or this value `wrong` (`disagree`). Nobody counts both
-ways. The difference sets the confidence (`confidence`):
+voted another value of the field `correct` or this value `wrong` (`disagree`; on `LIST_FIELDS`
+only this value `wrong`). Nobody counts both ways. The difference sets the confidence (`confidence`):
 
     net agreement   confidence   shown?
     0 or less       0            no
@@ -78,6 +78,8 @@ FIELDS: dict[str, tuple[str, str]] = {
 }
 #: Voted on in the app, never corrected into a value. See the module docstring.
 NOT_CORRECTABLE = {"fundings", "register_announcement", "cluster", "amazon_effect"}
+#: Shown as several values at once: a vote is about one of them, and confirming one denies no other.
+LIST_FIELDS = {"management", "activity_keywords"}
 
 REGISTER_STATUSES = {"aktiv", "erloschen", "in Liquidation"}
 _WZ_CODE = re.compile(r"^\d{2}(\.\d{1,2}(\.\d{1,2})?)?$")
@@ -157,15 +159,17 @@ def planned_observations(
 
     `votes` are `extraction_feedback` rows: company_id, field_name, value (what the person saw),
     verdict, correction, author_id, in the order they were last changed. Only a person's latest vote
-    per company and field counts, so a changed mind replaces the old vote. Corrections are grouped
+    per company and field counts (per shown value on `LIST_FIELDS`), so a changed mind replaces the
+    old vote. Corrections are grouped
     per company, field and cleaned value, ignoring case, so "Muster GmbH" and "muster gmbh" are one
     claim (the spelling seen first wins; the stored observation keeps its own).
     `filled` holds the (company, observation field) pairs another source has a value for
     (`filled_fields`); None treats every field as filled.
     """
-    latest: dict[tuple[str, str, str], Mapping[str, Any]] = {}
+    latest: dict[tuple[str, str, str, str | None], Mapping[str, Any]] = {}
     for vote in votes:
-        person = (str(vote["company_id"]), vote["field_name"], vote["author_id"])
+        shown_item = vote.get("value") if vote["field_name"] in LIST_FIELDS else None
+        person = (str(vote["company_id"]), vote["field_name"], vote["author_id"], shown_item)
         latest.pop(person, None)
         latest[person] = vote
 
@@ -174,7 +178,7 @@ def planned_observations(
     confirmed: dict[tuple[str, str], dict[Any, set[str]]] = defaultdict(lambda: defaultdict(set))
     rejected: dict[tuple[str, str, Any], set[str]] = defaultdict(set)
     skipped: dict[str, int] = defaultdict(int)
-    for (company, key, _), vote in latest.items():
+    for (company, key, _, _), vote in latest.items():
         if key in NOT_CORRECTABLE or key not in FIELDS:
             if vote.get("correction"):
                 skipped[f"not correctable: {key}"] += 1
@@ -199,7 +203,8 @@ def planned_observations(
         company, key, value = claim
         field_confirmed = confirmed.get((company, key), {})
         people = typed | field_confirmed.get(value, set())
-        against = rejected[claim].union(*(authors for other, authors in field_confirmed.items() if other != value))
+        against = rejected[claim] if key in LIST_FIELDS else rejected[claim].union(
+            *(authors for other, authors in field_confirmed.items() if other != value))
         planned.append({
             "company_id": company, "field_name": FIELDS[key][0], "value": spelling[claim],
             "confidence": confidence(len(people), len(against),

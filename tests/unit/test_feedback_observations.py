@@ -63,6 +63,23 @@ def test_only_a_persons_latest_vote_counts() -> None:
     assert (planned[0]["agree"], planned[0]["disagree"]) == (1, 1)
 
 
+def test_confirming_another_manager_keeps_a_persons_added_manager() -> None:
+    planned, _ = planned_observations([
+        vote("a", field="management", value="Xaver Alt", correction="Yvonne Neu"),
+        vote("a", field="management", value="Zora Bleibt", verdict="correct", correction=None),
+        vote("b", field="management", value="Xaver Alt", correction="Yvonne Neu"),
+        vote("b", field="management", value="Zora Bleibt", verdict="correct", correction=None),
+    ])
+    counts = {row["value"]: (row["agree"], row["disagree"], row["confidence"]) for row in planned}
+    assert counts == {"Yvonne Neu": (2, 0, 0.60)}
+
+
+def test_on_a_single_value_field_a_later_confirmation_replaces_the_correction() -> None:
+    planned, _ = planned_observations([vote("a"), vote("b"), vote("c"),
+                                       vote("a", value="Andere GmbH", verdict="correct", correction=None)])
+    assert (planned[0]["agree"], planned[0]["disagree"], planned[0]["confidence"]) == (2, 1, 0.30)
+
+
 def test_a_changed_mind_moves_the_person_to_the_new_correction() -> None:
     planned, _ = planned_observations([vote("a", correction="B GmbH"), vote("b", correction="B GmbH"),
                                        vote("a", value="B GmbH", correction="C GmbH")])
