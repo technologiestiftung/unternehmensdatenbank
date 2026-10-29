@@ -83,5 +83,5 @@ curl -s -H "Authorization: Bearer $TOKEN" \
 A second emulation runs on TSB's play server with docker compose: `technologiestiftung/ds-root-server`,
 branch `play`, folders `udb-postgres`, `udb-keycloak`, `udb-hasura`, `udb-airflow`, `udb-app`. It
 uses the official images only: Airflow pulls the DAGs from this repo with a `GitDagBundle`, and each
-task runs as a container from the pipelines image (`pipeline_runner` `docker`, on the unmerged
-branch `fix/official-airflow-image`).
+task runs as a container from the pipelines image (`pipeline_runner` `docker`, see
+[release](release.md)).

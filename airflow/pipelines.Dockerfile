@@ -17,6 +17,9 @@ RUN pip install --no-cache-dir -r /tmp/requirements.txt
 COPY dags/ /opt/pipelines/
 
 RUN useradd --uid 50000 --no-create-home pipelines
+# Where run_task leaves a task's return value. Kubernetes mounts its own folder here; Docker
+# (pipeline_runner "docker") reads the file from this one.
+RUN mkdir -p /airflow/xcom && chown pipelines /airflow/xcom
 USER pipelines
 
 ENTRYPOINT ["python", "-m", "run_task"]
