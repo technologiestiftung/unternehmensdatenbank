@@ -3,12 +3,13 @@ from __future__ import annotations
 import os
 from typing import Any
 
-from rapidfuzz import fuzz
-
 OSM_MIN_MATCH_SCORE = float(os.getenv("OSM_MIN_MATCH_SCORE", "0.65"))
 
 
 def score_osm_candidate(record: dict[str, Any], company: Any) -> float:
+    # Imported here, not at the top: the hub's Airflow parses the DAG files without our packages.
+    from rapidfuzz import fuzz
+
     name_score = fuzz.token_sort_ratio(record.get("name") or "", company.company_name or "") / 100.0
     postcode_score = (
         1.0 if company.postcode and record.get("postcode") == company.postcode else 0.0

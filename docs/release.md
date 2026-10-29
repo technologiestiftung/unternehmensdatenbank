@@ -76,6 +76,12 @@ Airflow **variables** decide how:
 | `pipeline_namespace` | — | from the hub team |
 | `pipeline_secret` | — | the Kubernetes secret with `PG_DSN` and the `ENABLE_*` flags |
 
+A third runner, `pipeline_runner = docker`, is for the play server, which emulates the hub with
+docker compose and the official Airflow image: the same pipelines image and `run_task` argument, but
+as a Docker container instead of a pod. It joins the network named by `pipeline_network` and gets
+the worker's own `PG_DSN` and DAG settings instead of a secret. Details in
+`airflow/dags/pipeline_task.py`.
+
 Schedules (`@monthly`, cron strings) and the `TriggerDagRunOperator` chains stay in Airflow; only the
 work moves into the pod. A pod shares no disk, so state between runs belongs in Postgres.
 

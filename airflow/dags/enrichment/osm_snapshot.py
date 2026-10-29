@@ -35,7 +35,6 @@ from pathlib import Path
 from typing import Any
 
 import requests
-from rapidfuzz import fuzz, process
 
 # `_to_record` is the one place that knows which OSM tags mean "website", "phone" and "email"
 # (`website`, `contact:website`, `url`, `contact:url` — four spellings for one idea). Importing a
@@ -184,6 +183,9 @@ class Snapshot:
         name = company.company_name or ""
         if not name or not self.records:
             return None, 0
+
+        # Imported here, not at the top: the hub's Airflow parses the DAG files without our packages.
+        from rapidfuzz import fuzz, process
 
         stripped = strip_legal_form(name) or name
         near = process.extract(
