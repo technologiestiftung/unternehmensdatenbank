@@ -74,3 +74,13 @@ def test_values_are_cleaned_to_what_the_coordinator_and_the_profile_read() -> No
     assert clean("boolean", "Ja") == "true" and clean("boolean", "vielleicht") is None
     assert clean("register_status", "aktiv") == "aktiv" and clean("register_status", "pleite") is None
     assert clean("wz_code", "62.01") == "62.01" and clean("wz_code", "Software") is None
+
+
+def test_one_person_fills_an_empty_field_but_not_one_a_source_fills() -> None:
+    assert confidence(1, 0, filled=False) >= 0.50
+    assert confidence(1, 0, filled=True) < 0.35
+    assert confidence(1, 1, filled=False) == 0.0
+    votes = [vote("a", field="employee_count", correction="12"), vote("a", field="website", correction="muster.de")]
+    planned, _ = planned_observations(votes, filled={(COMPANY, "website")})
+    shown = {row["field_name"]: row["confidence"] for row in planned}
+    assert shown == {"employee_count": 0.60, "website": 0.30}

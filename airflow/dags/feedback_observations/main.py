@@ -11,6 +11,7 @@ distinct people who typed it (`agree`) and the distinct people who voted the fie
     net agreement   confidence   shown?
     0 or less       0            no
     1               0.30         no: below the coordinator's bars (0.50, websites 0.35)
+    1, field empty  0.60         yes: no other source has a value (`filled_fields`, asked each run)
     2               0.60         yes
     3 or more       0.75         yes
 
@@ -82,11 +83,17 @@ _THOUSANDS = re.compile(r"^\d{1,3}(\.\d{3})+$")
 _TRUE, _FALSE = {"true", "ja", "yes", "1"}, {"false", "nein", "no", "0"}
 
 
-def confidence(agree: int, disagree: int) -> float:
-    """The confidence for a correction `agree` people typed and `disagree` people voted against."""
+def confidence(agree: int, disagree: int, *, filled: bool = True) -> float:
+    """The confidence for a correction `agree` people typed and `disagree` people voted against.
+
+    `filled`: another source has a value for the field. Where none has, one person is enough: there
+    is nothing to protect, and a gap filled is better than a gap.
+    """
     net = agree - disagree
     if net <= 0:
         return 0.0
+    if net == 1 and not filled:
+        return 0.60
     return {1: 0.30, 2: 0.60}.get(net, 0.75)
 
 
@@ -140,13 +147,16 @@ def clean(kind: str, raw: str, technologiefelder: frozenset[str] = frozenset()) 
 
 
 def planned_observations(
-    votes: Iterable[Mapping[str, Any]], technologiefelder: frozenset[str] = frozenset()
+    votes: Iterable[Mapping[str, Any]], technologiefelder: frozenset[str] = frozenset(),
+    filled: set[tuple[str, str]] | None = None,
 ) -> tuple[list[dict[str, Any]], dict[str, int]]:
     """Every correction people stand behind, with its confidence; and what was skipped, counted.
 
     `votes` are `extraction_feedback` rows: company_id, field_name, verdict, correction, author_id.
     Pure, so it is tested without a database. Corrections are grouped per company, field and cleaned
     value, ignoring case, so "Muster GmbH" and "muster gmbh" are one claim (the first spelling wins).
+    `filled` holds the (company, observation field) pairs another source has a value for
+    (`filled_fields`); None treats every field as filled.
     """
     agree: dict[tuple[str, str, Any], set[str]] = defaultdict(set)
     spelling: dict[tuple[str, str, Any], str | float] = {}
@@ -177,10 +187,40 @@ def planned_observations(
         against = disagree[(company, key)] - people
         planned.append({
             "company_id": company, "field_name": FIELDS[key][0], "value": spelling[claim],
-            "confidence": confidence(len(people), len(against)),
+            "confidence": confidence(len(people), len(against),
+                                     filled=filled is None or (company, FIELDS[key][0]) in filled),
             "agree": len(people), "disagree": len(against),
         })
     return planned, dict(skipped)
+
+
+def filled_fields(cur: Any, votes: list[dict[str, Any]]) -> set[tuple[str, str]]:
+    """(company, observation field) pairs another source has a value for, above the coordinator's bar.
+
+    Asked on every run, not when the vote was cast: when a source delivers a value later, a single
+    person's correction steps back to 0.30 and the source's value is shown.
+    """
+    from pipeline_coordinator.resolver import _FIELD_MIN_CONF, _WEBSITE_MIN_CONF
+
+    companies = sorted({str(v["company_id"]) for v in votes if v.get("correction")})
+    if not companies:
+        return set()
+    cur.execute(
+        """
+        SELECT DISTINCT o.company_id::text,
+               CASE WHEN o.field_name = 'candidate_url' THEN 'website' ELSE o.field_name END
+        FROM public.company_field_observations o
+        JOIN public.sources s ON s.id = o.source_id
+        WHERE s.key <> %s
+          AND o.company_id = ANY(%s::uuid[])
+          AND o.field_name = ANY(%s)
+          AND COALESCE(o.confidence, 0) >= CASE WHEN o.field_name IN ('website', 'candidate_url')
+                                                THEN %s ELSE %s END
+        """,
+        (SOURCE_KEY, companies, [f for f, _ in FIELDS.values()] + ["candidate_url"],
+         _WEBSITE_MIN_CONF, _FIELD_MIN_CONF),
+    )
+    return {(row[0], row[1]) for row in cur.fetchall()}
 
 
 def run_publish() -> int:
@@ -197,7 +237,7 @@ def run_publish() -> int:
             cur.execute("SELECT company_id, field_name, verdict, correction, author_id FROM public.extraction_feedback")
             columns = [c.name for c in cur.description]
             votes = [dict(zip(columns, row)) for row in cur.fetchall()]
-            planned, skipped = planned_observations(votes, _technologiefelder())
+            planned, skipped = planned_observations(votes, _technologiefelder(), filled_fields(cur, votes))
 
             cur.execute(
                 """

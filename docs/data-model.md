@@ -133,7 +133,9 @@ correction.
 company, field and corrected value, the people who typed it count for it and the people who voted
 the field `correct` count against it. One person net gives confidence 0.30, below every bar (0.50,
 websites 0.35), so nothing shows; two give 0.60 and three or more 0.75, which the coordinator
-publishes over any other source, the register included. Priority 50 is deliberate: register values
+publishes over any other source, the register included. **A field no other source fills takes the
+first correction**: one person then gives 0.60. Asked on every run, so when a source delivers a
+value later, a single person's correction steps back to 0.30 and the source's value is shown. Priority 50 is deliberate: register values
 carry 1.0 and verified websites up to 0.99, so at equal priority a correction could never replace a
 wrong name. Nothing is deleted: a withdrawn correction drops to 0 and the source's value is shown
 again. Each correction is checked first (a URL, one of the 77 fields, a number, a date); `fundings`,
