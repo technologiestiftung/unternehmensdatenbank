@@ -104,6 +104,8 @@ def _docker_task(task_id: str, run: Callable[[], Any], returns: bool) -> Any:
     return PipelineDockerOperator(
         task_id=task_id,
         image="{{ var.value.pipeline_image }}",
+        # `:main` is re-tagged on every merge; without a pull the host keeps running the old image.
+        force_pull=True,
         command=[task_target(run)],
         network_mode=_setting("pipeline_network") or None,
         # The worker's /tmp is not the Docker host's when Docker is reached over a proxy.
