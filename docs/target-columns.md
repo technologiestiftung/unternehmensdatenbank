@@ -1,68 +1,61 @@
-# Target columns — what each one is, where it comes from, and who fills it
+# Target columns
 
-The project's goal is one record per Berlin company with the 20 columns below. This page says,
-for each one, which column of `public.v_company_profile` holds it and who is
-expected to fill it.
+The goal is one record per Berlin company with the 20 columns below: which column of
+`v_company_profile` holds each, and who fills it.
 
-Two suppliers:
+- **Fusionbase**: the data vendor (offer of 2026-10-12). Delivers **only active** companies from the
+  Berlin registers (HRA, HRB, GnR, PR, VR, GsR), **quarterly**, by API. Its WZ code and activity
+  description come from **its own AI model**, so they are estimates like ours. No import yet.
+- **Us**: the DAGs and scripts in this repo.
 
-- **Fusionbase** — the data vendor in the offer of 2026-10-12. It delivers **only active** companies
-  from the Berlin registers (HRA, HRB, GnR, PR, VR, GsR), refreshed **once per quarter**, through an
-  API. Its WZ code and its activity description are produced **by Fusionbase's own AI model**, not
-  copied from a register, so they are a vendor's estimate, like ours. No import exists yet.
-- **Us** — Airflow DAGs and scripts in this repo.
+"Today" counts are from the local database on 2026-10-29: 296,897 companies (296,486 from
+OffeneRegister, the rest created by `register_announcements`). "Filled" says nothing about
+correctness: no row of any classification column has been hand-checked.
 
-State on 2026-10-28. "Filled" means a code path writes it today; it says nothing about whether the
-values are right — not one row of any classification column has been hand-checked.
-
-| # | Target column | `v_company_profile` column | Fusionbase delivers it? | Our part | Filled today |
+| # | Column | `v_company_profile` | Fusionbase? | Our part | Today |
 |---|---|---|---|---|---|
-| 1 | Name | `name` | yes, required (register name) | — | yes (Northdata import) |
-| 2 | Mitarbeiter | `employee_count` | yes, if published in the Bundesanzeiger; earlier years optional | fill gaps — blocked, see below | the coordinator resolves it, but no source writes a number |
-| 3 | Umsatz | `revenue` | yes, if the company must publish; earlier years optional | fill gaps — blocked, see below | the coordinator resolves it, but no source writes it |
-| 4 | Förderungen | `funding_count`, `funding_total_eur`, and the `fundings` relation | **no** | `foerderkatalog` DAG (Förderkatalog des Bundes, by name and city) and `berlin_zuwendungen` DAG (Land Berlin, by register number, 18,427 grants to 3,861 companies on 2026-10-28) | yes: 19,533 grants, 3,003 recipients, measured 2026-10-27 |
-| 5 | WZ-Nummer | `wz_code` | yes, required — **AI-derived** | cross-check against the register | yes (Northdata import) |
-| 6 | Gründungsdatum | `established_at` | yes, required | — | yes (Northdata import) |
-| 7 | Adresse | `address`, `postcode`, `city` | yes, required | — | yes |
-| 8 | Rechtsform | `legal_form` | yes, required | — | yes |
-| 9 | Cluster (n=5) | `cluster` | **no** | today `cluster` is free text from the search providers, **not** Berlin's five clusters. Needs a new classifier | no |
-| 10 | Technologiefeld | `technologiefeld` | **no** | `branch_classifier` (docs/branch-classification.md) | yes, 403 of 14,443 Osnabrück rows |
-| 11 | Website | `website` | yes, required | `website_discovery` DAG verifies it | yes |
-| 12 | Geschäftsführung / Kontakt | `management` | contact (name, email, phone) optional | `company_managers` from the register; `website_contacts` DAG reads the company's own email and phone off the Impressum | names only. Email and phone are **stored, not shown**, until a privacy review: 27 emails and 25 phones from 37 websites, 2026-10-28 |
-| 13 | Tätigkeitsbeschreibung | `business_purpose`, `activity_keywords` | yes, required — **AI-written**, plus keywords | register purpose (Gegenstand); `website_keywords` DAG: keywords the website itself states | register purpose yes; keywords published once 500 companies are read (22 of the first 37 websites gave candidates) |
-| 14 | Kommentar | `comments` relation → `company_comments` | no | written by users in the app, through Hasura | table exists, empty |
-| 15 | DeepTech Klassifikation | `deeptech_class` | **no** | needs a classifier | reserved, NULL |
-| 16 | Konfidenz der Klassifikation | `deeptech_confidence` | **no** | the confidence of the DeepTech observation itself | reserved, NULL |
-| 17 | isAI | `is_ai` | **no** | needs a classifier | reserved, NULL |
+| 1 | Name | `name` | yes | — | 296,897 |
+| 2 | Mitarbeiter | `employee_count` | yes, if published in the Bundesanzeiger | blocked, see below | 0: resolved, but no source writes it |
+| 3 | Umsatz | `revenue` | yes, if the company must publish | blocked, see below | 0: same |
+| 4 | Förderungen | `funding_count`, `funding_total_eur`, `fundings` | **no** | `foerderkatalog` (by name and city), `berlin_zuwendungen` (by register number) | 5,189 companies with a grant |
+| 5 | WZ-Nummer | `wz_code` | yes, **AI-derived** | cross-check against the register | 0: OffeneRegister has none |
+| 6 | Gründungsdatum | `established_at` | yes | — | 0 |
+| 7 | Adresse | `address`, `postcode`, `city` | yes | — | city 296,897; street and postcode 116,527 |
+| 8 | Rechtsform | `legal_form` | yes | — | 257,244 |
+| 9 | Cluster (n=5) | `cluster` | **no** | needs a classifier; today's values are not Berlin's five clusters | — |
+| 10 | Technologiefeld | `technologiefeld` | **no** | `branch_classifier` ([branch-classification](branch-classification.md)) | 27 |
+| 11 | Website | `website` | yes | `website_discovery` verifies it | 4,929 |
+| 12 | Geschäftsführung / Kontakt | `management` | contact optional | Geschäftsführer from the register; `website_contacts` reads email and phone from the Impressum | names 111,374. Email and phone stored, not shown (27 emails, 25 phones from 37 websites, 2026-10-28) |
+| 13 | Tätigkeitsbeschreibung | `business_purpose`, `activity_keywords` | yes, **AI-written** | register purpose; `website_keywords` | purpose 0 (OffeneRegister has none); keywords publish from 500 companies read |
+| 14 | Kommentar | `comments` | no | users in the app | — |
+| 15 | DeepTech Klassifikation | `deeptech_class` | **no** | needs a classifier | NULL |
+| 16 | Konfidenz der Klassifikation | `deeptech_confidence` | **no** | the DeepTech observation's confidence | NULL |
+| 17 | isAI | `is_ai` | **no** | needs a classifier | NULL |
 | 18 | timestamp | `updated_at` | quarterly refresh date | — | yes |
-| 19 | Amazon-Effekt *(dashed)* | `amazon_effect` | no | **meaning not defined yet** — reserved so the column exists | reserved, NULL |
-| 20 | Schließung / Liquidation *(dashed)* | `register_status`, `register_announcement` | **no** — Fusionbase only lists active companies | `register_announcements` DAG: the latest court announcement, e.g. a deletion announcement, shown as a hint next to the status; a company that drops out of a quarterly delivery is a candidate too | status from the 2017–2019 snapshot; announcements for 860 companies on 2026-10-28, 147 of them shown `aktiv` with a deletion announced |
+| 19 | Amazon-Effekt *(dashed)* | `amazon_effect` | no | meaning not defined yet | NULL |
+| 20 | Schließung / Liquidation *(dashed)* | `register_status`, `register_announcement` | **no**, only active companies | `register_announcements`: the latest announcement, a hint next to the status | status 296,486 (from the snapshot); announcements 854 |
 
-## Fusionbase's own sources: which we can use (2026-10-28)
-
-Fusionbase names its sources per column. Asked whether we could read the same ones ourselves:
+## Fusionbase's sources: which can we read ourselves
 
 | Source | Columns | Can we? |
 |---|---|---|
-| The company website | 11 website, 12 contact, 13 keywords | **yes**: `website_discovery`, `website_contacts`, `website_keywords` |
-| Fusionbase's AI on website + register purpose | 5 WZ code, 13 description | possible from the website only: OffeneRegister has no purpose. No hand-checked rows to measure it against |
-| Registerbekanntmachungen (handelsregister.de) | 20 closure hints, and companies registered after 2019 | **built**: `register_announcements`, weekly, 2 requests, list only. 900 Berlin announcements in 8 weeks; 425 companies created that the snapshot does not have. No new registrations or ordinary changes: since 2022 those are not announced (§ 10 HGB, to be checked) |
-| Handelsregister (handelsregister.de) | 13 Gegenstand, type of site (branch, head office) | **not built**: no API, and the terms reportedly allow 60 searches per hour (about 100 days for the 142,571 companies active in the snapshot). IT compliance, asked on 2026-10-28, said it should be fine; what exactly was cleared (bulk retrieval, a higher rate) is to be written down before a DAG is built |
-| Annual accounts (Bundesanzeiger / Unternehmensregister) | 2–3 employees and revenue, with history | **not built**: no bulk access, a CAPTCHA in front of the documents (solving it automatically is not an option), and small companies need not publish revenue at all (§ 326 HGB, to be checked). Whether accounts since 2022 sit in the Unternehmensregister instead (DiRUG) is also to be checked. Same compliance answer as the row above |
+| The company website | 11, 12, 13 keywords | **built**: `website_discovery`, `website_contacts`, `website_keywords` |
+| Fusionbase's AI on website + register purpose | 5, 13 description | from the website only (OffeneRegister has no purpose); nothing hand-checked to measure against |
+| Registerbekanntmachungen (handelsregister.de) | 20, and companies registered after 2019 | **built**: `register_announcements`, weekly, 2 requests, list only. About 900 Berlin announcements in 8 weeks. New registrations and ordinary changes have not been announced since 2022 (§ 10 HGB, to be checked) |
+| Handelsregister (handelsregister.de) | 13 Gegenstand, branch or head office | **not built**: no API; the terms reportedly allow 60 searches per hour, about 100 days for the 142,571 active companies |
+| Annual accounts (Bundesanzeiger / Unternehmensregister) | 2–3, with history | **not built**: no bulk access, a CAPTCHA in front of the documents (not solved automatically), and small companies need not publish revenue (§ 326 HGB, to be checked). Whether accounts since 2022 sit in the Unternehmensregister (DiRUG) is to be checked |
 
-## What follows from the table
+## What follows
 
-- **Fusionbase covers 1–3, 5–8, 11–13 and 18.** Of those, 5 and 13 are AI output and need the same
-  scepticism as ours.
-- **Ours alone: 4, 9, 10, 14–17, 19, 20.** The classification columns (9, 10, 15–17) are where the
-  remaining work is, and none of them has a precision figure.
-- **Fusionbase drops dissolved companies.** So column 20 has to come from comparing two quarterly
-  deliveries, or from the register — not from the vendor.
+- **Fusionbase covers 1–3, 5–8, 11–13 and 18.** 5 and 13 are AI output.
+- **Ours alone: 4, 9, 10, 14–17, 19, 20.** The classification columns (9, 10, 15–17) are the open
+  work, and none has a precision figure.
+- **Fusionbase drops dissolved companies**, so 20 comes from comparing quarterly deliveries or from
+  the register.
 
-## How a new column gets a value
+## Filling a new column
 
-`deeptech_class`, `is_ai` and `amazon_effect` are read the same way as every other enriched field:
-the canonical observation for that `field_name`. A DAG that wants to fill one must write an
-observation through `insert_text_observation`, and before that, **widen the upsert key** in a new
-migration **and** the `ON CONFLICT ... WHERE` predicate in `source_enrichment_common.py` in the same
-commit (see CLAUDE.md, "Migrations").
+`deeptech_class`, `is_ai` and `amazon_effect` are read like every enriched field: the canonical
+observation for that `field_name`. A DAG that fills one writes through `insert_text_observation`,
+after **widening the upsert key** in a new migration **and** the `ON CONFLICT ... WHERE` in
+`source_enrichment_common.py`, in the same commit.
