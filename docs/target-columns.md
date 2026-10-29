@@ -22,8 +22,8 @@ correctness: no row of any classification column has been hand-checked.
 | 6 | Gründungsdatum | `established_at` | yes | — | 0 |
 | 7 | Adresse | `address`, `postcode`, `city` | yes | — | city 296,897; street and postcode 116,527 |
 | 8 | Rechtsform | `legal_form` | yes | — | 257,244 |
-| 9 | Cluster (n=5) | `cluster` | **no** | needs a classifier; today's values are not Berlin's five clusters | — |
-| 10 | Technologiefeld | `technologiefeld` | **no** | `branch_classifier` ([branch-classification](branch-classification.md)) | 27 |
+| 9 | Cluster (n=5) | — | **no** | column removed with #47 (2026-10-29): it held LLM free text, not Berlin's five clusters. Comes back as a new column with a classifier | — |
+| 10 | Technologiefeld | `technology_field` (English names, `name_en`) | **no** | `branch_classifier` ([branch-classification](branch-classification.md)) | 27 |
 | 11 | Website | `website` | yes | `website_discovery` verifies it | 4,929 |
 | 12 | Geschäftsführung / Kontakt | `management` | contact optional | Geschäftsführer from the register; `website_contacts` reads email and phone from the Impressum | names 111,374. Email and phone stored, not shown (27 emails, 25 phones from 37 websites, 2026-10-28) |
 | 13 | Tätigkeitsbeschreibung | `business_purpose`, `activity_keywords` | yes, **AI-written** | register purpose; `website_keywords` | purpose 0 (OffeneRegister has none); keywords publish from 500 companies read |
@@ -32,7 +32,7 @@ correctness: no row of any classification column has been hand-checked.
 | 16 | Konfidenz der Klassifikation | `deeptech_confidence` | **no** | the DeepTech observation's confidence | NULL |
 | 17 | isAI | `is_ai` | **no** | needs a classifier; corrections from the app (`feedback_observations`, source `user_feedback`) can already fill it | NULL |
 | 18 | timestamp | `updated_at` | quarterly refresh date | — | yes |
-| 19 | Amazon-Effekt *(dashed)* | `amazon_effect` | no | meaning not defined yet | NULL |
+| 19 | Amazon-Effekt *(dashed)* | — | no | column removed with #47; meaning not defined yet | — |
 | 20 | Schließung / Liquidation *(dashed)* | `register_status`, `register_announcement` | **no**, only active companies | `register_announcements`: the latest announcement, a hint next to the status | status 296,486 (from the snapshot); announcements 854 |
 
 ## Fusionbase's sources: which can we read ourselves
@@ -55,7 +55,7 @@ correctness: no row of any classification column has been hand-checked.
 
 ## Filling a new column
 
-`deeptech_class`, `is_ai` and `amazon_effect` are read like every enriched field: the canonical
+`deeptech_class` and `is_ai` are read like every enriched field: the canonical
 observation for that `field_name`. A DAG that fills one writes through `insert_text_observation`,
 after **widening the upsert key** in a new migration **and** the `ON CONFLICT ... WHERE` in
 `source_enrichment_common.py`, in the same commit.

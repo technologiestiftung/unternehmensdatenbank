@@ -27,8 +27,14 @@
 # keyword for being too common — that is measured from the data rather than from anyone's opinion.
 # Delete a keyword only when it is WRONG for its branch, and say so in a comment.
 
+# `name_en` is what the database stores and the app shows (`technology_field`, `purpose_field`; #47,
+# 2026-10-29). The key stays Berlin's official German name, because the keywords, the classifier and
+# Berlin's own lists use it. The English names are our translations (Berlin publishes none, as far as
+# we know) and were not checked by Berlin; correct one here and V5's mapping for already stored rows.
+
 branches:
   "5G- bzw. 6G Anwendungen":
+    name_en: "5G/6G Applications"
     senweb_unit: "IIIB4"
     berlin_partner: "Juliane Haupt"
     related:
@@ -40,6 +46,7 @@ branches:
       - "Network Slicing"
 
   "Additive Fertigung":
+    name_en: "Additive Manufacturing"
     senweb_unit: "IIIC1"
     berlin_partner: "David Hampel"
     keywords:
@@ -50,6 +57,7 @@ branches:
       - "Funktionsbauteile"
 
   "Advanced Materials":
+    name_en: "Advanced Materials"
     senweb_unit: "III B 3"
     berlin_partner: "David Hampel"
     keywords:
@@ -60,6 +68,7 @@ branches:
       - "Funktionswerkstoffe"
 
   "Architekturmarkt":
+    name_en: "Architecture Market"
     senweb_unit: "IIB4"
     berlin_partner: "Justina Siegmund-Born"
     keywords:
@@ -70,6 +79,7 @@ branches:
       - "Revitalisierung"
 
   "Automobilwirtschaft":
+    name_en: "Automotive Industry"
     senweb_unit: "IIIB3, IIIC1"
     berlin_partner: "Sascha Tiede, David Hampel"
     keywords:
@@ -99,6 +109,7 @@ branches:
       - "Circular Economy"
 
   "Autonomes, vernetzes Fahren":
+    name_en: "Autonomous and Connected Driving"
     senweb_unit: "IIIB3"
     berlin_partner: "Sascha Tiede"
     keywords:
@@ -138,6 +149,7 @@ branches:
       - "Vollautonome Fahrzeuge"
 
   "Bahnindustrie":
+    name_en: "Rail Industry"
     senweb_unit: "IIIB3"
     berlin_partner: "Sascha Tiede"
     keywords:
@@ -177,6 +189,7 @@ branches:
       - "European Rail Traffic Management System (ERTMS)"
 
   "Batterietechnologien":
+    name_en: "Battery Technologies"
     related:
       - "Elektromobilität"
       - "Ladeinfrastruktur"
@@ -190,6 +203,7 @@ branches:
       - "Akkus"
 
   "Bauindustrie":
+    name_en: "Construction Industry"
     senweb_unit: "IIIC1"
     berlin_partner: "David Hampel"
     keywords:
@@ -200,6 +214,7 @@ branches:
       - "Dekarbonisierung"
 
   "Bioproduktion":
+    name_en: "Bioproduction"
     senweb_unit: "IIIC1"
     berlin_partner: "David Hampel"
     keywords:
@@ -221,6 +236,7 @@ branches:
       # companies being used as a benchmark. "Skalierung" is generic in any city; "Clubs" is not.
 
   "Biotechnologie":
+    name_en: "Biotechnology"
     senweb_unit: "IIIB2"
     berlin_partner: "Carolin Clement"
     related:
@@ -237,6 +253,7 @@ branches:
       - "Zell- und Gentherapie"
 
   "Buchmarkt":
+    name_en: "Book Market"
     senweb_unit: "IIB4"
     berlin_partner: "Justina Siegmund-Born"
     keywords:
@@ -248,6 +265,7 @@ branches:
       - "Buchhandel"
 
   "Carbon Management":
+    name_en: "Carbon Management"
     senweb_unit: "IIIA4"
     berlin_partner: "Wolfgang Korek"
     keywords:
@@ -256,6 +274,7 @@ branches:
       - "ccu"
 
   "Chemische Industrie":
+    name_en: "Chemical Industry"
     senweb_unit: "IIIC1"
     berlin_partner: "David Hampel"
     keywords:
@@ -266,6 +285,7 @@ branches:
       - "Grüne Chemie"
 
   "Cybersicherheit":
+    name_en: "Cybersecurity"
     senweb_unit: "IIIB1"
     berlin_partner: "Juliane Haupt"
     related:
@@ -278,6 +298,7 @@ branches:
       - "Digitale Identität"
 
   "Defence Tech":
+    name_en: "Defence Tech"
     related:
       - "Drohnen"
       - "Raumfahrt"
@@ -304,6 +325,7 @@ branches:
       - "Software Defined Defence"
 
   "Designwirtschaft":
+    name_en: "Design Industry"
     senweb_unit: "IIB4"
     berlin_partner: "Justina Siegmund-Born"
     keywords:
@@ -314,6 +336,7 @@ branches:
       - "Corporate Design"
 
   "Dienstleistung":
+    name_en: "Services"
     senweb_unit: "IIB2"
     berlin_partner: "nicht bekannt"
     keywords:
@@ -325,6 +348,7 @@ branches:
       - "Fitnessstudio"
 
   "Digital Health":
+    name_en: "Digital Health"
     senweb_unit: "IIIB2"
     berlin_partner: "Petra Schmauß"
     related:
@@ -345,6 +369,7 @@ branches:
       - "KI-Diagnostik"
 
   "Drohnen":
+    name_en: "Drones"
     senweb_unit: "IIIB3"
     berlin_partner: "Sascha Tiede"
     related:
@@ -371,6 +396,7 @@ branches:
       - "Drohneninfrastruktur"
 
   "Elektroindustrie":
+    name_en: "Electrical Industry"
     senweb_unit: "IIIC1"
     berlin_partner: "David Hampel"
     keywords:
@@ -383,6 +409,7 @@ branches:
       - "Elektromobilität"
 
   "Elektromobilität":
+    name_en: "Electromobility"
     senweb_unit: "IIIB3"
     berlin_partner: "Sascha Tiede"
     related:
@@ -399,6 +426,7 @@ branches:
       - "Elektrotechnik"
 
   "Energiespeicher":
+    name_en: "Energy Storage"
     senweb_unit: "IIIA4"
     berlin_partner: "Wolfgang Korek"
     keywords:
@@ -407,6 +435,7 @@ branches:
       - "Stromspeicher"
 
   "Ernährungsindustrie":
+    name_en: "Food Industry"
     senweb_unit: "III C 11"
     berlin_partner: "David Hampel, Jens Woelki, Dorota Thiel-Jankievicz"
     keywords:
@@ -419,6 +448,7 @@ branches:
       - "Nachhaltigkeit"
 
   "Fernwärme":
+    name_en: "District Heating"
     senweb_unit: "IIIA4"
     berlin_partner: "Wolfgang Korek"
     keywords:
@@ -427,6 +457,7 @@ branches:
       - "Smart Grid"
 
   "Filmwirtschaft":
+    name_en: "Film Industry"
     senweb_unit: "IIB4"
     berlin_partner: "Justina Siegmund-Born"
     keywords:
@@ -437,6 +468,7 @@ branches:
       - "VFX"
 
   "FinTech":
+    name_en: "FinTech"
     senweb_unit: "IIA4"
     berlin_partner: "Juliane Haupt"
     related:
@@ -451,6 +483,7 @@ branches:
       - "Robo-Advisory"
 
   "Foodtech":
+    name_en: "Foodtech"
     senweb_unit: "III C 11"
     berlin_partner: "Jens Woelki"
     keywords:
@@ -460,6 +493,7 @@ branches:
       - "Aquaponik"
 
   "Freiberufler":
+    name_en: "Freelancers"
     senweb_unit: "IIB2"
     berlin_partner: "nicht bekannt"
     keywords:
@@ -470,6 +504,7 @@ branches:
       - "Wirtschaftsprüfer"
 
   "Games":
+    name_en: "Games"
     senweb_unit: "IIB4"
     berlin_partner: "Justina Siegmund-Born"
     keywords:
@@ -480,6 +515,7 @@ branches:
       - "Virtual Reality"
 
   "Gastgewerbe":
+    name_en: "Hospitality"
     senweb_unit: "IIB3"
     berlin_partner: "?"
     keywords:
@@ -496,6 +532,7 @@ branches:
       - "Café"
 
   "Geothermie":
+    name_en: "Geothermal Energy"
     senweb_unit: "IIIA4"
     berlin_partner: "Wolfgang Korek"
     keywords:
@@ -504,6 +541,7 @@ branches:
       - "Erdwärme"
 
   "Gesundheitsversorgung & Pflege":
+    name_en: "Healthcare & Nursing"
     senweb_unit: "IIIB2"
     berlin_partner: "Petra Schmauß"
     related:
@@ -519,6 +557,7 @@ branches:
       - "Pflege-Robotik"
 
   "GovTech":
+    name_en: "GovTech"
     senweb_unit: "IIA4"
     berlin_partner: "Juliane Haupt"
     keywords:
@@ -529,6 +568,7 @@ branches:
       - "Smart Government"
 
   "Gummi- und Kunststoffverarbeitende Industrie":
+    name_en: "Rubber and Plastics Processing Industry"
     senweb_unit: "IIIC1"
     berlin_partner: "David Hampel"
     keywords:
@@ -542,6 +582,7 @@ branches:
       - "Kunststoffrecycling"
 
   "Halbleitertechnologien":
+    name_en: "Semiconductor Technologies"
     senweb_unit: "IIIB1"
     berlin_partner: "Gerrit Rössler"
     related:
@@ -555,6 +596,7 @@ branches:
       - "Semiconductor"
 
   "Handel":
+    name_en: "Trade"
     senweb_unit: "IIB2"
     berlin_partner: "nicht bekannt"
     keywords:
@@ -565,6 +607,7 @@ branches:
       - "Shoppingcenter/Einkaufszentren"
 
   "Handwerk":
+    name_en: "Skilled Crafts"
     senweb_unit: "IIB2"
     berlin_partner: "nicht bekannt"
     keywords:
@@ -590,6 +633,7 @@ branches:
       []
 
   "Immersive Technologien (VR, AR, XR)":
+    name_en: "Immersive Technologies (VR, AR, XR)"
     senweb_unit: "IIIB1"
     berlin_partner: "Juliane Haupt"
     keywords:
@@ -600,6 +644,7 @@ branches:
       - "Immersive Experience"
 
   "Kreislaufwirtschaft":
+    name_en: "Circular Economy"
     keywords:
       - "Cradle-to-Cradle"
       - "Ressourceneffizienz"
@@ -611,6 +656,7 @@ branches:
       - "zirkulär"
 
   "Kunstmarkt":
+    name_en: "Art Market"
     senweb_unit: "IIB4"
     berlin_partner: "Justina Siegmund-Born"
     keywords:
@@ -624,6 +670,7 @@ branches:
       # Kunstbewertung and Sammlungsmanagement, all three of which name the art trade itself.
 
   "Künstliche Intelligenz":
+    name_en: "Artificial Intelligence"
     senweb_unit: "IIIB1"
     berlin_partner: "Juliane Haupt"
     keywords:
@@ -634,6 +681,7 @@ branches:
       - "Natural Language Processing"
 
   "Ladeinfrastruktur":
+    name_en: "Charging Infrastructure"
     senweb_unit: "IIIB3"
     berlin_partner: "Sascha Tiede"
     related:
@@ -650,6 +698,7 @@ branches:
       - "MCS"
 
   "Logistik":
+    name_en: "Logistics"
     senweb_unit: "IIIB3"
     berlin_partner: "Sascha Tiede"
     keywords:
@@ -690,6 +739,7 @@ branches:
       - "Drohnenlieferservice"
 
   "Markt für darstellende Künste":
+    name_en: "Performing Arts Market"
     senweb_unit: "IIB4"
     berlin_partner: "Justina Siegmund-Born"
     keywords:
@@ -700,6 +750,7 @@ branches:
       - "Spielstätte"
 
   "Maschinen- und Anlagenbau":
+    name_en: "Mechanical and Plant Engineering"
     senweb_unit: "IIIC1"
     berlin_partner: "David Hampel"
     keywords:
@@ -719,6 +770,7 @@ branches:
       - "Steuerungstechnik"
 
   "Medizintechnik":
+    name_en: "Medical Technology"
     senweb_unit: "IIIB2"
     berlin_partner: "Petra Schmauß"
     related:
@@ -734,6 +786,7 @@ branches:
       - "Automat"
 
   "Messe- und Kongresswirtschaft":
+    name_en: "Trade Fair and Congress Industry"
     senweb_unit: "IIB3"
     berlin_partner: "?"
     keywords:
@@ -747,6 +800,7 @@ branches:
       - "Kongressorganisation"
 
   "Metallindustrie":
+    name_en: "Metal Industry"
     senweb_unit: "IIIC1"
     berlin_partner: "David Hampel"
     keywords:
@@ -758,6 +812,7 @@ branches:
       - "Umformtechnik"
 
   "Mikroelektronik":
+    name_en: "Microelectronics"
     senweb_unit: "IIIB1"
     berlin_partner: "Gerrit Rössler"
     related:
@@ -772,6 +827,7 @@ branches:
       - "Heterointergration"
 
   "Mobilitätssoftware":
+    name_en: "Mobility Software"
     senweb_unit: "IIIB3"
     berlin_partner: "Sascha Tiede"
     keywords:
@@ -809,6 +865,7 @@ branches:
       - "Telematik"
 
   "Modewirtschaft":
+    name_en: "Fashion Industry"
     senweb_unit: "IIB4"
     berlin_partner: "Justina Siegmund-Born"
     keywords:
@@ -820,6 +877,7 @@ branches:
       - "Kollektion"
 
   "Musikwirtschaft":
+    name_en: "Music Industry"
     senweb_unit: "IIB4"
     berlin_partner: "Justina Siegmund-Born"
     keywords:
@@ -837,6 +895,7 @@ branches:
       - "Clubs"
 
   "Nachhaltige Wirtschaft":
+    name_en: "Sustainable Economy"
     senweb_unit: "IIA6"
     berlin_partner: "Diana Woelki, Robin Bruck"
     keywords:
@@ -848,6 +907,7 @@ branches:
       - "ESG"
 
   "Neue Mobilitätsangebote":
+    name_en: "New Mobility Services"
     senweb_unit: "IIIB3"
     berlin_partner: "Sascha Tiede"
     keywords:
@@ -865,6 +925,7 @@ branches:
       - "E-Scooter"
 
   "Papier- und Druckindustrie":
+    name_en: "Paper and Printing Industry"
     senweb_unit: "IIIC1"
     berlin_partner: "David Hampel"
     keywords:
@@ -875,6 +936,7 @@ branches:
       - "Printmedien"
 
   "Pharma & Wirkstoffe":
+    name_en: "Pharma & Active Ingredients"
     senweb_unit: "IIIB2"
     berlin_partner: "Carolin Clement"
     related:
@@ -895,6 +957,7 @@ branches:
       - "Pharmazeutika"
 
   "Pharmaindustrie":
+    name_en: "Pharmaceutical Industry"
     senweb_unit: "IIIC1"
     berlin_partner: "Carolin Clement"
     keywords:
@@ -905,6 +968,7 @@ branches:
       - "Zulassungsverfahren"
 
   "Photonik":
+    name_en: "Photonics"
     senweb_unit: "IIIB1"
     berlin_partner: "Gerrit Rössler"
     related:
@@ -917,6 +981,7 @@ branches:
       - "Machine Vision"
 
   "Pressemarkt":
+    name_en: "Press Market"
     senweb_unit: "IIB4"
     berlin_partner: "Justina Siegmund-Born"
     keywords:
@@ -927,6 +992,7 @@ branches:
       - "Printmedien"
 
   "Quantentechnologien":
+    name_en: "Quantum Technologies"
     senweb_unit: "IIIB1"
     berlin_partner: "Gerrit Rössler"
     related:
@@ -939,6 +1005,7 @@ branches:
       - "Quantum Key Distribution"
 
   "Raumfahrt":
+    name_en: "Space"
     senweb_unit: "IIIB3"
     berlin_partner: "Sascha Tiede"
     related:
@@ -957,6 +1024,7 @@ branches:
       - "Satellitenkonstellation"
 
   "Rechenzentrenbetreiber":
+    name_en: "Data Centre Operators"
     senweb_unit: "IIIB4"
     berlin_partner: "Juliane Haupt"
     related:
@@ -969,6 +1037,7 @@ branches:
       - "Cloud-Infrastruktur"
 
   "Recycling":
+    name_en: "Recycling"
     senweb_unit: "IIIC1"
     berlin_partner: "Hannes Lebert"
     keywords:
@@ -979,6 +1048,7 @@ branches:
       - "Abfallmanagement"
 
   "Robotik":
+    name_en: "Robotics"
     senweb_unit: "IIIC1"
     berlin_partner: "David Hampel"
     keywords:
@@ -992,6 +1062,7 @@ branches:
       - "Sensorik"
 
   "Rundfunkwirtschaft":
+    name_en: "Broadcasting Industry"
     senweb_unit: "IIB4"
     berlin_partner: "Justina Siegmund-Born"
     keywords:
@@ -1002,12 +1073,14 @@ branches:
       - "Medientechnologie"
 
   "Sicherheits- und Verteidigungsindustrie":
+    name_en: "Security and Defence Industry"
     senweb_unit: "III C 1"
     berlin_partner: "David Hampel"
     keywords:
       - "Rüstungsgüter"
 
   "Solarenergie":
+    name_en: "Solar Energy"
     senweb_unit: "IIIA4"
     berlin_partner: "Wolfgang Korek"
     keywords:
@@ -1016,6 +1089,7 @@ branches:
       - "PVT"
 
   "Soziale Unternehmen":
+    name_en: "Social Enterprises"
     senweb_unit: "IIA6"
     berlin_partner: "Diana Woelki, Anne Le Rolland, Janis Gummersbach"
     keywords:
@@ -1035,6 +1109,7 @@ branches:
       - "Kollektiv"
 
   "Stromnetz":
+    name_en: "Power Grid"
     senweb_unit: "IIIA4"
     berlin_partner: "Wolfgang Korek"
     keywords:
@@ -1044,6 +1119,7 @@ branches:
       - "Resilienz"
 
   "Telekommunikationsanbieter":
+    name_en: "Telecommunications Providers"
     senweb_unit: "IIIB4"
     berlin_partner: "Juliane Haupt"
     related:
@@ -1062,6 +1138,7 @@ branches:
       - "Open RAN"
 
   "Tourismus":
+    name_en: "Tourism"
     senweb_unit: "IIB3"
     berlin_partner: "?"
     keywords:
@@ -1075,6 +1152,7 @@ branches:
       - "Sightseeing"
 
   "Wasserstoff":
+    name_en: "Hydrogen"
     senweb_unit: "IIIA4"
     berlin_partner: "Wolfgang Korek"
     keywords:
@@ -1089,6 +1167,7 @@ branches:
       # by accident, and it is the one word here that only this industry uses.
 
   "Wassertechnologien":
+    name_en: "Water Technologies"
     senweb_unit: "IIIA4"
     berlin_partner: "Wolfgang Korek"
     keywords:
@@ -1099,6 +1178,7 @@ branches:
       - "Wasserwiederverwendung"
 
   "Web3, Blockchain, DLT":
+    name_en: "Web3, Blockchain, DLT"
     senweb_unit: "IIIB1"
     berlin_partner: "Juliane Haupt"
     related:
@@ -1112,6 +1192,7 @@ branches:
       - "Onchain Asset Management"
 
   "Werbemarkt":
+    name_en: "Advertising Market"
     senweb_unit: "IIB4"
     berlin_partner: "Justina Siegmund-Born"
     keywords:
@@ -1128,6 +1209,7 @@ branches:
       # and it is still worth it at 1 right in 12. The branch keeps four words only the trade uses.
 
   "Windenergie":
+    name_en: "Wind Energy"
     senweb_unit: "IIIA4"
     berlin_partner: "Wolfgang Korek"
     keywords:

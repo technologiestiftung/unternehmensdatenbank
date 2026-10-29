@@ -68,7 +68,7 @@ def test_row_uses_northdatas_register_format_and_german_status() -> None:
         "retrieved_at": "2018-11-01T00:00:00Z",
     })
     assert row["registration_number"] == "Amtsgericht Berlin (Charlottenburg) HRB 1"
-    assert row["register_status"] == "erloschen"
+    assert row["register_status"] == "dissolved"
     assert row["address"] is None and row["postcode"] is None
     assert row["legal_form"] == "GmbH" and row["name"] == "Beispiel GmbH"
 

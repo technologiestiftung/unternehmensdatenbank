@@ -24,7 +24,7 @@ votes. Nothing is ever deleted: a correction nobody stands behind any more drops
 **Checked before it is written** (`clean`): a website must be a URL, a Technologiefeld one of
 Berlin's 77, a number a number, a date a date. A correction that fails is counted and skipped.
 Three fields take no corrections: `fundings` (a grant link, not a value), `register_announcement`
-(what the court published) and `cluster`/`amazon_effect` (removed with #47).
+(what the court published) and `registration_number` (identity, not a value).
 
 **No personal data leaves `extraction_feedback`.** An observation stores how many people agreed,
 never who. A corrected `management` name is a person's name; showing it was cleared on 2026-10-29
@@ -45,6 +45,7 @@ from urllib.parse import urlparse
 from psycopg2.extras import Json
 
 from enrichment.url_patterns import to_ascii_host
+from enrichment.register_names import REGISTER_STATUS_FROM_GERMAN, REGISTER_STATUSES
 from source_enrichment_common import (
     ensure_source,
     finish_sync_run,
@@ -70,7 +71,7 @@ FIELDS: dict[str, tuple[str, str]] = {
     "business_purpose": ("business_purpose", "text"),
     "employee_count": ("employee_count", "integer"),
     "revenue": ("revenue", "number"),
-    "technologiefeld": ("technologiefeld", "technologiefeld"),
+    "technology_field": ("technology_field", "technology_field"),
     "website": ("website", "url"),
     "management": ("ceo_name_or_contact", "text"),
     "deeptech": ("deeptech_class", "text"),
@@ -78,11 +79,10 @@ FIELDS: dict[str, tuple[str, str]] = {
     "activity_keywords": ("activity_keywords", "text"),
 }
 #: Voted on in the app, never corrected into a value. See the module docstring.
-NOT_CORRECTABLE = {"fundings", "register_announcement", "cluster", "amazon_effect"}
+NOT_CORRECTABLE = {"fundings", "register_announcement", "registration_number"}
 #: Shown as several values at once: a vote is about one of them, and confirming one denies no other.
 LIST_FIELDS = {"management", "activity_keywords"}
 
-REGISTER_STATUSES = {"aktiv", "erloschen", "in Liquidation"}
 _WZ_CODE = re.compile(r"^\d{2}(\.\d{1,2}(\.\d{1,2})?)?$")
 _THOUSANDS = re.compile(r"^\d{1,3}(\.\d{3})+$")
 _HOST = re.compile(r"^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$")
@@ -103,13 +103,13 @@ def confidence(agree: int, disagree: int, *, filled: bool = True) -> float:
     return {1: 0.30, 2: 0.60}.get(net, 0.75)
 
 
-def _technologiefelder() -> frozenset[str]:
+def _technology_fields() -> frozenset[str]:
     from enrichment.branch_classifier import load_taxonomy
 
-    return frozenset(load_taxonomy().branch_names())
+    return frozenset(load_taxonomy().english_names())
 
 
-def clean(kind: str, raw: str, technologiefelder: frozenset[str] = frozenset()) -> str | float | None:
+def clean(kind: str, raw: str, technology_fields: frozenset[str] = frozenset()) -> str | float | None:
     """A correction as the observation stores it, or None when it is not a valid value of `kind`."""
     text = " ".join(raw.split())
     if not text:
@@ -122,10 +122,12 @@ def clean(kind: str, raw: str, technologiefelder: frozenset[str] = frozenset()) 
         if parts.scheme not in {"http", "https"} or "." not in host or not _HOST.match(host):
             return None
         return f"{parts.scheme}://{host}"
-    if kind == "technologiefeld":
-        return text if text in technologiefelder else None
+    if kind == "technology_field":
+        return text if text in technology_fields else None
     if kind == "register_status":
-        return text if text in REGISTER_STATUSES else None
+        # The app shows English; a German word someone types is the same status.
+        status = REGISTER_STATUS_FROM_GERMAN.get(text.casefold(), text.casefold().replace(" ", "_"))
+        return status if status in REGISTER_STATUSES else None
     if kind == "wz_code":
         return text if _WZ_CODE.match(text) else None
     if kind == "boolean":
@@ -153,7 +155,7 @@ def clean(kind: str, raw: str, technologiefelder: frozenset[str] = frozenset()) 
 
 
 def planned_observations(
-    votes: Iterable[Mapping[str, Any]], technologiefelder: frozenset[str] = frozenset(),
+    votes: Iterable[Mapping[str, Any]], technology_fields: frozenset[str] = frozenset(),
     filled: set[tuple[str, str]] | None = None,
 ) -> tuple[list[dict[str, Any]], dict[str, int]]:
     """Every correction people stand behind, with its confidence; and what was skipped, counted.
@@ -185,7 +187,7 @@ def planned_observations(
                 skipped[f"not correctable: {key}"] += 1
             continue
         author = vote["author_id"]
-        shown = clean(FIELDS[key][1], vote.get("value") or "", technologiefelder)
+        shown = clean(FIELDS[key][1], vote.get("value") or "", technology_fields)
         if shown is not None:
             seen = (company, key, claim_key(shown))
             if vote["verdict"] == "correct":
@@ -197,7 +199,7 @@ def planned_observations(
                 confirmed.get((company, key), {}).get(seen[2], set()).discard(author)
         if not vote.get("correction"):
             continue
-        value = clean(FIELDS[key][1], vote["correction"], technologiefelder)
+        value = clean(FIELDS[key][1], vote["correction"], technology_fields)
         if value is None:
             skipped[f"invalid {key}"] += 1
             continue
@@ -271,7 +273,7 @@ def run_publish() -> int:
                         " FROM public.extraction_feedback ORDER BY updated_at, created_at, id")
             columns = [c.name for c in cur.description]
             votes = [dict(zip(columns, row)) for row in cur.fetchall()]
-            planned, skipped = planned_observations(votes, _technologiefelder(), filled_fields(cur, votes))
+            planned, skipped = planned_observations(votes, _technology_fields(), filled_fields(cur, votes))
 
             cur.execute(
                 """

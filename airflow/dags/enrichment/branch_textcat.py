@@ -11,7 +11,7 @@ WHERE THE LABELS COME FROM
 
 1. Seed: every company the keywords assigned (`outcome == "assigned"`, `decided_by == "keywords"`).
    The classifier starts by learning to imitate the keywords.
-2. App votes on `technologiefeld` (`extraction_feedback`) override the seed per company:
+2. App votes on `technology_field` (`extraction_feedback`) override the seed per company:
    a correction naming one of the 77 fields replaces the label, a majority "correct" confirms it,
    and a majority "wrong" without a correction REMOVES the example, so a known mistake is never
    learned. Corrections that are not one of the 77 names are ignored.

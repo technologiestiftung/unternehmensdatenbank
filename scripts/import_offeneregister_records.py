@@ -58,7 +58,7 @@ sys.path.insert(0, str(REPO / "airflow" / "dags"))
 
 import psycopg2  # noqa: E402
 from psycopg2.extras import Json, execute_values  # noqa: E402
-from enrichment.register_names import legal_form  # noqa: E402
+from enrichment.register_names import ACTIVE, DISSOLVED, legal_form  # noqa: E402
 from pipeline_coordinator.resolver import REGISTER_FIELDS, resolve_register_fields  # noqa: E402
 from source_enrichment_common import ensure_source  # noqa: E402
 
@@ -82,8 +82,8 @@ REGISTRATION_FIELDS = (
 FEDERAL_STATE = "Berlin"
 
 # OffeneRegister's status, in the register's own German words that `register_status` uses everywhere
-# else (the discovery filter is `= 'aktiv'`).
-STATUS = {"currently registered": "aktiv", "removed": "erloschen"}
+# else, translated (#47): `register_names.ACTIVE` / `DISSOLVED`.
+STATUS = {"currently registered": ACTIVE, "removed": DISSOLVED}
 
 # The address ends at "<postcode> <city>". What follows in some rows is register text, sometimes with
 # managers' names and dates of birth, which must not land in `address`.

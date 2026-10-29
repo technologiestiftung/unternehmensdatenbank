@@ -17,13 +17,13 @@ SOURCE_ENRICHMENT_BATCH_SIZE = int(os.getenv("SOURCE_ENRICHMENT_BATCH_SIZE", "50
 SOURCE_ENRICHMENT_SELECTION_WINDOW = int(os.getenv("SOURCE_ENRICHMENT_SELECTION_WINDOW", "250"))
 
 #: Skip companies the register says no longer exist. Off by default, and the default is the whole
-#: point of the flag: `register_status` is `erloschen` for 7,673 of the 14,443 Osnabrück
-#: rows (53.1%) and `in Liquidation` for 472 more, so switching it on removes 56.4% of the work — and
+#: point of the flag: `register_status` was `dissolved` for 7,673 of the 14,443 Osnabrück
+#: rows (53.1%) and `in_liquidation` for 472 more, so switching it on removes 56.4% of the work — and
 #: with it 36 of the 902 websites ever discovered, 4.0%. That trade is good but it is a CHANGE, and
 #: every number published in `docs/` was measured over the unfiltered table. Turn it on, measure once,
 #: write the new baseline down, and only then argue about the default.
 #:
-#: `aktiv` alone counts as active: a company in liquidation is winding down, and its 7 websites are
+#: `active` alone counts as active (`register_names.ACTIVE`; a literal here, see below): a company in liquidation is winding down, and its 7 websites are
 #: not worth 472 companies of work. Decided 2026-08-27.
 ACTIVE_ONLY = os.getenv("DISCOVERY_ACTIVE_ONLY", "").strip().lower() in {"1", "true", "yes"}
 
@@ -33,15 +33,14 @@ ACTIVE_ONLY = os.getenv("DISCOVERY_ACTIVE_ONLY", "").strip().lower() in {"1", "t
 #: a user reaches it. A `%s` placeholder cannot be empty and cannot carry `AND <col> = <val>`, so
 #: binding it would either fail to parse or silently filter on something else. The real arguments in
 #: those queries stay `%s`, as they must.
-_ACTIVE_ONLY_SQL = "AND c.register_status = 'aktiv'" if ACTIVE_ONLY else ""
+_ACTIVE_ONLY_SQL = "AND c.register_status = 'active'" if ACTIVE_ONLY else ""
 
 #: Skip companies that already HAVE a resolved website. Off by default, same reasoning as above:
 #: it changes which companies every published number was measured over.
 #:
-#: Why it is needed at all. The candidate queries already skip a company THIS source has seen, and
-#: skip anything at `data_quality_score >= 0.90`. Neither catches the case that costs money: on
-#: 2026-09-01, importing `combined_discovery` took the active companies with a website from 155 to
-#: 949, and their mean `data_quality_score` was **0.340** — nowhere near the 0.90 gate. So a paid
+#: Why it is needed at all. The candidate queries already skip a company THIS source has seen. That
+#: does not catch the case that costs money: on 2026-09-01, importing `combined_discovery` took the
+#: active companies with a website from 155 to 949. So a paid
 #: provider would have re-searched all 949, 15.1% of the 6,298 active companies, to rediscover
 #: URLs a DNS lookup had already found. Tradineo GmbH is the worked example: url_pattern had
 #: `tradineo.com` at 0.99 with a register-number match, and Brave paid to find it again.
@@ -382,9 +381,9 @@ def insert_text_observation(
 ) -> str:
     """Write one claim by one source about one text field of one company. Returns the row's id.
 
-    An append for most fields. Nineteen of them — the six discovery ones (`website`, `candidate_url`,
-    `directory_url`, `discovery_tier`, `search_query`, `osm_id`), the four classification ones
-    (`technologiefeld`, `purpose_field` and their `_withheld` variants) and the nine register fields
+    An append for most fields. Eighteen of them — the five discovery ones (`website`, `candidate_url`,
+    `directory_url`, `discovery_tier`, `osm_id`), the four classification ones
+    (`technology_field`, `purpose_field` and their `_withheld` variants) and the nine register fields
     (`resolver.REGISTER_FIELDS`, V3) — have a unique key (a partial unique index) so a re-run updates
     rather than writing a second copy. Without
     that, a source re-writing what it already wrote had to DELETE first, and
@@ -428,9 +427,9 @@ def insert_text_observation(
         ON CONFLICT (company_id, field_name, source_id, value_text)
           WHERE field_name IN (
             'website', 'candidate_url', 'directory_url',
-            'discovery_tier', 'search_query', 'osm_id',
-            'technologiefeld', 'purpose_field',
-            'technologiefeld_withheld', 'purpose_field_withheld',
+            'discovery_tier', 'osm_id',
+            'technology_field', 'purpose_field',
+            'technology_field_withheld', 'purpose_field_withheld',
             'name', 'legal_form', 'address', 'postcode', 'city',
             'register_status', 'established_at', 'business_purpose', 'wz_code'
           )

@@ -12,6 +12,14 @@ array_relationships:
           schema: public
         column_mapping:
           id: company_id
+  - name: tags
+    using:
+      manual_configuration:
+        remote_table:
+          name: company_tags
+          schema: public
+        column_mapping:
+          id: company_id
   - name: fundings
     using:
       manual_configuration:

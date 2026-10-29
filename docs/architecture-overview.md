@@ -142,8 +142,8 @@ flowchart TD
 | 6 | Gründungsdatum | `established_at` | yes | none | empty: OffeneRegister has none |
 | 7 | Adresse | `address` | yes | none | 116,527 of 296,897 |
 | 8 | Rechtsform | `legal_form` | yes | none | 257,244 of 296,897 |
-| 9 | Cluster (n=5) | `cluster` | not delivered | classifier to build | empty |
-| 10 | Technologiefeld | `technologiefeld` | not delivered | keywords on the website text; DAG to rebuild (#18) | 27 of 106 Berlin companies with a website, measured |
+| 9 | Cluster (n=5) | — | not delivered | column removed with #47 (it held LLM free text, not Berlin's five clusters); back as a new column once a classifier exists | — |
+| 10 | Technologiefeld | `technology_field` (English names) | not delivered | keywords on the website text; DAG to rebuild (#18) | 27 of 106 Berlin companies with a website, measured |
 | 11 | Website | `website` | yes | `website_discovery` verifies and fills gaps | 4,929 (106 among the first 1,000 active companies checked) |
 | 12 | Geschäftsführung / Kontakt | `management` | contact optional | register Geschäftsführer (`import_register_managers.py`); `manager_ner` (spaCy) on the Impressum; `website_contacts` for email and phone | names from register and Impressum; email and phone stored, not shown |
 | 13 | Tätigkeitsbeschreibung | `business_purpose`, `activity_keywords` | written by Fusionbase's AI | `website_keywords` | keywords published once 500 companies are read |
@@ -152,7 +152,7 @@ flowchart TD
 | 16 | Konfidenz der Klassifikation | `deeptech_confidence` | not delivered | same classifier | empty |
 | 17 | isAI | `is_ai` | not delivered | classifier to build | empty |
 | 18 | Timestamp | `updated_at` | delivery date | resolver timestamps | filled |
-| 19 | Amazon-Effekt (optional) | `amazon_effect` | not delivered | not defined yet | empty |
+| 19 | Amazon-Effekt (optional) | — | not delivered | column removed with #47, meaning not defined yet | — |
 | 20 | Schließung / Liquidation (optional) | `register_status`, `register_announcement` | only active companies are delivered | `register_announcements` (weekly, a hint); a company missing from the next delivery is a candidate | register status; announcements for 854 companies |
 
 Proposal: import Fusionbase as a high-priority source, so its values win unless a check of ours is

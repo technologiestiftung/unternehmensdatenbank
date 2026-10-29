@@ -93,7 +93,7 @@ keywords on companies people have voted on in the app.
 
 | reason | meaning |
 |---|---|
-| `no_website` | the text named a field, but no downloaded website backs it (kept in `withheld_branch`, stored as `technologiefeld_withheld`, never shown) |
+| `no_website` | the text named a field, but no downloaded website backs it (kept in `withheld_branch`, stored as `technology_field_withheld`, never shown) |
 | `torn` | keywords fired, two fields too close to separate |
 | `no_keyword` | we read text, no keyword appeared |
 | `no_text` | nothing to read |

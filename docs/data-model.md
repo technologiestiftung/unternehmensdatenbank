@@ -40,15 +40,16 @@ stored profile and did not get slower. Every shown value stayed the same (checks
 profiles, and a fresh import gave the same values as the migrated database), and grant links went from 26,236 to 26,241: names with letters like é now get the same
 key as grant recipients (`normalize_company_name` in SQL, one key everywhere).
 
-`companies` keeps: `id`, `registration_number`, `merged_into`, `metadata`, `data_quality_score`,
-`canonical_updated_at`, `data_last_updated_at`, `created_at`, `updated_at`.
+`companies` keeps: `id`, `registration_number`, `merged_into`, `metadata`, `data_last_updated_at`,
+`created_at`, `updated_at`. (`data_quality_score` and `canonical_updated_at` were removed with #47.)
 
 ### `register_status`
 
-Whether the register still lists the company: 142,571 `aktiv` and 153,915 `erloschen` in the Berlin
-set. `DISCOVERY_ACTIVE_ONLY=true` restricts discovery to `register_status = 'aktiv'`; `in
-Liquidation` counts as inactive. With a limit, the limit applies after the filter, so compare a
-filtered run only with another filtered run. A website found for an `erloschen` company deserves
+Whether the register still lists the company: 142,571 `active` and 153,915 `dissolved` in the Berlin
+set. Stored in English since V5 (#47): the register's aktiv, erloschen and in Liquidation are
+`active`, `dissolved` and `in_liquidation` (`enrichment.register_names`). `DISCOVERY_ACTIVE_ONLY=true`
+restricts discovery to `register_status = 'active'`; `in_liquidation` counts as inactive. With a limit, the limit applies after the filter, so compare a
+filtered run only with another filtered run. A website found for a `dissolved` company deserves
 extra suspicion: dissolved companies' domains get sold.
 
 ## Loading the OffeneRegister Berlin set
@@ -59,7 +60,7 @@ January 2019: 6–9 years old, so newer companies are missing and "active" means
 | | |
 |---|---|
 | companies (register court Berlin-Charlottenburg) | **296,486** |
-| `aktiv` / `erloschen` | 142,571 / 153,915 |
+| `active` / `dissolved` | 142,571 / 153,915 |
 | with an address | 116,527 |
 | with a legal form (read from the end of the name) | 256,845 |
 | WZ code, purpose, founding date, website | **none**: the dump does not have them |
@@ -124,6 +125,14 @@ How a record from any source finds its company, in this order:
 Merging never deletes: the duplicate keeps `merged_into`, and its records and observations move to
 the survivor.
 
+## Tags (V5, #47)
+
+People tag companies in the app: `tags` (free text, unique ignoring case and surrounding spaces) and
+`company_tags` (which company, which tag, who added it, when). Written through Hasura only; a person
+removes only tags they added, and renaming or deleting a tag waits for an admin role. The app reads
+them live through the profile's `tags` relationship, not from the stored profile, so a tag shows at
+once. Tags are not a source field: no vote, no observation, no coordinator.
+
 ## Feedback and provenance (V3 before the squash)
 
 **Every field the app shows can be voted on** (`extraction_feedback`), under the app's column keys.
@@ -143,8 +152,8 @@ value later, a single person's correction steps back to 0.30 and the source's va
 Priority 50 is deliberate: register values carry 1.0 and verified websites up to 0.99, so at
 equal priority a correction could never replace a wrong name. Nothing is deleted: a withdrawn
 correction drops to 0 and the source's value is shown again. Each correction is checked first (a
-URL, one of the 77 fields, a number, a date); `fundings`, `register_announcement`, `cluster` and
-`amazon_effect` take none. Only counts are stored, never who.
+URL, one of the 77 fields, a number, a date); `fundings`, `register_announcement` and
+`registration_number` take none. Only counts are stored, never who.
 
 Tested on a copy of the Berlin database on 2026-10-29: two people correcting a name replaced the
 register's name; one person correcting an address or website changed nothing; two corrections
@@ -215,7 +224,7 @@ court keeps each up for 8 weeks, so a weekly run misses none. It reads only the 
   number through `company_identifiers` (`match_method = 'identifier'`).
 - **The name comes second, before creating.** An unknown register number can be a company we have
   under an old number (HRA to HRB gets a new one). Exactly one company with the same
-  name key (`normalize_company_name`) and city that is not `erloschen`: it is the company (`match_method = 'fuzzy'`,
+  name key (`normalize_company_name`) and city that is not `dissolved`: it is the company (`match_method = 'fuzzy'`,
   confidence 0.9) and gets the new number as an identifier. Several live ones, or only deleted ones:
   the company is created and each candidate becomes a `match_candidates` row. A deleted company is
   never linked by name, since its name may be reused. Without this rule, 14 of 425 created companies
@@ -226,7 +235,7 @@ court keeps each up for 8 weeks, so a weekly run misses none. It reads only the 
   Measured 2026-10-28: 900 announcements, 451 matched, 425 companies created.
 - **The profile shows the latest one as a hint** (`register_announcement`,
   `register_announcement_date`): latest per company at confidence 1.0, older ones 0. It never changes
-  `register_status`: 147 companies shown `aktiv` had a deletion announced.
+  `register_status`: 147 companies shown `active` had a deletion announced.
 
 ## Source overview (V2)
 
