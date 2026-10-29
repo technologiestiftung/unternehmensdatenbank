@@ -50,6 +50,7 @@ from datetime import date, datetime, timezone
 from typing import Any
 from urllib.parse import urljoin
 
+from pipeline_coordinator.resolver import resolve_register_fields
 from source_enrichment_common import (
     ensure_source,
     finish_sync_run,
@@ -346,6 +347,9 @@ def run_read() -> None:
                 created += method == "created"
                 linked += method == "fuzzy"
             changed = mark_latest(cur, source_id)
+            if created:
+                # The grant links read the published name and city, which a new company only has once resolved.
+                resolve_register_fields(cur)
             if created or linked:
                 # A new company or a new register number can be the recipient of a grant that names it.
                 cur.execute("SELECT public.refresh_company_funding_links()")
