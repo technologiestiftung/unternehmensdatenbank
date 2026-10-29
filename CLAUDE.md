@@ -131,7 +131,7 @@ purpose, so for Berlin only the Technologiefeld can be filled today.
 ## Migrations
 
 `V1__baseline.sql` is the whole schema as of 2026-10-28 (squashed while nothing was deployed), plus
-`V2__source_overview.sql`, `V3__register_fields_as_observations.sql`, `V4__user_feedback_source.sql` and `V5__profile_cleanup_tags_english.sql`. A database migrated before the squash needs its Flyway history reset once
+`V2__source_overview.sql`, `V3__register_fields_as_observations.sql`, `V4__user_feedback_source.sql`, `V5__profile_cleanup_tags_english.sql` and `V6__source_dates.sql`. A database migrated before the squash needs its Flyway history reset once
 ([data-model](docs/data-model.md), "Migration strategy"). **Forward-only:** never edit a migration
 that ran anywhere shared. Flyway runs under `--profile tools`, not with `docker compose up`; on the
 hub as the app's initContainer ([release](docs/release.md)).
