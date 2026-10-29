@@ -81,7 +81,8 @@ def _apply_canonical(
     mark it as canonical (is_canonical = true on the observation), and record
     the winner in company_canonical_field_sources under logical_field.
 
-    Returns the number of company_canonical_field_sources rows upserted.
+    Returns the number of company_canonical_field_sources rows that got a new winner. An unchanged
+    winner is not written again, so `selected_at` is when the value was chosen, not the last run.
     """
     _ensure_tmp(cur)
 
@@ -155,10 +156,21 @@ def _apply_canonical(
         (logical_field,),
     )
 
-    if n_winners == 0:
+    # A winner that is already published needs nothing more. Without this, steps 2-4 cleared every
+    # winner and set it again on every run: about 5 million rows once the nine register fields (V3)
+    # went through here, for a run in which nothing had changed.
+    cur.execute(
+        f"""
+        DELETE FROM {_TMP_TABLE} w
+        USING public.company_canonical_field_sources c
+        WHERE c.company_id = w.company_id AND c.field_name = %s AND c.company_field_observation_id = w.obs_id
+        """,
+        (logical_field,),
+    )
+    if n_winners == cur.rowcount:
         return 0
 
-    # --- Step 2: clear old is_canonical for all aliases on affected companies ---
+    # --- Step 2: clear old is_canonical for all aliases on companies with a new winner ---
     cur.execute(
         f"""
         UPDATE public.company_field_observations
@@ -380,6 +392,26 @@ def resolve_register_announcement(cur: Any) -> int:
         obs_field_names=["register_announcement"],
         value_col="value_text",
         min_confidence=_FIELD_MIN_CONF,
+    )
+
+
+#: What the register says about a company, one observation field each (V3). `v_companies_enriched`
+#: reads the winners under the old `companies` column names; `name` is `company_name` there.
+REGISTER_FIELDS = (
+    "name", "legal_form", "address", "postcode", "city",
+    "register_status", "established_at", "business_purpose", "wz_code",
+)
+
+
+def resolve_register_fields(cur: Any) -> int:
+    """Name, address, status and the other register facts. Until V3 they were plain columns that
+    nothing could compete with; now a second register or a user's correction can win them."""
+    return sum(
+        _apply_canonical(
+            cur, logical_field=field, obs_field_names=[field], value_col="value_text",
+            min_confidence=_FIELD_MIN_CONF,
+        )
+        for field in REGISTER_FIELDS
     )
 
 

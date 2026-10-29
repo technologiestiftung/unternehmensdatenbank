@@ -2,16 +2,16 @@
 
 ## In one sentence
 
-`companies` is the answer, `company_field_observations` is the proof.
+`companies` is who a company is, `company_field_observations` is everything said about it.
 
 Several sources talk about the same company and may disagree. We lose none of it:
 
 | Table | Holds |
 |---|---|
-| `companies` | the base record: one row per company, a random UUID as identity |
+| `companies` | identity only: a random UUID, the register number, `merged_into` |
 | `company_source_records` | the whole record one source delivered, one row per `(source_id, external_id)` |
 | `company_field_observations` | one claim per field: company, source, field name, value, confidence |
-| `company_canonical_field_sources` | which observation won each field, and when |
+| `company_canonical_field_sources` | which observation won each field, and when it was chosen |
 | `sources` | every source, with its `priority` (lower wins) |
 | `source_sync_runs` | one row per run: status (`pending` … `cancelled`) and counters seen/created/updated/failed |
 | `company_identifiers` | every identifier a source uses for a company |
@@ -19,14 +19,28 @@ Several sources talk about the same company and may disagree. We lose none of it
 | `pipeline_state` | what a DAG has done so far, one row per (pipeline, key) |
 
 Only one observation per `(company_id, field_name)` may be canonical. Only `pipeline_coordinator`
-decides which one: sources write observations and trigger it. Enriched values (website,
-Technologiefeld, …) are not columns of `companies`; they are read through `v_companies_enriched`.
+decides which one: sources write observations and trigger it. **Every shown value is an
+observation**, the register facts included, and is read through `v_companies_enriched`.
 
-### `companies` columns
+### Register fields are observations (V3)
 
-`id`, `company_name`, `normalized_name` (for matching and search), `registration_number`,
-`legal_form`, `business_purpose`, `wz_code`, `address`, `established_at`, `postcode`, `city`,
-`district`, `locality`, `register_status`, `merged_into`, `metadata`, `data_quality_score`,
+Until V3, name, legal form, address, postcode, city, register status, founding date, purpose and WZ
+code were columns of `companies`, written once by the import. Nothing could compete with them: not a
+second register, not a user's correction. Now each is an observation of the source that delivered it
+(`resolver.REGISTER_FIELDS`; the name's field is `name`), and the coordinator publishes the winner
+like any other field. `v_companies_enriched` shows the winners under the old column names
+(`company_name`, `normalized_name`, `legal_form`, `address`, `postcode`, `city`, `register_status`,
+…), so readers did not change.
+
+What it cost, measured on the Berlin set (296,897 companies) on 2026-10-29: the migration took
+5 min 15 s; a first import into an empty database 30 min (publishing 1,379,357 values, each one
+new); a discovery batch query 8.6 s instead of 0.3 s; `refresh_company_funding_links()`
+8.3 s instead of 2.8 s; the nine register fields 22 s of each coordinator run. The app reads the
+stored profile and did not get slower. Every shown value stayed the same (checksum over all
+profiles, and a fresh import gave the same values as the migrated database), and grant links went from 26,236 to 26,241: names with letters like é now get the same
+key as grant recipients (`normalize_company_name` in SQL, one key everywhere).
+
+`companies` keeps: `id`, `registration_number`, `merged_into`, `metadata`, `data_quality_score`,
 `canonical_updated_at`, `data_last_updated_at`, `created_at`, `updated_at`.
 
 ### `register_status`
@@ -36,10 +50,6 @@ set. `DISCOVERY_ACTIVE_ONLY=true` restricts discovery to `register_status = 'akt
 Liquidation` counts as inactive. With a limit, the limit applies after the filter, so compare a
 filtered run only with another filtered run. A website found for an `erloschen` company deserves
 extra suspicion: dissolved companies' domains get sold.
-
-> **The load has to map this column.** `prepare_offeneregister_import.py` emits it, but if the
-> `\copy` column list leaves it out every row lands `NULL`, and an active-only run finds nothing.
-> The command below maps it.
 
 ## Loading the OffeneRegister Berlin set
 
@@ -54,26 +64,18 @@ January 2019: 6–9 years old, so newer companies are missing and "active" means
 | with a legal form (read from the end of the name) | 256,845 |
 | WZ code, purpose, founding date, website | **none**: the dump does not have them |
 
-The address in `companies` is cut after postcode and city, because some rows continue with register
-text naming managers and their birth dates. A part naming who receives the post (`c/o`, `bei`,
-`z. Hd.`, `zu Händen`) is dropped too: 10,423 of the 116,527 addresses had one. Before the postcode
-only parts with a digit are kept, so a name split by a comma ("Muster, Erika") goes as well.
+The address is cut after postcode and city, because some rows continue with register text naming
+managers and their birth dates. A part naming who receives the post (`c/o`, `bei`, `z. Hd.`,
+`zu Händen`) is dropped too: 10,423 of the 116,527 addresses had one. Before the postcode only parts
+with a digit are kept, so a name split by a comma ("Muster, Erika") goes as well. Where the address
+has no city, the registered seat is the city (179,959 rows).
 
-Into an empty, migrated database (`./scripts/dev-up.sh` creates and migrates `unternehmensdatenbank`):
-
-```bash
-python scripts/prepare_offeneregister_import.py openregister.db berlin.csv
-docker compose exec -T postgres psql -U app -d unternehmensdatenbank -c "\copy public.companies \
-  (company_name, normalized_name, registration_number, legal_form, business_purpose, wz_code, address, \
-  established_at, postcode, city, register_status, metadata) FROM STDIN WITH (FORMAT csv, HEADER true)" < berlin.csv
-```
-
-Everything else the dump knows goes into `company_source_records`, one row per company under the
-source `offeneregister`: register court, type and number, seat, status, the seven document flags,
-former names (32,170 companies), register moves (25,584), officers (348,904) and the raw address.
-`company_source_records` is not exposed through Hasura. The same script fills `companies.city` from
-the registered seat where the address gave none (179,959 rows). Run it after the CSV load; safe to
-re-run.
+One script, into a migrated database (`./scripts/dev-up.sh` creates and migrates
+`unternehmensdatenbank`). It creates each company (identity only) or finds it by register number,
+keeps everything the dump knows in `company_source_records` under the source `offeneregister`
+(register court, type and number, seat, status, the seven document flags, former names (32,170
+companies), register moves (25,584), officers (348,904) and the raw address; not exposed through
+Hasura), writes the register fields as observations and publishes them. Safe to re-run.
 
 ```bash
 python scripts/import_offeneregister_records.py openregister.db
@@ -188,13 +190,14 @@ court keeps each up for 8 weeks, so a weekly run misses none. It reads only the 
   number through `company_identifiers` (`match_method = 'identifier'`).
 - **The name comes second, before creating.** An unknown register number can be a company we have
   under an old number (HRA to HRB gets a new one). Exactly one company with the same
-  `normalized_name` and city that is not `erloschen`: it is the company (`match_method = 'fuzzy'`,
+  name key (`normalize_company_name`) and city that is not `erloschen`: it is the company (`match_method = 'fuzzy'`,
   confidence 0.9) and gets the new number as an identifier. Several live ones, or only deleted ones:
   the company is created and each candidate becomes a `match_candidates` row. A deleted company is
   never linked by name, since its name may be reused. Without this rule, 14 of 425 created companies
   duplicated one we had and 66 grant links would have been lost.
-- **A company we do not have is created** (`match_method = 'created'`) with name, legal form, city,
-  register number and identifier, using `enrichment.register_names` like the OffeneRegister import.
+- **A company we do not have is created** (`match_method = 'created'`): its register number and
+  identifier, and name, legal form and city as observations of this source, the legal form read by
+  `enrichment.register_names` like the OffeneRegister import.
   Measured 2026-10-28: 900 announcements, 451 matched, 425 companies created.
 - **The profile shows the latest one as a hint** (`register_announcement`,
   `register_announcement_date`): latest per company at confidence 1.0, older ones 0. It never changes

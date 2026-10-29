@@ -1,7 +1,7 @@
 """A company's official industry cluster, straight from its WZ code. No judgement anywhere.
 
 **WZ** is the *Klassifikation der Wirtschaftszweige*, the official German industry classification.
-`public.companies.wz_code` holds one for 8,483 of 14,443 companies, courtesy of the Northdata export.
+The `wz_code` register field held one for 8,483 of 14,443 companies, courtesy of the Northdata export.
 A code names an industry: `56.11.1` is "Restaurants mit Bedienung", `64.2` is
 "Beteiligungsgesellschaften".
 

@@ -17,7 +17,7 @@ SOURCE_ENRICHMENT_BATCH_SIZE = int(os.getenv("SOURCE_ENRICHMENT_BATCH_SIZE", "50
 SOURCE_ENRICHMENT_SELECTION_WINDOW = int(os.getenv("SOURCE_ENRICHMENT_SELECTION_WINDOW", "250"))
 
 #: Skip companies the register says no longer exist. Off by default, and the default is the whole
-#: point of the flag: `companies.register_status` is `erloschen` for 7,673 of the 14,443 Osnabrück
+#: point of the flag: `register_status` is `erloschen` for 7,673 of the 14,443 Osnabrück
 #: rows (53.1%) and `in Liquidation` for 472 more, so switching it on removes 56.4% of the work — and
 #: with it 36 of the 902 websites ever discovered, 4.0%. That trade is good but it is a CHANGE, and
 #: every number published in `docs/` was measured over the unfiltered table. Turn it on, measure once,
@@ -119,11 +119,6 @@ class CompanyCandidate:
     officers: frozenset[str] = frozenset()
 
 
-@dataclass
-class CompanyUrlCandidate(CompanyCandidate):
-    source_url: str = ""
-
-
 def get_connection() -> Any:
     return psycopg2.connect(PG_DSN)
 
@@ -152,7 +147,7 @@ def fetch_companies_without_source(
                   c.wz_code,
                   c.business_purpose,
                   c.metadata ->> 'branch_description' as branch_description
-                FROM public.companies c
+                FROM public.v_companies_enriched c
                 WHERE NOT EXISTS (
                   SELECT 1
                   FROM public.company_source_records csr
@@ -169,83 +164,6 @@ def fetch_companies_without_source(
                 """,
                 (source_key, recheck_after_days, recheck_after_days, limit * SOURCE_ENRICHMENT_SELECTION_WINDOW),
             )
-            return _rank_company_candidates([CompanyCandidate(*row) for row in cur.fetchall()], limit)
-    finally:
-        connection.close()
-
-
-def fetch_companies_without_source_after_id(
-    source_key: str,
-    *,
-    after_id: str | None = None,
-    limit: int = SOURCE_ENRICHMENT_BATCH_SIZE,
-) -> list[CompanyCandidate]:
-    connection = get_connection()
-    try:
-        with connection, connection.cursor() as cur:
-            # Both branches interpolate `_ACTIVE_ONLY_SQL` rather than binding it — see the note at
-            # its definition; a bound parameter cannot be an empty string or a predicate.
-            if after_id:
-                cur.execute(
-                    f"""
-                    SELECT
-                      c.id,
-                      c.company_name,
-                      c.address,
-                      c.postcode,
-                      c.city,
-                      c.registration_number,
-                      c.legal_form,
-                      c.wz_code,
-                      c.business_purpose,
-                      c.metadata ->> 'branch_description' as branch_description
-                    FROM public.companies c
-                    WHERE c.id > %s
-                      AND NOT EXISTS (
-                        SELECT 1
-                        FROM public.company_source_records csr
-                        JOIN public.sources s ON s.id = csr.source_id
-                        WHERE csr.company_id = c.id
-                          AND s.key = %s
-                          AND COALESCE(csr.source_payload ->> 'status', '') <> 'planned'
-                      )
-                      {_ACTIVE_ONLY_SQL}
-                      {_SKIP_RESOLVED_WEBSITE_SQL}
-                    ORDER BY c.id ASC
-                    LIMIT %s
-                    """,
-                    (after_id, source_key, limit * SOURCE_ENRICHMENT_SELECTION_WINDOW),
-                )
-            else:
-                cur.execute(
-                    f"""
-                    SELECT
-                      c.id,
-                      c.company_name,
-                      c.address,
-                      c.postcode,
-                      c.city,
-                      c.registration_number,
-                      c.legal_form,
-                      c.wz_code,
-                      c.business_purpose,
-                      c.metadata ->> 'branch_description' as branch_description
-                    FROM public.companies c
-                    WHERE NOT EXISTS (
-                      SELECT 1
-                      FROM public.company_source_records csr
-                      JOIN public.sources s ON s.id = csr.source_id
-                      WHERE csr.company_id = c.id
-                        AND s.key = %s
-                        AND COALESCE(csr.source_payload ->> 'status', '') <> 'planned'
-                    )
-                    {_ACTIVE_ONLY_SQL}
-                    {_SKIP_RESOLVED_WEBSITE_SQL}
-                    ORDER BY c.id ASC
-                    LIMIT %s
-                    """,
-                    (source_key, limit * SOURCE_ENRICHMENT_SELECTION_WINDOW),
-                )
             return _rank_company_candidates([CompanyCandidate(*row) for row in cur.fetchall()], limit)
     finally:
         connection.close()
@@ -464,16 +382,17 @@ def insert_text_observation(
 ) -> str:
     """Write one claim by one source about one text field of one company. Returns the row's id.
 
-    An append for most fields. Ten of them — the six discovery ones (`website`, `candidate_url`,
-    `directory_url`, `discovery_tier`, `search_query`, `osm_id`) and the four classification ones
-    (`technologiefeld`, `purpose_field` and their `_withheld` variants) — have a unique key (a partial
-    unique index, widened twice before the baseline squash) so a re-run updates rather than writing a second copy. Without
+    An append for most fields. Nineteen of them — the six discovery ones (`website`, `candidate_url`,
+    `directory_url`, `discovery_tier`, `search_query`, `osm_id`), the four classification ones
+    (`technologiefeld`, `purpose_field` and their `_withheld` variants) and the nine register fields
+    (`resolver.REGISTER_FIELDS`, V3) — have a unique key (a partial unique index) so a re-run updates
+    rather than writing a second copy. Without
     that, a source re-writing what it already wrote had to DELETE first, and
     `company_canonical_field_sources` cascades off these rows — which un-published 558 websites for
     four days on 2026-09-03.
 
     The predicate below must stay identical to the index predicate of `uq_obs_company_field_source_value`
-    in the baseline migration. Widen one and you widen
+    in the newest migration that creates it (V3). Widen one and you widen
     the other, in the same commit — Postgres infers the partial index from this predicate, so a
     field name present in one and absent from the other cannot be upserted at all.
 
@@ -511,7 +430,9 @@ def insert_text_observation(
             'website', 'candidate_url', 'directory_url',
             'discovery_tier', 'search_query', 'osm_id',
             'technologiefeld', 'purpose_field',
-            'technologiefeld_withheld', 'purpose_field_withheld'
+            'technologiefeld_withheld', 'purpose_field_withheld',
+            'name', 'legal_form', 'address', 'postcode', 'city',
+            'register_status', 'established_at', 'business_purpose', 'wz_code'
           )
         DO UPDATE SET
           confidence = EXCLUDED.confidence,
@@ -583,126 +504,6 @@ def normalize_company_name_for_search(value: str) -> str:
     simplified = re.sub(r"[^0-9a-zäöüß]+", " ", simplified, flags=re.IGNORECASE)
     simplified = re.sub(r"\s+", " ", simplified).strip()
     return simplified
-
-
-def fetch_companies_with_latest_text_observation(
-    observation_field_name: str,
-    target_source_key: str,
-    limit: int = SOURCE_ENRICHMENT_BATCH_SIZE,
-) -> list[CompanyUrlCandidate]:
-    connection = get_connection()
-    try:
-        with connection, connection.cursor() as cur:
-            # Interpolated, not bound — see `_ACTIVE_ONLY_SQL` at the top of this module.
-            cur.execute(
-                f"""
-                WITH latest_observation AS (
-                  SELECT DISTINCT ON (o.company_id)
-                    o.company_id,
-                    o.value_text
-                  FROM public.company_field_observations o
-                  WHERE o.field_name = %s
-                    AND o.value_text IS NOT NULL
-                    AND trim(o.value_text) <> ''
-                  ORDER BY o.company_id, o.is_canonical DESC, o.observed_at DESC, o.created_at DESC
-                )
-                SELECT
-                  c.id,
-                  c.company_name,
-                  c.address,
-                  c.postcode,
-                  c.city,
-                  c.registration_number,
-                  lo.value_text
-                FROM public.companies c
-                JOIN latest_observation lo ON lo.company_id = c.id
-                WHERE NOT EXISTS (
-                  SELECT 1
-                  FROM public.company_source_records csr
-                  JOIN public.sources s ON s.id = csr.source_id
-                  WHERE csr.company_id = c.id
-                    AND s.key = %s
-                    AND COALESCE(csr.source_payload ->> 'status', '') <> 'planned'
-                )
-                {_ACTIVE_ONLY_SQL}
-                {_SKIP_RESOLVED_WEBSITE_SQL}
-                ORDER BY c.updated_at DESC, c.company_name ASC
-                LIMIT %s
-                """,
-                (observation_field_name, target_source_key, limit),
-            )
-            return [CompanyUrlCandidate(*row) for row in cur.fetchall()]
-    finally:
-        connection.close()
-
-
-def fetch_companies_for_llm_enrichment(
-    source_key: str,
-    *,
-    after_id: str | None = None,
-    limit: int = SOURCE_ENRICHMENT_BATCH_SIZE,
-    min_quality_score: float | None = None,
-    max_quality_score: float = 0.90,
-) -> list[CompanyCandidate]:
-    """
-    Like fetch_companies_without_source_after_id but additionally skips companies
-    whose data_quality_score is already at or above max_quality_score (default 0.90).
-    Use this for expensive LLM enrichment so fully-covered companies are not
-    re-processed. Set min_quality_score to prioritise the least-enriched companies.
-    """
-    connection = get_connection()
-    try:
-        with connection, connection.cursor() as cur:
-            id_clause = "AND c.id > %s" if after_id else ""
-            params: list = []
-            if after_id:
-                params.append(after_id)
-            params += [source_key, max_quality_score, limit * SOURCE_ENRICHMENT_SELECTION_WINDOW]
-            if min_quality_score is not None:
-                quality_clause = (
-                    "AND (c.data_quality_score IS NULL OR c.data_quality_score BETWEEN %s AND %s)"
-                )
-                params.insert(-1, min_quality_score)
-                params.insert(-1, max_quality_score)
-            else:
-                quality_clause = "AND (c.data_quality_score IS NULL OR c.data_quality_score < %s)"
-            cur.execute(
-                f"""
-                SELECT
-                  c.id,
-                  c.company_name,
-                  c.address,
-                  c.postcode,
-                  c.city,
-                  c.registration_number,
-                  c.legal_form,
-                  c.wz_code,
-                  c.business_purpose,
-                  c.metadata ->> 'branch_description' as branch_description
-                FROM public.companies c
-                WHERE true
-                  {id_clause}
-                  AND NOT EXISTS (
-                    SELECT 1
-                    FROM public.company_source_records csr
-                    JOIN public.sources s ON s.id = csr.source_id
-                    WHERE csr.company_id = c.id
-                      AND s.key = %s
-                      AND COALESCE(csr.source_payload ->> 'status', '') <> 'planned'
-                  )
-                  {quality_clause}
-                  {_ACTIVE_ONLY_SQL}
-                  {_SKIP_RESOLVED_WEBSITE_SQL}
-                ORDER BY c.id ASC
-                LIMIT %s
-                """,
-                params,
-            )
-            return _rank_company_candidates(
-                [CompanyCandidate(*row) for row in cur.fetchall()], limit
-            )
-    finally:
-        connection.close()
 
 
 #: Whether to put the Handelsregister number — the ID a German company gets in the commercial

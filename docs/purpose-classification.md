@@ -2,7 +2,7 @@
 
 Every registered German company files a **Gegenstand des Unternehmens**: one or two sentences, written
 by a notary, saying what it is *permitted* to do. It is filed at registration and rarely changed. It
-arrives as `companies.business_purpose`.
+arrives as the `business_purpose` register field (an observation since V3).
 
 `airflow/dags/enrichment/purpose_branch.py` turns that text into `purpose_field`: one of Berlin's 77
 fields, or a recorded non-answer. Read [branch-classification](branch-classification.md) first; this

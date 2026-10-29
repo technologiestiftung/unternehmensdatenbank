@@ -1,26 +1,13 @@
-"""Company names as the register writes them: the matching key, and the legal form at the end.
+"""Company names as the register writes them: the legal form at the end.
 
-Shared by the OffeneRegister import (`scripts/prepare_offeneregister_import.py`) and the DAGs that
+Shared by the OffeneRegister import (`scripts/import_offeneregister_records.py`) and the DAGs that
 create companies from a register source (`register_announcements`), so a company created either way
-gets the same `normalized_name` and `legal_form`.
+gets the same `legal_form`. The matching key is `public.normalize_company_name` in SQL (V3): grant
+recipients were already keyed by it, and one key means a name matches the same way everywhere.
 """
 from __future__ import annotations
 
 import re
-
-LEGAL_SUFFIX_RE = re.compile(
-    r"\b(gmbh(?:\s*&\s*co\.\s*kg)?|ug|haftungsbeschränkt|ag|eg|kg|ohg|gbr|se|kgaa|mbh|e\.v\.)\b",
-    re.IGNORECASE,
-)
-
-
-def normalize_company_name(value: str) -> str:
-    """The matching key for a name: lower case, no legal form, no punctuation, single spaces."""
-    value = value.lower().replace("&", " und ")
-    value = re.sub(r"[^0-9a-zäöüß]+", " ", value, flags=re.IGNORECASE)
-    value = LEGAL_SUFFIX_RE.sub(" ", value)
-    return re.sub(r"\s+", " ", value).strip()
-
 
 # Longest first: "GmbH & Co. KG" must win over "KG", "UG (haftungsbeschränkt)" over "UG".
 LEGAL_FORMS = [

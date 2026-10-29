@@ -5,8 +5,8 @@ from datetime import date
 
 import pytest
 
-from enrichment.register_names import legal_form, normalize_company_name
-from register_announcements.main import name_match, parse_announcements, parse_java_date
+from enrichment.register_names import legal_form
+from register_announcements.main import name_match, parse_announcements, parse_java_date, register_fields
 
 
 def row(n: int, when: str, portal_id: str, category: str, court: str, name_city: str) -> str:
@@ -48,11 +48,15 @@ def test_the_register_value_has_the_identifier_format() -> None:
     assert parse_announcements(PAGE)[1].register == "Berlin (Charlottenburg) HRA 59880"
 
 
-def test_created_companies_get_the_import_name_key_and_legal_form() -> None:
-    name = parse_announcements(PAGE)[1].name
-    assert legal_form(name) == "GmbH & Co. KG"
-    # The import's key, quirks included ("& Co." stays as "und co"): same key, whichever source created it.
-    assert normalize_company_name(name) == "devg deutsche energie versorgung und co"
+def test_created_companies_get_the_imports_legal_form() -> None:
+    assert legal_form(parse_announcements(PAGE)[1].name) == "GmbH & Co. KG"
+
+
+def test_a_created_company_gets_name_legal_form_and_city_and_no_empty_field() -> None:
+    first, _, no_city = parse_announcements(PAGE)
+    assert register_fields(first) == {"name": "Beststrom24 UG (haftungsbeschränkt)", "legal_form": "UG",
+                                      "city": "Berlin"}
+    assert "city" not in register_fields(no_city)
 
 
 def test_java_dates_in_summer_and_winter_time() -> None:

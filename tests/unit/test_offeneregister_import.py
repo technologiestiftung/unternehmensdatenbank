@@ -1,4 +1,4 @@
-"""`prepare_offeneregister_import`: legal form from the name, postcode from the address, status words."""
+"""`import_offeneregister_records`: legal form from the name, postcode from the address, status words."""
 from __future__ import annotations
 
 import sys
@@ -6,9 +6,10 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "scripts"))
 
-from import_offeneregister_records import FLAGS, OFFICER_FIELDS, REGISTRATION_FIELDS, payload  # noqa: E402
+from import_offeneregister_records import (  # noqa: E402
+    FLAGS, OFFICER_FIELDS, REGISTRATION_FIELDS, legal_form, parse_address, payload, to_row,
+)
 from import_register_managers import current_managers  # noqa: E402
-from prepare_offeneregister_import import legal_form, parse_address, to_row  # noqa: E402
 
 
 def test_longest_legal_form_wins() -> None:
@@ -69,7 +70,7 @@ def test_row_uses_northdatas_register_format_and_german_status() -> None:
     assert row["registration_number"] == "Amtsgericht Berlin (Charlottenburg) HRB 1"
     assert row["register_status"] == "erloschen"
     assert row["address"] is None and row["postcode"] is None
-    assert row["legal_form"] == "GmbH" and row["normalized_name"] == "beispiel"
+    assert row["legal_form"] == "GmbH" and row["name"] == "Beispiel GmbH"
 
 
 def test_city_falls_back_to_the_registered_seat() -> None:
