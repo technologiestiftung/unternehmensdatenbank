@@ -51,7 +51,7 @@ runs one task; its exit code is the task's result, its log the task's log.
 ```
 Airflow (the hub's)     reads our DAG files from git (the DAG bundle), keeps the schedules
   └─ task due → pod     python -m run_task website_discovery.main:run_discover
-                        env from a Kubernetes secret: PG_DSN (writer), ENABLE_* flags
+                        env from a Kubernetes secret: PG_DSN (writer) and DAG settings
 ```
 
 `airflow/dags/pipeline_task.py` builds each task; Airflow **variables** decide how:
@@ -61,7 +61,7 @@ Airflow (the hub's)     reads our DAG files from git (the DAG bundle), keeps the
 | `pipeline_runner` | unset: `PythonOperator` | `kubernetes` |
 | `pipeline_image` | — | `…-pipelines:main` (staging), `…-pipelines:X.Y.Z` (production) |
 | `pipeline_namespace` | — | from the hub team |
-| `pipeline_secret` | — | the secret with `PG_DSN` and the `ENABLE_*` flags |
+| `pipeline_secret` | — | the secret with `PG_DSN` and the DAG settings |
 
 A third runner, `pipeline_runner = docker`, is for the play server, which emulates the hub with
 docker compose and the official Airflow image: the same image and `run_task` argument, but as a

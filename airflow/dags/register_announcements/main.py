@@ -43,7 +43,6 @@ later, or not. One observation per announcement; the latest has confidence 1.0, 
 from __future__ import annotations
 
 import logging
-import os
 import re
 import time
 from dataclasses import asdict, dataclass
@@ -65,7 +64,6 @@ log = logging.getLogger(__name__)
 DAG_ID = "register_announcements"
 SOURCE_KEY = "registerbekanntmachungen"
 FIELD_NAME = "register_announcement"
-ENABLED_FLAG = "ENABLE_REGISTER_ANNOUNCEMENTS"
 URL = "https://www.handelsregister.de/rp_web/bekanntmachungen/welcome.xhtml"
 #: Says who we are. Never a browser's user agent.
 USER_AGENT = "unternehmensdatenbank (Technologiestiftung Berlin; register announcements, weekly)"
@@ -97,11 +95,6 @@ class Announcement:
     def registration_number(self) -> str:
         """As `companies.registration_number` holds it: "Amtsgericht Berlin (Charlottenburg) HRB 211322"."""
         return f"Amtsgericht {self.register}"
-
-
-def _require_enabled() -> None:
-    if os.getenv(ENABLED_FLAG, "false").lower() != "true":
-        raise RuntimeError(f"{ENABLED_FLAG} is not set to true.")
 
 
 def parse_java_date(value: str) -> date:
@@ -308,7 +301,6 @@ def mark_latest(cur: Any, source_id: str) -> int:
 
 
 def run_read() -> None:
-    _require_enabled()
     announcements = parse_announcements(fetch_berlin_page())
     if not announcements:
         # Berlin has had about 110 a week; none at all means the page changed, not a quiet week.

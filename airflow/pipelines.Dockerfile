@@ -2,10 +2,10 @@
 # this image (airflow/dags/pipeline_task.py), because the hub's Airflow cannot install our packages.
 # It holds the DAG packages and their requirements, not Airflow: a pod runs one task and exits.
 #
-#   docker run --rm -e PG_DSN=... -e ENABLE_WEBSITE_DISCOVERY=true <image> website_discovery.main:run_discover
+#   docker run --rm -e PG_DSN=... <image> website_discovery.main:run_discover
 #
-# Configured by environment only (see docs/release.md): PG_DSN for the writer login, the ENABLE_*
-# flags, and each DAG's own settings.
+# Configured by environment only (see docs/release.md): PG_DSN for the writer login and each DAG's
+# own settings.
 FROM python:3.12-slim
 
 ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 PYTHONPATH=/opt/pipelines

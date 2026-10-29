@@ -44,8 +44,8 @@ scripts/free_checks.sh                              # every free check, as CI ru
 - Profiles: `debug`, `datahub` (Keycloak, Hasura, S3).
 - **Three DB roles, as on the hub:** `app` owns the schema (Flyway, host scripts), DAGs run as
   `writer` (rows only, no DDL), Hasura as `reader`. A DAG that needs DDL is wrong, not the grant.
-- `cp .env.example .env`; `dev-up.sh` fills in a Fernet key. Every DAG is **off by default** via an
-  `ENABLE_*` flag checked at task runtime, and needs **two** switches: the flag *and* unpausing.
+- `cp .env.example .env`; `dev-up.sh` fills in a Fernet key. Every DAG starts **paused** (Airflow's
+  default); unpausing it in Airflow is the only switch.
 
 ## Architecture
 

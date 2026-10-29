@@ -1,21 +1,20 @@
 # DAGs
 
-Eight DAG packages and one library. Each DAG runs only with its `ENABLE_*` flag `true` **and**
-unpaused in Airflow. The flag is checked when the task runs, so a disabled DAG still shows and fails
-with a clear message.
+Eight DAG packages and one library. Every DAG starts paused (Airflow's default,
+`dags_are_paused_at_creation`); unpausing it in Airflow is the only switch.
 
-| package | DAG id | schedule | flag | what it does |
-|---|---|---|---|---|
-| `pipeline_coordinator/` | `pipeline_coordinator` | triggered | — | the ONLY thing that decides which observation wins a field |
-| `website_discovery/` | `website_discovery` | `@hourly`, a full batch starts the next | `ENABLE_WEBSITE_DISCOVERY` | guesses domains, reads the Impressum, keeps only websites the page proves are the company's (`confidence.identifies_company`). Rechecks after `WEBSITE_DISCOVERY_RECHECK_DAYS` (90). The OpenStreetMap step is off (`WEBSITE_DISCOVERY_OSM=false`): the public Overpass server refused requests |
-| `website_contacts/` | `website_contacts` | triggered | `ENABLE_WEBSITE_CONTACTS` | the company's own `info@`-style email and phone from the Impressum of its proven website (source `impressum_contacts`). Stored, never resolved, so never shown. A failed read is retried, 3 times at most |
-| `website_keywords/` | `website_keywords` | triggered | `ENABLE_WEBSITE_KEYWORDS` | keywords from meta tags and services/products headings; generic ones measured out over all companies read; publishes `activity_keywords` once 500 companies are read; retried 3 times at most |
-| `register_announcements/` | `register_announcements` | `@weekly` | `ENABLE_REGISTER_ANNOUNCEMENTS` | Berlin's register announcements of the last 8 weeks from handelsregister.de (2 requests, the result list only, never a detail page). Linked by register number, then name and city (never to a deleted company); unknown companies are created. Publishes the latest as `register_announcement`, a hint next to `register_status`, never a change of it |
-| `berlin_zuwendungen/` | `berlin_zuwendungen` | `@monthly` | `ENABLE_BERLIN_ZUWENDUNGEN` | Land Berlin grants to HRA/HRB recipients into `company_fundings`, linked by register number |
-| `foerderkatalog/` | `foerderkatalog` | `@monthly` | `ENABLE_FOERDERKATALOG` | every Berlin grant from the Förderkatalog des Bundes into `company_fundings` |
-| `manager_ner/` | `manager_ner_extract` | triggered | `ENABLE_MANAGER_NER` | spaCy reads the Impressum and writes Geschäftsführer names (source `spacy_ner`) |
-| | `manager_ner_train` | `@weekly` | `ENABLE_MANAGER_NER` | turns the app's votes into training data; promotes a model only if it beats the current one on a held-out fifth |
-| `enrichment/` | — | — | — | the library: URL patterns, OSM matching, Impressum regex, confidence, classification. `__init__.py` is the map |
+| package | DAG id | schedule | what it does |
+|---|---|---|---|
+| `pipeline_coordinator/` | `pipeline_coordinator` | triggered | the ONLY thing that decides which observation wins a field |
+| `website_discovery/` | `website_discovery` | `@hourly`, a full batch starts the next | guesses domains, reads the Impressum, keeps only websites the page proves are the company's (`confidence.identifies_company`). Rechecks after `WEBSITE_DISCOVERY_RECHECK_DAYS` (90). The OpenStreetMap step is off (`WEBSITE_DISCOVERY_OSM=false`): the public Overpass server refused requests |
+| `website_contacts/` | `website_contacts` | triggered | the company's own `info@`-style email and phone from the Impressum of its proven website (source `impressum_contacts`). Stored, never resolved, so never shown. A failed read is retried, 3 times at most |
+| `website_keywords/` | `website_keywords` | triggered | keywords from meta tags and services/products headings; generic ones measured out over all companies read; publishes `activity_keywords` once 500 companies are read; retried 3 times at most |
+| `register_announcements/` | `register_announcements` | `@weekly` | Berlin's register announcements of the last 8 weeks from handelsregister.de (2 requests, the result list only, never a detail page). Linked by register number, then name and city (never to a deleted company); unknown companies are created. Publishes the latest as `register_announcement`, a hint next to `register_status`, never a change of it |
+| `berlin_zuwendungen/` | `berlin_zuwendungen` | `@monthly` | Land Berlin grants to HRA/HRB recipients into `company_fundings`, linked by register number |
+| `foerderkatalog/` | `foerderkatalog` | `@monthly` | every Berlin grant from the Förderkatalog des Bundes into `company_fundings` |
+| `manager_ner/` | `manager_ner_extract` | triggered | spaCy reads the Impressum and writes Geschäftsführer names (source `spacy_ner`) |
+| | `manager_ner_train` | `@weekly` | turns the app's votes into training data; promotes a model only if it beats the current one on a held-out fifth |
+| `enrichment/` | — | — | the library: URL patterns, OSM matching, Impressum regex, confidence, classification. `__init__.py` is the map |
 
 Grants are linked to companies by `refresh_company_funding_links()` after a load.
 

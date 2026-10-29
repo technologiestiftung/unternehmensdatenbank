@@ -48,14 +48,8 @@ log = logging.getLogger(__name__)
 DAG_ID = "website_keywords"
 SOURCE_KEY = "website_keywords"
 FIELD_NAME = "activity_keywords"
-ENABLED_FLAG = "ENABLE_WEBSITE_KEYWORDS"
 BATCH_SIZE = int(os.getenv("WEBSITE_KEYWORDS_BATCH_SIZE", "50"))
 CONFIDENCE = 0.6
-
-
-def _require_enabled() -> None:
-    if os.getenv(ENABLED_FLAG, "false").lower() != "true":
-        raise RuntimeError(f"{ENABLED_FLAG} is not set to true.")
 
 
 def _source_id(cur: Any) -> str:
@@ -88,7 +82,6 @@ def read_site(website: str, company_name: str) -> dict[str, Any]:
 
 
 def run_read() -> None:
-    _require_enabled()
     connection = get_connection()
     try:
         with connection, connection.cursor() as cur:
@@ -148,7 +141,6 @@ def planned_write(
 
 
 def run_publish() -> None:
-    _require_enabled()
     connection = get_connection()
     try:
         with connection, connection.cursor() as cur:

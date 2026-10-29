@@ -12,7 +12,7 @@ Chosen per Airflow installation by Airflow variables, so the DAG files are the s
   pipeline_image       the image with its tag: `:main` on staging, a version on production
   pipeline_namespace   the Kubernetes namespace the hub team gives us
   pipeline_secret      a Kubernetes secret whose keys become the pod's environment: PG_DSN for the
-                       writer login and the ENABLE_* flags
+                       writer login and the DAG settings
   pipeline_network     docker only: the network the container joins to reach Postgres
 
 "docker" is the pod as a container: same image, same `run_task` argument. Its environment is the
@@ -33,7 +33,7 @@ DAGS = Path(__file__).resolve().parent
 
 #: What a "docker" task container gets from the worker: the DAG settings of docker-compose.yml.
 #: Never PATH or PYTHONPATH (the image sets its own), never AIRFLOW_* (Airflow's secrets).
-PIPELINE_ENV_PREFIXES = ("PG_DSN", "ENABLE_", "DISCOVERY_", "WEBSITE_", "SOURCE_ENRICHMENT_",
+PIPELINE_ENV_PREFIXES = ("PG_DSN", "DISCOVERY_", "WEBSITE_", "SOURCE_ENRICHMENT_",
                          "MANAGER_NER_", "URL_DISCOVERY_", "OSM_", "IMPRINT_")
 
 

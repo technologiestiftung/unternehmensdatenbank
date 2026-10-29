@@ -47,7 +47,6 @@ from source_enrichment_common import (
 log = logging.getLogger(__name__)
 
 DAG_ID = "website_discovery"
-ENABLED_FLAG = "ENABLE_WEBSITE_DISCOVERY"
 BATCH_SIZE = int(os.getenv("WEBSITE_DISCOVERY_BATCH_SIZE", "50"))
 #: OpenStreetMap found 3 websites in 1,000 active Berlin companies and needs a city snapshot on
 #: disk, which a hub pod does not keep. Off unless asked for.
@@ -58,11 +57,6 @@ WORKERS = int(os.getenv("WEBSITE_DISCOVERY_WORKERS", "8"))
 #: A company is checked again once its last check is older than this: sites appear, move and close.
 RECHECK_AFTER_DAYS = int(os.getenv("WEBSITE_DISCOVERY_RECHECK_DAYS", "90"))
 RULE = "identity-2026-10-28"
-
-
-def _require_enabled() -> None:
-    if os.getenv(ENABLED_FLAG, "false").lower() != "true":
-        raise RuntimeError(f"{ENABLED_FLAG} is not set to true.")
 
 
 # --- rescore --------------------------------------------------------------------------------
@@ -114,7 +108,6 @@ def rescore_websites(cur: Any) -> int:
 
 
 def run_rescore() -> None:
-    _require_enabled()
     connection = get_connection()
     try:
         with connection, connection.cursor() as cur:
@@ -136,7 +129,6 @@ def _common_words(cur: Any) -> set[str]:
 def run_discover() -> int:
     """Check one batch. Returns how many companies it took: 0 skips the coordinator, a full batch
     starts the next run."""
-    _require_enabled()
     companies = fetch_companies_without_source(SOURCE_KEY, limit=BATCH_SIZE, recheck_after_days=RECHECK_AFTER_DAYS)
     if not companies:
         log.info("Every company was looked at by %s in the last %d days.", SOURCE_KEY, RECHECK_AFTER_DAYS)
