@@ -402,8 +402,9 @@ def insert_text_observation(
     also return no row when it declined to fire, and the `RETURNING id` below would then raise.
 
     `source_updated_at` is when the SOURCE recorded the value (the register's read date, an
-    announcement's publication date). Left None it means "now", the observed_at. The coordinator
-    weighs values by this age (#49).
+    announcement's publication date). Left None it means a fresh read: it is set to now(), on insert
+    and on conflict, so a website re-verified today ages from today. The coordinator weighs values by
+    this age (#49).
 
     Two things it deliberately does not refresh on conflict: `observed_at` and `source_sync_run_id`
     keep the values from the first write, so a row updated by a later run still points at the run that
@@ -429,7 +430,7 @@ def insert_text_observation(
           created_at,
           updated_at
         )
-        VALUES (%s, %s, %s, %s, %s, %s, now(), %s, %s, %s, now(), now())
+        VALUES (%s, %s, %s, %s, %s, %s, now(), %s, %s, COALESCE(%s, now()), now(), now())
         ON CONFLICT (company_id, field_name, source_id, value_text)
           WHERE field_name IN (
             'website', 'candidate_url', 'directory_url',

@@ -126,12 +126,14 @@ def _apply_canonical(
             AND {not_null_check}
             AND COALESCE(o.confidence, 0) >= %(min_confidence)s
         ),
+        newest AS (
+          SELECT company_id, max(read_at) AS read_at FROM qualifying WHERE NOT from_people GROUP BY company_id
+        ),
         candidates AS (
           -- A correction gives way to a source value read after the vote behind it.
-          SELECT * FROM qualifying c
-          WHERE NOT (c.from_people AND EXISTS (
-            SELECT 1 FROM qualifying n
-            WHERE n.company_id = c.company_id AND NOT n.from_people AND n.read_at > c.read_at))
+          SELECT c.* FROM qualifying c
+          LEFT JOIN newest n ON n.company_id = c.company_id
+          WHERE NOT c.from_people OR n.read_at IS NULL OR n.read_at <= c.read_at
         ),
         agreement AS (
           SELECT
