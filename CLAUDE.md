@@ -104,7 +104,7 @@ Read [website-verification](docs/website-verification.md) before touching `confi
 - **`enrichment/observations.py` is the write path for discovery.** `sorted()` the `evidence` set
   before `Json()`.
 - Search-engine discovery was measured and removed; a new search source must feed the same
-  verification and `confidence.py`. The OpenStreetMap step is off (`WEBSITE_DISCOVERY_OSM=false`).
+  verification and `confidence.py`, as `wikidata` does (`pipeline.verify_proposed`). The OpenStreetMap step is off (`WEBSITE_DISCOVERY_OSM=false`).
 
 ## Industry classification: THREE columns, never mixed
 

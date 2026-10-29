@@ -118,6 +118,9 @@ GENERIC_HOST = "host_is_an_industry_not_a_company"
 #: Methods, strongest first. The base is set by the strongest method that proposed the URL.
 METHOD_URL_PATTERN = "url_pattern"
 METHOD_OSM = "osm"
+#: A website Wikidata lists for the company (property P856, issue #26). Trusted like an OSM website
+#: tag: a curated record proposed it, but it may be dead or hijacked, so only the page can prove it.
+METHOD_WIKIDATA = "wikidata"
 
 # ---------------------------------------------------------------------------------------
 # The weights. Every one of these is a judgement call, not a measurement. They are grouped so
@@ -371,7 +374,7 @@ def base_for(method: str, name_uniqueness: float) -> float:
     is computed by `url_discovery.scorer.name_uniqueness`. It only moves the URL-pattern base,
     because it only describes the risk that a *guessed* domain belongs to somebody else.
     """
-    if method == METHOD_OSM:
+    if method in (METHOD_OSM, METHOD_WIKIDATA):
         return BASE_OSM
     return BASE_URL_PATTERN_MIN + BASE_URL_PATTERN_RANGE * max(0.0, min(1.0, name_uniqueness))
 
@@ -388,6 +391,8 @@ def _verified_by(evidence: set[str], methods: list[str]) -> str:
         return "page_content_match"
     if METHOD_OSM in methods:
         return "osm_website_tag"
+    if METHOD_WIKIDATA in methods:
+        return "wikidata_website"
     if IMPRINT_FOUND in evidence:
         return "imprint_found"
     return "url_pattern"
@@ -401,7 +406,7 @@ def score(
 ) -> Verdict:
     """Turn evidence into a confidence number.
 
-    `methods` — which of url_pattern / osm proposed this URL. More than one is
+    `methods` — which of url_pattern / osm / wikidata proposed this URL. More than one is
     what triggers the agreement bonus, and the caller must add AGREE_TWO / AGREE_THREE to the
     evidence itself; this function does not infer it, so that "agreement" always means what
     the pipeline decided it means.
@@ -410,7 +415,7 @@ def score(
     """
     evidence_set = set(evidence)
     ordered_methods = [
-        m for m in (METHOD_URL_PATTERN, METHOD_OSM) if m in methods
+        m for m in (METHOD_URL_PATTERN, METHOD_OSM, METHOD_WIKIDATA) if m in methods
     ]
 
     for name, reason in _DISQUALIFIERS.items():
@@ -427,8 +432,8 @@ def score(
                 disqualified_because=name,
             )
 
-    # The strongest method wins the base: OSM outranks a name guess.
-    strongest = METHOD_OSM if METHOD_OSM in ordered_methods else METHOD_URL_PATTERN
+    # The strongest method wins the base: a curated record (OSM, Wikidata) outranks a name guess.
+    strongest = next((m for m in (METHOD_OSM, METHOD_WIKIDATA) if m in ordered_methods), METHOD_URL_PATTERN)
 
     value = base_for(strongest, name_uniqueness)
     parts = [f"base {strongest} {value:.2f}"]
