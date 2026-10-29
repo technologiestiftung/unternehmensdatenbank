@@ -28,9 +28,9 @@ correctness: no row of any classification column has been hand-checked.
 | 12 | Geschäftsführung / Kontakt | `management` | contact optional | Geschäftsführer from the register; `website_contacts` reads email and phone from the Impressum | names 111,374. Email and phone stored, not shown (27 emails, 25 phones from 37 websites, 2026-10-28) |
 | 13 | Tätigkeitsbeschreibung | `business_purpose`, `activity_keywords` | yes, **AI-written** | register purpose; `website_keywords` | purpose 0 (OffeneRegister has none); keywords publish from 500 companies read |
 | 14 | Kommentar | `comments` | no | users in the app | — |
-| 15 | DeepTech Klassifikation | `deeptech_class` | **no** | needs a classifier | NULL |
+| 15 | DeepTech Klassifikation | `deeptech_class` | **no** | needs a classifier; corrections from the app (`feedback_observations`, source `user_feedback`) can already fill it | NULL |
 | 16 | Konfidenz der Klassifikation | `deeptech_confidence` | **no** | the DeepTech observation's confidence | NULL |
-| 17 | isAI | `is_ai` | **no** | needs a classifier | NULL |
+| 17 | isAI | `is_ai` | **no** | needs a classifier; corrections from the app (`feedback_observations`, source `user_feedback`) can already fill it | NULL |
 | 18 | timestamp | `updated_at` | quarterly refresh date | — | yes |
 | 19 | Amazon-Effekt *(dashed)* | `amazon_effect` | no | meaning not defined yet | NULL |
 | 20 | Schließung / Liquidation *(dashed)* | `register_status`, `register_announcement` | **no**, only active companies | `register_announcements`: the latest announcement, a hint next to the status | status 296,486 (from the snapshot); announcements 854 |
