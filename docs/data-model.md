@@ -129,7 +129,8 @@ the survivor.
 
 Every observation knows when its **source** read the value: `source_updated_at`, else
 `observed_at`. The register read Berlin between 2017-06-12 and 2019-01-31; a website is read the day
-a DAG downloads it; a correction is dated by the newest vote behind it.
+a DAG downloads it (a write without a source date sets `source_updated_at` to that day, again on every
+re-read); a correction is dated by the newest vote behind it.
 
 - **Decay only ranks.** Within one priority the coordinator compares `confidence × 0.5 ^ (age /
   half-life)`. The bar still filters on the stored confidence, so an old value with nothing newer
