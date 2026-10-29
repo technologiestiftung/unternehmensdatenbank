@@ -58,9 +58,16 @@ def test_calling_the_correction_itself_wrong_counts_against_it() -> None:
     assert (planned[0]["agree"], planned[0]["disagree"]) == (2, 1)
 
 
-def test_nobody_counts_both_for_and_against_a_claim() -> None:
+def test_only_a_persons_latest_vote_counts() -> None:
     planned, _ = planned_observations([vote("a"), vote("b"), vote("a", verdict="correct", correction=None)])
-    assert (planned[0]["agree"], planned[0]["disagree"]) == (2, 0)
+    assert (planned[0]["agree"], planned[0]["disagree"]) == (1, 1)
+
+
+def test_a_changed_mind_moves_the_person_to_the_new_correction() -> None:
+    planned, _ = planned_observations([vote("a", correction="B GmbH"), vote("b", correction="B GmbH"),
+                                       vote("a", value="B GmbH", correction="C GmbH")])
+    counts = {row["value"]: (row["agree"], row["disagree"], row["confidence"]) for row in planned}
+    assert counts == {"B GmbH": (1, 0, 0.30), "C GmbH": (1, 0, 0.30)}
 
 
 def test_the_app_key_becomes_the_coordinators_field_name() -> None:
@@ -71,7 +78,7 @@ def test_the_app_key_becomes_the_coordinators_field_name() -> None:
 
 def test_invalid_and_uncorrectable_corrections_are_counted_and_skipped() -> None:
     planned, skipped = planned_observations([
-        vote("a", field="technologiefeld", correction="Raketenbau"),
+        vote("b", field="technologiefeld", correction="Raketenbau"),
         vote("a", field="fundings", correction="01AB2345"),
         vote("a", field="technologiefeld", correction="Künstliche Intelligenz"),
     ], FIELDS_77)
@@ -91,6 +98,7 @@ def test_values_are_cleaned_to_what_the_coordinator_and_the_profile_read() -> No
     assert clean("url", "ftp://muster.de") is None
     assert clean("url", "muster.de:8080") is None
     assert clean("url", "http://Shop.Muster-Firma.de/") == "http://shop.muster-firma.de"
+    assert clean("url", "bäckerei-müller.de") == "https://xn--bckerei-mller-bfb28a.de"
     assert clean("date", "01.02.2003") == clean("date", "2003-02-01") == "2003-02-01"
     assert clean("date", "31.02.2003") is None
     assert clean("integer", "1.200") == 1200.0

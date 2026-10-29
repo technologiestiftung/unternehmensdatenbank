@@ -43,6 +43,7 @@ from urllib.parse import urlparse
 
 from psycopg2.extras import Json
 
+from enrichment.url_patterns import to_ascii_host
 from source_enrichment_common import (
     ensure_source,
     finish_sync_run,
@@ -114,7 +115,7 @@ def clean(kind: str, raw: str, technologiefelder: frozenset[str] = frozenset()) 
         return text
     if kind == "url":
         parts = urlparse(text if "://" in text else f"https://{text}")
-        host = parts.netloc.lower()
+        host = to_ascii_host(parts.netloc.lower())
         if parts.scheme not in {"http", "https"} or "." not in host or not _HOST.match(host):
             return None
         return f"{parts.scheme}://{host}"
@@ -155,29 +156,35 @@ def planned_observations(
     """Every correction people stand behind, with its confidence; and what was skipped, counted.
 
     `votes` are `extraction_feedback` rows: company_id, field_name, value (what the person saw),
-    verdict, correction, author_id, oldest first. Pure, so it is tested without a database.
-    Corrections are grouped per company, field and cleaned value, ignoring case, so "Muster GmbH"
-    and "muster gmbh" are one claim (the earliest spelling wins).
+    verdict, correction, author_id, in the order they were last changed. Only a person's latest vote
+    per company and field counts, so a changed mind replaces the old vote. Corrections are grouped
+    per company, field and cleaned value, ignoring case, so "Muster GmbH" and "muster gmbh" are one
+    claim (the spelling seen first wins; the stored observation keeps its own).
     `filled` holds the (company, observation field) pairs another source has a value for
     (`filled_fields`); None treats every field as filled.
     """
+    latest: dict[tuple[str, str, str], Mapping[str, Any]] = {}
+    for vote in votes:
+        person = (str(vote["company_id"]), vote["field_name"], vote["author_id"])
+        latest.pop(person, None)
+        latest[person] = vote
+
     agree: dict[tuple[str, str, Any], set[str]] = defaultdict(set)
     spelling: dict[tuple[str, str, Any], str | float] = {}
-    confirmed: dict[tuple[str, str, Any], set[str]] = defaultdict(set)
+    confirmed: dict[tuple[str, str], dict[Any, set[str]]] = defaultdict(lambda: defaultdict(set))
     rejected: dict[tuple[str, str, Any], set[str]] = defaultdict(set)
     skipped: dict[str, int] = defaultdict(int)
-    for vote in votes:
-        key = vote["field_name"]
-        company = str(vote["company_id"])
+    for (company, key, _), vote in latest.items():
         if key in NOT_CORRECTABLE or key not in FIELDS:
             if vote.get("correction"):
                 skipped[f"not correctable: {key}"] += 1
             continue
-        shown = clean(FIELDS[key][1], vote.get("value") or "", technologiefelder)
-        if shown is not None:
-            seen = confirmed if vote["verdict"] == "correct" else rejected
-            seen[(company, key, claim_key(shown))].add(vote["author_id"])
         if not vote.get("correction"):
+            shown = clean(FIELDS[key][1], vote.get("value") or "", technologiefelder)
+            if shown is not None and vote["verdict"] == "correct":
+                confirmed[(company, key)][claim_key(shown)].add(vote["author_id"])
+            elif shown is not None:
+                rejected[(company, key, claim_key(shown))].add(vote["author_id"])
             continue
         value = clean(FIELDS[key][1], vote["correction"], technologiefelder)
         if value is None:
@@ -189,11 +196,10 @@ def planned_observations(
 
     planned = []
     for claim, typed in sorted(agree.items(), key=lambda item: str(item[0])):
-        company, key, _ = claim
-        people = typed | confirmed[claim]
-        other_values = {author for (c, k, v), authors in confirmed.items() if (c, k) == (company, key)
-                        and (c, k, v) != claim for author in authors}
-        against = (other_values | rejected[claim]) - people
+        company, key, value = claim
+        field_confirmed = confirmed.get((company, key), {})
+        people = typed | field_confirmed.get(value, set())
+        against = rejected[claim].union(*(authors for other, authors in field_confirmed.items() if other != value))
         planned.append({
             "company_id": company, "field_name": FIELDS[key][0], "value": spelling[claim],
             "confidence": confidence(len(people), len(against),
@@ -249,7 +255,7 @@ def run_publish() -> int:
                                       source_type="user_feedback", metadata={"dag_id": DAG_ID})
             sync_run_id = start_sync_run(cur, source_id=source_id)
             cur.execute("SELECT company_id, field_name, value, verdict, correction, author_id"
-                        " FROM public.extraction_feedback ORDER BY created_at, id")
+                        " FROM public.extraction_feedback ORDER BY updated_at, created_at, id")
             columns = [c.name for c in cur.description]
             votes = [dict(zip(columns, row)) for row in cur.fetchall()]
             planned, skipped = planned_observations(votes, _technologiefelder(), filled_fields(cur, votes))
