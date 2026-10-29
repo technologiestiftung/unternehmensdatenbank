@@ -5,8 +5,9 @@ row per person, company, field and shown value). This DAG turns those correction
 of the source `user_feedback`, and `pipeline_coordinator` decides what is shown, as for every source.
 
 **Agreement decides, not one person.** Per company, field and corrected value, it counts the
-distinct people who typed it (`agree`) and the distinct people who voted the field `correct`
-(`disagree`). The difference sets the confidence (`confidence`):
+distinct people who typed it or voted that value `correct` (`agree`), and the distinct people who
+voted another value of the field `correct` or this value `wrong` (`disagree`). Nobody counts both
+ways. The difference sets the confidence (`confidence`):
 
     net agreement   confidence   shown?
     0 or less       0            no
@@ -80,6 +81,7 @@ NOT_CORRECTABLE = {"fundings", "register_announcement", "cluster", "amazon_effec
 REGISTER_STATUSES = {"aktiv", "erloschen", "in Liquidation"}
 _WZ_CODE = re.compile(r"^\d{2}(\.\d{1,2}(\.\d{1,2})?)?$")
 _THOUSANDS = re.compile(r"^\d{1,3}(\.\d{3})+$")
+_HOST = re.compile(r"^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$")
 _TRUE, _FALSE = {"true", "ja", "yes", "1"}, {"false", "nein", "no", "0"}
 
 
@@ -111,11 +113,11 @@ def clean(kind: str, raw: str, technologiefelder: frozenset[str] = frozenset()) 
     if kind == "text":
         return text
     if kind == "url":
-        url = text if "://" in text else f"https://{text}"
-        parts = urlparse(url)
-        if parts.scheme not in {"http", "https"} or "." not in parts.netloc or " " in parts.netloc:
+        parts = urlparse(text if "://" in text else f"https://{text}")
+        host = parts.netloc.lower()
+        if parts.scheme not in {"http", "https"} or "." not in host or not _HOST.match(host):
             return None
-        return f"{parts.scheme}://{parts.netloc.lower()}"
+        return f"{parts.scheme}://{host}"
     if kind == "technologiefeld":
         return text if text in technologiefelder else None
     if kind == "register_status":
@@ -152,39 +154,46 @@ def planned_observations(
 ) -> tuple[list[dict[str, Any]], dict[str, int]]:
     """Every correction people stand behind, with its confidence; and what was skipped, counted.
 
-    `votes` are `extraction_feedback` rows: company_id, field_name, verdict, correction, author_id.
-    Pure, so it is tested without a database. Corrections are grouped per company, field and cleaned
-    value, ignoring case, so "Muster GmbH" and "muster gmbh" are one claim (the first spelling wins).
+    `votes` are `extraction_feedback` rows: company_id, field_name, value (what the person saw),
+    verdict, correction, author_id, oldest first. Pure, so it is tested without a database.
+    Corrections are grouped per company, field and cleaned value, ignoring case, so "Muster GmbH"
+    and "muster gmbh" are one claim (the earliest spelling wins).
     `filled` holds the (company, observation field) pairs another source has a value for
     (`filled_fields`); None treats every field as filled.
     """
     agree: dict[tuple[str, str, Any], set[str]] = defaultdict(set)
     spelling: dict[tuple[str, str, Any], str | float] = {}
-    disagree: dict[tuple[str, str], set[str]] = defaultdict(set)
+    confirmed: dict[tuple[str, str, Any], set[str]] = defaultdict(set)
+    rejected: dict[tuple[str, str, Any], set[str]] = defaultdict(set)
     skipped: dict[str, int] = defaultdict(int)
     for vote in votes:
         key = vote["field_name"]
         company = str(vote["company_id"])
-        if vote["verdict"] == "correct":
-            disagree[(company, key)].add(vote["author_id"])
-            continue
-        if not vote.get("correction"):
-            continue
         if key in NOT_CORRECTABLE or key not in FIELDS:
-            skipped[f"not correctable: {key}"] += 1
+            if vote.get("correction"):
+                skipped[f"not correctable: {key}"] += 1
+            continue
+        shown = clean(FIELDS[key][1], vote.get("value") or "", technologiefelder)
+        if shown is not None:
+            seen = confirmed if vote["verdict"] == "correct" else rejected
+            seen[(company, key, claim_key(shown))].add(vote["author_id"])
+        if not vote.get("correction"):
             continue
         value = clean(FIELDS[key][1], vote["correction"], technologiefelder)
         if value is None:
             skipped[f"invalid {key}"] += 1
             continue
-        claim = (company, key, value.casefold() if isinstance(value, str) else value)
+        claim = (company, key, claim_key(value))
         agree[claim].add(vote["author_id"])
         spelling.setdefault(claim, value)
 
     planned = []
-    for claim, people in sorted(agree.items(), key=lambda item: str(item[0])):
+    for claim, typed in sorted(agree.items(), key=lambda item: str(item[0])):
         company, key, _ = claim
-        against = disagree[(company, key)] - people
+        people = typed | confirmed[claim]
+        other_values = {author for (c, k, v), authors in confirmed.items() if (c, k) == (company, key)
+                        and (c, k, v) != claim for author in authors}
+        against = (other_values | rejected[claim]) - people
         planned.append({
             "company_id": company, "field_name": FIELDS[key][0], "value": spelling[claim],
             "confidence": confidence(len(people), len(against),
@@ -192,6 +201,11 @@ def planned_observations(
             "agree": len(people), "disagree": len(against),
         })
     return planned, dict(skipped)
+
+
+def claim_key(value: str | float) -> str | float:
+    """What makes two corrections the same claim: text ignoring case, numbers as numbers."""
+    return value.casefold() if isinstance(value, str) else value
 
 
 def filled_fields(cur: Any, votes: list[dict[str, Any]]) -> set[tuple[str, str]]:
@@ -234,7 +248,8 @@ def run_publish() -> int:
             source_id = ensure_source(cur, key=SOURCE_KEY, name="Corrections from the app",
                                       source_type="user_feedback", metadata={"dag_id": DAG_ID})
             sync_run_id = start_sync_run(cur, source_id=source_id)
-            cur.execute("SELECT company_id, field_name, verdict, correction, author_id FROM public.extraction_feedback")
+            cur.execute("SELECT company_id, field_name, value, verdict, correction, author_id"
+                        " FROM public.extraction_feedback ORDER BY created_at, id")
             columns = [c.name for c in cur.description]
             votes = [dict(zip(columns, row)) for row in cur.fetchall()]
             planned, skipped = planned_observations(votes, _technologiefelder(), filled_fields(cur, votes))
@@ -247,7 +262,7 @@ def run_publish() -> int:
                 (source_id,),
             )
             # Numbers compared as numbers: their text differs between Python and Postgres ("12" / "12.0").
-            existing = {(r[0], r[1], r[2] if r[2] is not None else float(r[3])): (r[4], float(r[5] or 0))
+            existing = {(r[0], r[1], claim_key(r[2] if r[2] is not None else float(r[3]))): (r[4], float(r[5] or 0))
                         for r in cur.fetchall()}
 
             records: dict[str, str] = {}
@@ -265,7 +280,7 @@ def run_publish() -> int:
                 is_number = isinstance(value, float)
                 metadata = {"users_agreeing": row["agree"], "users_disagreeing": row["disagree"],
                             "decided_by": f"corrected by {row['agree']} people in the app"}
-                stored = existing.get((company, row["field_name"], value))
+                stored = existing.get((company, row["field_name"], claim_key(value)))
                 if stored is None:
                     cur.execute(
                         """
