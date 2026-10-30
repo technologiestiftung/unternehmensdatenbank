@@ -175,3 +175,6 @@ UNION ALL
 
 -- 3. Nothing reads the column any more.
 ALTER TABLE public.companies DROP COLUMN registration_number;
+
+COMMENT ON TABLE public.companies IS
+  'Company identity: a random UUID and merged_into. The register number is in company_identifiers (scheme register). Every shown value (name, address, status, ...) is an observation; read the published one through v_companies_enriched.';

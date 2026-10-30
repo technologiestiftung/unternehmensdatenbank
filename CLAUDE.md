@@ -62,7 +62,8 @@ field claim, with a confidence) → `pipeline_coordinator` → `company_canonica
   `company_canonical_field_sources`, read through `v_companies_enriched`.
 - **`companies` is identity only (V3).** Name, address, status and the other register facts are
   observations too (`resolver.REGISTER_FIELDS`), shown by `v_companies_enriched` under the old column
-  names. Never add a value column to `companies`: nothing could compete with it.
+  names. Never add a value column to `companies`: nothing could compete with it. The register number
+  lives only in `company_identifiers` (V7); the views show the newest as `registration_number`.
 - **Company identity is a random UUID, never the name** (32,170 Berlin companies have a former name).
   Matching: identifiers first, fuzzy second; `match_method`/`match_confidence` on the source record.
   Merging never deletes (`companies.merged_into`).
@@ -131,7 +132,7 @@ purpose, so for Berlin only the Technologiefeld can be filled today.
 ## Migrations
 
 `V1__baseline.sql` is the whole schema as of 2026-10-28 (squashed while nothing was deployed), plus
-`V2__source_overview.sql`, `V3__register_fields_as_observations.sql`, `V4__user_feedback_source.sql`, `V5__profile_cleanup_tags_english.sql` and `V6__source_dates.sql`. A database migrated before the squash needs its Flyway history reset once
+`V2__source_overview.sql`, `V3__register_fields_as_observations.sql`, `V4__user_feedback_source.sql`, `V5__profile_cleanup_tags_english.sql`, `V6__source_dates.sql` and `V7__register_number_from_identifiers.sql`. A database migrated before the squash needs its Flyway history reset once
 ([data-model](docs/data-model.md), "Migration strategy"). **Forward-only:** never edit a migration
 that ran anywhere shared. Flyway runs under `--profile tools`, not with `docker compose up`; on the
 hub as the app's initContainer ([release](docs/release.md)).

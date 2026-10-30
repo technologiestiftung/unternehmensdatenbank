@@ -8,7 +8,7 @@ Several sources talk about the same company and may disagree. We lose none of it
 
 | Table | Holds |
 |---|---|
-| `companies` | identity only: a random UUID, the register number, `merged_into` |
+| `companies` | identity only: a random UUID and `merged_into` (the register number is in `company_identifiers`) |
 | `company_source_records` | the whole record one source delivered, one row per `(source_id, external_id)` |
 | `company_field_observations` | one claim per field: company, source, field name, value, confidence |
 | `company_canonical_field_sources` | which observation won each field, and when it was chosen |
@@ -75,7 +75,7 @@ with a digit are kept, so a name split by a comma ("Muster, Erika") goes as well
 has no city, the registered seat is the city (179,959 rows).
 
 One script, into a migrated database (`./scripts/dev-up.sh` creates and migrates
-`unternehmensdatenbank`). It creates each company (identity only) or finds it by register number,
+`unternehmensdatenbank`). It creates each company (identity only) or finds it by its register identifier,
 keeps everything the dump knows in `company_source_records` under the source `offeneregister`
 (register court, type and number, seat, status, the seven document flags, former names (32,170
 companies), register moves (25,584), officers (348,904) and the raw address; not exposed through
@@ -96,7 +96,8 @@ python scripts/import_register_managers.py
 
 `V1__baseline.sql` is the whole schema as of 2026-10-28; everything before it was squashed while
 nothing was deployed. `V2__source_overview.sql`, `V3__register_fields_as_observations.sql`,
-`V4__user_feedback_source.sql`, `V5__profile_cleanup_tags_english.sql` and `V6__source_dates.sql` came after. Forward-only from here: never edit a migration that has
+`V4__user_feedback_source.sql`, `V5__profile_cleanup_tags_english.sql`, `V6__source_dates.sql` and
+`V7__register_number_from_identifiers.sql` came after. Forward-only from here: never edit a migration that has
 run anywhere shared, add new ones as `V{N}__description.sql`, and run Flyway before Airflow
 touches the changed schema.
 The headings below keep the pre-squash migration numbers (V3–V10) so git history finds the reasoning.
