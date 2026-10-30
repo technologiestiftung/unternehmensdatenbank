@@ -34,7 +34,7 @@ from typing import Any
 from psycopg2.extras import Json, execute_values
 
 from enrichment import confidence as conf
-from enrichment import name_frequency, pipeline, wikidata
+from enrichment import corpus, name_frequency, pipeline, wikidata
 from enrichment.observations import field_name_for
 from enrichment.register_names import DISSOLVED
 from enrichment.officers import load_officers
@@ -136,11 +136,14 @@ def match_items(cur: Any, items: list[wikidata.Item], *, source_id: str) -> tupl
     cur.execute("SELECT external_id, company_id::text FROM public.company_source_records WHERE source_id = %s",
                 (source_id,))
     left = moved_from(dict(cur.fetchall()), {qid: str(company_id) for qid, company_id, _, _ in matches})
+    texts = {i.qid: (i.wikipedia_url, i.description) for i in items}
     rows = []
     for qid, company_id, method, confidence in matches:
         _, label, digits, websites = item_by_qid[qid]
+        article, description = texts.get(qid, (None, None))
         rows.append((company_id, source_id, qid, f"https://www.wikidata.org/wiki/{qid}", label,
-                     Json({"qid": qid, "label": label, "register_digits": digits, "websites": websites}),
+                     Json({"qid": qid, "label": label, "register_digits": digits, "websites": websites,
+                           "wikipedia_url": article, "description": description}),
                      method, confidence))
     execute_values(cur, """
         INSERT INTO public.company_source_records
@@ -215,6 +218,56 @@ def demote_unproven(cur: Any, *, source_id: str, company_ids: list[str],
 
 
 # --- verify ---------------------------------------------------------------------------------
+
+
+def run_texts() -> int:
+    """Keep each matched item's Wikipedia article and Wikidata description in the company corpus
+    (#61): texts to train the classifiers on. A text read in the last `CORPUS_MAX_AGE_DAYS` is not
+    read again. Returns how many texts were stored; 0 without a corpus."""
+    if not corpus.enabled():
+        log.info("No company corpus configured (CORPUS_S3_ENDPOINT); Wikipedia texts not stored.")
+        return 0
+    connection = get_connection()
+    try:
+        with connection, connection.cursor() as cur:
+            source_id = _source_id(cur)
+            cur.execute(
+                """
+                SELECT r.company_id::text, r.external_url, r.source_payload ->> 'description',
+                       r.source_payload ->> 'wikipedia_url',
+                       EXISTS (SELECT 1 FROM public.company_documents d
+                               WHERE d.company_id = r.company_id AND d.source_id = r.source_id
+                                 AND d.kind = 'wikipedia' AND d.url = r.source_payload ->> 'wikipedia_url'
+                                 AND d.read_at > now() - %s * interval '1 day')
+                FROM public.company_source_records r
+                WHERE r.source_id = %s AND r.is_active
+                """,
+                (corpus.max_age().days, source_id),
+            )
+            records = cur.fetchall()
+        stored = 0
+        for company_id, item_url, description, article, fresh in records:
+            with connection, connection.cursor() as cur:
+                if description and corpus.put("wikidata_description", item_url, {"url": item_url, "text": description}):
+                    corpus.record_document(cur, company_id=company_id, source_id=source_id,
+                                           kind="wikidata_description", url=item_url, text=description,
+                                           namespace="wikidata_description", language="de")
+                    stored += 1
+                if article and not fresh:
+                    try:
+                        text = wikidata.wikipedia_text(article)
+                    except Exception as exc:  # noqa: BLE001  one missing article must not stop the rest
+                        log.warning("Wikipedia article not readable for %s: %s", company_id, type(exc).__name__)
+                        continue
+                    if text and corpus.put("wikipedia", article, {"url": article, "text": text}):
+                        corpus.record_document(cur, company_id=company_id, source_id=source_id,
+                                               kind="wikipedia", url=article, text=text,
+                                               namespace="wikipedia", language="de")
+                        stored += 1
+        log.info("%d texts stored in the company corpus (Wikipedia articles and Wikidata descriptions).", stored)
+        return stored
+    finally:
+        connection.close()
 
 
 def run_verify() -> int:
@@ -336,6 +389,7 @@ def _make_dag():  # noqa: ANN201
         max_active_runs=1, tags=["sources", "websites", "wikidata"],
     ) as dag:
         match = pipeline_task("match_items", run_match, returns=True)
+        texts = pipeline_task("store_texts", run_texts)
         verify = pipeline_task("verify_websites", run_verify, returns=True)
         took_any = ShortCircuitOperator(
             task_id="took_any",
@@ -351,7 +405,7 @@ def _make_dag():  # noqa: ANN201
             python_callable=lambda ti: is_full_batch(ti.xcom_pull(task_ids="verify_websites")),
         )
         next_batch = TriggerDagRunOperator(task_id="next_batch", trigger_dag_id=DAG_ID, wait_for_completion=False)
-        match >> verify >> took_any >> [coordinate, more_left]
+        match >> texts >> verify >> took_any >> [coordinate, more_left]
         more_left >> next_batch
     return dag
 

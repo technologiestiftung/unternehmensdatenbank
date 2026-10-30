@@ -50,6 +50,7 @@ from manager_ner.ner import (
     train,
     window_text,
 )
+from enrichment import corpus
 from source_enrichment_common import (
     ensure_source,
     finish_sync_run,
@@ -172,7 +173,7 @@ def run_extract() -> None:
         seen = names_written = failed = 0
         for company_id, company_name, website in companies:
             seen += 1
-            imprint_url = None
+            text, imprint_url = "", None
             try:
                 text, imprint_url = read_impressum(website)
                 names = extract_names(nlp, window_text(text))
@@ -186,6 +187,10 @@ def run_extract() -> None:
                     external_url=website, source_company_name=company_name,
                     source_payload={"model_version": version or BASE_MODEL, "names_found": len(names)},
                 )
+                # The Impressum is in the company corpus (S3, via fetch_page); this says it is this company's.
+                if imprint_url:
+                    corpus.record_document(cur, company_id=company_id, source_id=source_id, kind="webpage",
+                                           url=imprint_url, text=text, namespace="page")
                 for name in names:
                     insert_text_observation(
                         cur, company_id=company_id, source_record_id=record_id, source_id=source_id,

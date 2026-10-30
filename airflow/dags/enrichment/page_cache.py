@@ -21,13 +21,16 @@ Both store raw HTML and nothing derived. Whether a page looks parked, which post
 its register number is — all of that is recomputed on every read. Caching a *conclusion* would
 freeze the very code this cache exists to let people change.
 
-Switched on by setting COMBINED_PAGE_CACHE_DIR. Unset means disabled, which is the default inside
-Airflow: a DAG is supposed to see the web as it is today, and a cache that silently served last
-month's page would make it report stale websites as current. `scripts/run_combined_discovery.py` is
-a measurement rather than a data load, so it turns the cache on for itself.
+Two backends, the same calls:
 
-Entries never expire. A measurement wants the page as it was when the run happened, so that a
-re-scored comparison is against the same input. Delete the directory to start again.
+- **S3, the company corpus** (`enrichment.corpus`, issue #61): on whenever `CORPUS_S3_ENDPOINT` is set,
+  which is how the DAGs run. A page is served for `CORPUS_MAX_AGE_DAYS` (90, the recheck interval) and
+  then downloaded again, so a DAG sees the web of the last 90 days and every DAG shares one download.
+- **A directory** (`COMBINED_PAGE_CACHE_DIR`): for measurement runs, and it wins when set. Its entries
+  never expire: a measurement wants the page as it was when the run happened, so a re-scored
+  comparison is against the same input. Delete the directory to start again.
+
+Neither set: nothing is cached, and every function here is a no-op.
 """
 from __future__ import annotations
 
@@ -40,15 +43,21 @@ import tempfile
 from pathlib import Path
 from typing import Any
 
+from enrichment import corpus
+
 log = logging.getLogger(__name__)
 
 #: Where to keep pages. Unset = no caching at all, and every function here becomes a no-op.
 CACHE_DIR = os.getenv("COMBINED_PAGE_CACHE_DIR", "").strip()
 
 
+def _directory() -> bool:
+    return bool(os.getenv("COMBINED_PAGE_CACHE_DIR", "").strip())
+
+
 def enabled() -> bool:
     """Is there a cache to use? Read at call time, so a test can set the variable and go."""
-    return bool(os.getenv("COMBINED_PAGE_CACHE_DIR", "").strip())
+    return _directory() or corpus.enabled()
 
 
 def _root() -> Path:
@@ -73,8 +82,8 @@ def get(namespace: str, key: str) -> dict[str, Any] | None:
     Never raises. A cache that fails has to behave exactly like a cache that is empty, or a corrupt
     file would take down a four-hour run.
     """
-    if not enabled():
-        return None
+    if not _directory():
+        return corpus.get(namespace, key)
     path = _path_for(namespace, key)
     try:
         with gzip.open(path, "rt", encoding="utf-8") as handle:
@@ -93,7 +102,8 @@ def put(namespace: str, key: str, record: dict[str, Any]) -> None:
     and a half-written file read back as a page is worse than no cache. `os.replace` is atomic on
     both Windows and Linux.
     """
-    if not enabled():
+    if not _directory():
+        corpus.put(namespace, key, record)
         return
     path = _path_for(namespace, key)
     try:
@@ -113,7 +123,7 @@ def put(namespace: str, key: str, record: dict[str, Any]) -> None:
 
 def stats() -> dict[str, int]:
     """How many pages are cached, per namespace. For the runner's opening log line."""
-    if not enabled():
+    if not _directory():
         return {}
     counts: dict[str, int] = {}
     root = _root()

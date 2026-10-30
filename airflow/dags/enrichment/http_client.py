@@ -100,12 +100,24 @@ def verify_url(url: str) -> dict | None:
 
 
 def fetch_page(url: str) -> str | None:
+    """The page's HTML, or None. Served from the page store when one is configured (`page_cache`,
+    the company corpus on S3): a page any DAG downloaded in the last 90 days is not downloaded again,
+    including one discovery probed. A failed download is not stored, so a short outage is retried."""
+    from enrichment import page_cache
+
+    for namespace in ("page", "probe"):
+        cached = page_cache.get(namespace, url)
+        if cached and cached.get("html") and 200 <= (cached.get("status_code") or 200) < 300:
+            if namespace != "page":
+                page_cache.put("page", url, cached)
+            return cached["html"]
     try:
         resp = session().get(
             url, headers=HEADERS, timeout=URL_DISCOVERY_HTTP_TIMEOUT_S, allow_redirects=True
         )
         if resp.status_code == 200:
             resp.encoding = resp.apparent_encoding or "utf-8"
+            page_cache.put("page", url, {"final_url": str(resp.url), "status_code": 200, "html": resp.text})
             return resp.text
     except Exception:
         pass

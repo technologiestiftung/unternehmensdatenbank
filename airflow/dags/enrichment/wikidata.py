@@ -21,11 +21,13 @@ ENDPOINT = "https://query.wikidata.org/sparql"
 USER_AGENT = ("unternehmensdatenbank/1.0 (Technologiestiftung Berlin; "
               "https://github.com/technologiestiftung/unternehmensdatenbank)")
 QUERY = """
-SELECT ?item ?label ?website ?register WHERE {
+SELECT ?item ?label ?website ?register ?article ?description WHERE {
   ?item wdt:P159 ?hq . ?hq wdt:P131* wd:Q64 .
   ?item wdt:P856 ?website .
   OPTIONAL { ?item wdt:P12012 ?register }
   OPTIONAL { ?item rdfs:label ?label FILTER(lang(?label) = "de") }
+  OPTIONAL { ?article schema:about ?item ; schema:isPartOf <https://de.wikipedia.org/> }
+  OPTIONAL { ?item schema:description ?description FILTER(lang(?description) = "de") }
 }
 """
 _DIGITS = re.compile(r"\d+")
@@ -39,6 +41,10 @@ class Item:
     #: Only the digits of a commercial register number (HRA/HRB or bare). An association (`VR`) or
     #: cooperative register entry is None: our register data has no such numbers to match.
     register_digits: str | None
+    #: The German Wikipedia article, and Wikidata's German one-line description: texts for the
+    #: company corpus (#61). Wikipedia is CC BY-SA, Wikidata CC0.
+    wikipedia_url: str | None = None
+    description: str | None = None
 
 
 def register_digits(value: str | None) -> str | None:
@@ -54,11 +60,15 @@ def parse(bindings: Iterable[dict[str, Any]]) -> list[Item]:
     grouped: dict[str, dict[str, Any]] = {}
     for row in bindings:
         qid = row["item"]["value"].rsplit("/", 1)[-1]
-        item = grouped.setdefault(qid, {"label": None, "websites": set(), "register": None})
+        item = grouped.setdefault(qid, {"label": None, "websites": set(), "register": None,
+                                         "article": None, "description": None})
         item["websites"].add(row["website"]["value"])
+        item["article"] = item["article"] or (row.get("article") or {}).get("value")
+        item["description"] = item["description"] or (row.get("description") or {}).get("value")
         item["label"] = item["label"] or (row.get("label") or {}).get("value")
         item["register"] = item["register"] or register_digits((row.get("register") or {}).get("value"))
-    return [Item(qid, g["label"], tuple(sorted(g["websites"])), g["register"]) for qid, g in sorted(grouped.items())]
+    return [Item(qid, g["label"], tuple(sorted(g["websites"])), g["register"], g["article"], g["description"])
+            for qid, g in sorted(grouped.items())]
 
 
 def fetch() -> list[Item]:
@@ -69,3 +79,21 @@ def fetch() -> list[Item]:
                              headers={"Accept": "application/sparql-results+json", "User-Agent": USER_AGENT})
     response.raise_for_status()
     return parse(response.json()["results"]["bindings"])
+
+
+def wikipedia_text(article_url: str) -> str | None:
+    """The plain text of a German Wikipedia article (CC BY-SA), or None. One API call, no HTML."""
+    from urllib.parse import unquote, urlparse
+
+    from enrichment.http_client import session
+
+    title = unquote(urlparse(article_url).path.rsplit("/", 1)[-1])
+    response = session().get(
+        "https://de.wikipedia.org/w/api.php",
+        params={"action": "query", "prop": "extracts", "explaintext": 1, "format": "json",
+                "formatversion": 2, "redirects": 1, "titles": title},
+        headers={"User-Agent": USER_AGENT}, timeout=60,
+    )
+    response.raise_for_status()
+    pages = response.json().get("query", {}).get("pages", [])
+    return (pages[0].get("extract") or None) if pages else None
