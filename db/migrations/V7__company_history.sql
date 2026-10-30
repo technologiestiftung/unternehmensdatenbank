@@ -9,6 +9,9 @@
 --
 -- PERSONAL DATA: manager names stay here after they are no longer shown (a former Geschäftsführer).
 -- Included as decided on 2026-10-30, flagged for the privacy review (#54).
+-- v_company_claims deliberately lists every claim to every logged-in user, also manager names that
+-- were never shown and corrections below the bar (one person's, or withdrawn). Decided on
+-- 2026-10-30, FLAGGED FOR THE PRIVACY REVIEW (#54).
 
 CREATE TABLE public.company_field_history (
     id bigserial PRIMARY KEY,
@@ -26,7 +29,10 @@ CREATE TABLE public.company_field_history (
     changed_at timestamptz NOT NULL DEFAULT now()
 );
 CREATE INDEX company_field_history_latest_idx
-    ON public.company_field_history (company_id, field_name, value, changed_at DESC, id DESC);
+    ON public.company_field_history (company_id, field_name, changed_at DESC, id DESC);
+CREATE INDEX company_field_history_management_idx
+    ON public.company_field_history (company_id, value, changed_at DESC, id DESC)
+    WHERE field_name = 'management';
 COMMENT ON TABLE public.company_field_history IS
   'Append-only history of every shown value per company: shown, replaced, confidence_changed, removed. Written by record_company_history() at the end of each pipeline_coordinator run. Never updated or deleted.';
 
@@ -37,6 +43,8 @@ DECLARE
   written integer;
   managers integer;
 BEGIN
+  -- Overlapping coordinator runs would both compare with the same latest row and write it twice.
+  PERFORM pg_advisory_xact_lock(hashtext('record_company_history'));
   -- One value per field: the canonical observation.
   WITH current AS (
     SELECT cfs.company_id, cfs.field_name,
@@ -149,6 +157,8 @@ COMMENT ON VIEW public.v_company_history IS
 -- Every claim a source made, for the "all claims" toggle. Only fields the app may show: never email
 -- or phone (stored, never resolved), never a _withheld field (the rules refused to publish it), no
 -- internal bookkeeping (discovery_tier, osm_id, directory_url), and no person behind a correction.
+-- Deliberately included (decided 2026-10-30, FLAGGED FOR THE PRIVACY REVIEW, #54): manager names
+-- that were never shown, and corrections below the bar (one person's, or withdrawn).
 CREATE VIEW public.v_company_claims AS
  SELECT o.id,
     o.company_id,
@@ -174,7 +184,7 @@ CREATE VIEW public.v_company_claims AS
     'activity_keywords', 'register_announcement', 'ceo_name_or_contact', 'employee_count', 'revenue',
     'deeptech_class', 'is_ai');
 COMMENT ON VIEW public.v_company_claims IS
-  'Every claim any source made about a company, shown or not, for the app''s "all claims" toggle (#54). Excludes email, phone, _withheld fields and bookkeeping by a field allow-list.';
+  'Every claim any source made about a company, shown or not, for the app''s "all claims" toggle (#54). Excludes email, phone, _withheld fields and bookkeeping by a field allow-list. Deliberately includes manager names never shown and corrections below the bar (one person''s, or withdrawn), visible to every logged-in user: flagged for the privacy review (#54).';
 
 GRANT SELECT, INSERT ON public.company_field_history TO ${writer_role};
 GRANT USAGE ON SEQUENCE public.company_field_history_id_seq TO ${writer_role};

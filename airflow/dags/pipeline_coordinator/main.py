@@ -87,6 +87,7 @@ def _make_dag():  # noqa: ANN201
         schedule=None,
         start_date=datetime(2026, 8, 4, tzinfo=timezone.utc),
         catchup=False,
+        max_active_runs=1,
         tags=["pipeline", "coordinator"],
     ) as dag:
         pipeline_task("resolve_and_score", run_pipeline_coordinator)
