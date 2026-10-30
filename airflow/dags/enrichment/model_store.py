@@ -35,9 +35,13 @@ def _key(name: str, path: str) -> str:
 
 
 def current_version(name: str, local_dir: Path) -> str | None:
-    """The version in use: S3's `current.json` when there is a store, else the local one."""
-    raw = corpus.get_bytes(_key(name, "current.json")) if corpus.enabled() else None
-    if raw is None:
+    """The version in use: S3's `current.json` when a store is configured, else the local one.
+    None when there is none; raises when the store cannot be read."""
+    if corpus.configured():
+        raw = corpus.get_bytes(_key(name, "current.json"))
+        if raw is None:
+            return None
+    else:
         try:
             raw = (local_dir / "current.json").read_bytes()
         except FileNotFoundError:

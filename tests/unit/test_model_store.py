@@ -6,7 +6,8 @@ import shutil
 
 import pytest
 
-from enrichment import model_store
+from enrichment import corpus, model_store
+from tests.unit.conftest import S3Error
 
 
 def _train(folder, version: str) -> dict:  # noqa: ANN001
@@ -53,3 +54,22 @@ def test_a_named_version_missing_from_the_store_fails_instead_of_falling_back(s3
     assert model_store.current_version("ner", tmp_path / "pod") == "v1"
     with pytest.raises(FileNotFoundError):
         model_store.local_copy("ner", "v1", tmp_path / "pod")
+
+
+def test_a_store_without_current_json_has_no_version(s3, tmp_path) -> None:  # noqa: ANN001
+    (tmp_path / "current.json").write_text('{"version": "v9"}')  # a stale working copy is not asked
+    assert model_store.current_version("ner", tmp_path) is None
+
+
+def test_a_store_that_fails_raises_instead_of_meaning_no_version(s3, tmp_path, monkeypatch) -> None:  # noqa: ANN001
+    model_store.publish("ner", "v1", tmp_path, _train(tmp_path, "v1"), promoted=True)
+
+    def broken(*_args):  # noqa: ANN002, ANN202
+        raise S3Error("InternalError")
+
+    monkeypatch.setattr(s3, "get_object", broken)
+    with pytest.raises(S3Error):
+        model_store.current_version("ner", tmp_path / "pod")
+    monkeypatch.setattr(corpus, "_unreachable", True)  # an earlier page read lost the store
+    with pytest.raises(ConnectionError):
+        model_store.current_version("ner", tmp_path / "pod")

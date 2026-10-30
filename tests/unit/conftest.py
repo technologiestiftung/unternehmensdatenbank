@@ -29,6 +29,8 @@ class FakeS3:
         return type("Stat", (), {"last_modified": self.objects[name][1]})()
 
     def get_object(self, _bucket: str, name: str):  # noqa: ANN201
+        if name not in self.objects:
+            raise S3Error("NoSuchKey")
         body = self.objects[name][0]
         return type("Response", (), {"read": lambda self: body, "close": lambda self: None,
                                      "release_conn": lambda self: None})()

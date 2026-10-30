@@ -20,7 +20,7 @@ without a privacy review.
 
 Configured by `CORPUS_S3_ENDPOINT` (host:port), `CORPUS_S3_ACCESS_KEY`, `CORPUS_S3_SECRET_KEY`,
 `CORPUS_S3_BUCKET`, `CORPUS_S3_SECURE`. Without an endpoint every function here is a no-op, and a
-store that fails behaves exactly like an empty one: nothing here raises.
+store that fails behaves exactly like an empty one: nothing here raises, except `get_bytes` (models).
 """
 from __future__ import annotations
 
@@ -51,9 +51,14 @@ def _setting(name: str, default: str = "") -> str:
     return os.getenv(name, default).strip()
 
 
+def configured() -> bool:
+    """Is an S3 store set up? Read at call time, so a test can set the variable and go."""
+    return bool(_setting("CORPUS_S3_ENDPOINT"))
+
+
 def enabled() -> bool:
-    """Is there an S3 store? Read at call time, so a test can set the variable and go."""
-    return bool(_setting("CORPUS_S3_ENDPOINT")) and not _unreachable
+    """Is there an S3 store that has not failed this run?"""
+    return configured() and not _unreachable
 
 
 def _failed(exc: Exception, what: str) -> None:
@@ -189,9 +194,13 @@ def put_bytes(name: str, data: bytes, content_type: str = "application/octet-str
 
 
 def get_bytes(name: str) -> bytes | None:
-    """The bytes under an exact object name, or None. Never raises."""
-    if not enabled():
+    """The bytes under an exact object name; None only when no store is configured or the object does
+    not exist. Any other failure raises, an unreachable store included: a model read that failed must
+    not look like a model that is not there."""
+    if not configured():
         return None
+    if _unreachable:
+        raise ConnectionError("Company corpus unreachable earlier in this run.")
     try:
         response = _s3().get_object(bucket(), name)
         try:
@@ -199,6 +208,7 @@ def get_bytes(name: str) -> bytes | None:
         finally:
             response.close()
             response.release_conn()
-    except Exception as exc:  # noqa: BLE001
-        _failed(exc, f"reading {name}")
-        return None
+    except Exception as exc:
+        if type(exc).__name__ == "S3Error" and getattr(exc, "code", "") == "NoSuchKey":
+            return None
+        raise
