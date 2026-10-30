@@ -156,12 +156,16 @@ two people's correction did not replace it, one read after it did.
 
 Nothing had been checked by a person: every confidence and threshold here is a starting value.
 `review_sample` is a **fixed** set of active companies people check in the app (list filter
-"Stichprobe", then the usual ✓/✗), stratified so every kind of value is judged: 40 with a website,
-25 with a technology field, 20 with managers, 15 with register data only. Drawn in a stable random
+"Stichprobe", then the usual ✓/✗), stratified so every kind of value is judged: 25 with a technology field,
+40 with a website (and no technology field), 20 with managers, 15 with register data only. The
+technology field is checked first: it needs a website, so a website-first order would leave it only
+companies whose website was later dropped. Drawn in a stable random
 order, not by low confidence, which would make every source look worse than it is.
 `draw_review_sample()` only tops a stratum up, never replaces anyone; `pipeline_coordinator` calls it
-after every run, so the technology-field stratum fills once companies are classified (14 of 25 on
-2026-10-30). `v_review_results` gives the precision per field and stratum from those votes.
+after every run, so the technology-field stratum fills once companies are classified.
+`v_review_results` gives the precision per field and stratum of the values shown **now**: a vote on a
+value that was since replaced no longer counts, and each value gets one verdict by majority of its
+votes (a tie is left out), so two voters do not count twice.
 
 ## Company corpus (V9, #61)
 
