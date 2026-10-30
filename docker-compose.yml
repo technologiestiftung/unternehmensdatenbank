@@ -116,7 +116,6 @@ services:
       APP_DB_NAME: ${APP_DB_NAME:-unternehmensdatenbank}
       APP_DB_USER: ${APP_DB_USER:-app}
       APP_DB_PASSWORD: ${APP_DB_PASSWORD:-app}
-      APP_DB_STAGING_NAME: ${APP_DB_STAGING_NAME:-unternehmensdatenbank_staging}
       APP_DB_WRITER_USER: ${APP_DB_WRITER_USER:-writer}
       APP_DB_WRITER_PASSWORD: ${APP_DB_WRITER_PASSWORD:-writer}
       APP_DB_READER_USER: ${APP_DB_READER_USER:-reader}

@@ -7,7 +7,7 @@ them. This repo runs the same pieces locally, so "works here" means "works on th
 | On the hub | Locally | Where |
 |---|---|---|
 | Postgres **15** with PostGIS and pgvector | the same, from `postgres:15` | `postgres/Dockerfile` |
-| one database per environment | `unternehmensdatenbank`, `unternehmensdatenbank_staging` | `postgres/init/01-create-databases.sh` |
+| one database per environment | `unternehmensdatenbank` (one environment locally) | `postgres/init/01-create-databases.sh` |
 | owner, writer, reader login per database | `app`, `writer`, `reader` | same file; grants in the baseline |
 | Airflow (add-on, default 3.3.2) | Airflow 3.2.0 | `docker-compose.yml` |
 | Keycloak 26 (realm `tsb-prd`) | Keycloak 26.8.1, realm `datahub` | `keycloak/datahub-realm.json` |
@@ -44,10 +44,16 @@ docker compose --profile datahub up -d     # Keycloak, Hasura, S3
 The role **names** reach the migrations as Flyway placeholders (`${writer_role}`, `${reader_role}`),
 so the hub can name them its own way.
 
-**Staging:** both databases get every migration, staging first
-(`APP_DB_NAME=unternehmensdatenbank_staging docker compose --profile tools run --rm flyway`, then
-without the variable). To point Airflow and Hasura at staging, set `APP_DB_NAME` in `.env` and
-recreate the containers.
+**After a migration, reload Hasura's metadata.** Hasura reads the columns of every table and view
+once and keeps them. After V5 renamed and dropped profile columns it still offered the old ones, so
+the app's company list failed with `database query error` (`column ... cluster does not exist`):
+
+```bash
+curl -s localhost:8090/v1/metadata -H "x-hasura-admin-secret: $HASURA_ADMIN_SECRET" \
+  -d '{"type":"reload_metadata","args":{"reload_sources":true}}'
+```
+
+Restarting the Hasura container does the same.
 
 ## Hasura
 

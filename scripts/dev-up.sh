@@ -21,8 +21,7 @@ fi
 echo "Starting Postgres..."
 docker compose up -d postgres
 
-echo "Running Flyway migrations (staging first, then prod)..."
-APP_DB_NAME=unternehmensdatenbank_staging docker compose --profile tools run --rm flyway
+echo "Running Flyway migrations..."
 docker compose --profile tools run --rm flyway
 
 echo "Building and starting Airflow..."

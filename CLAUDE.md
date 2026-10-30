@@ -38,9 +38,10 @@ scripts/free_checks.sh                              # every free check, as CI ru
 
 - Airflow UI **http://localhost:8082** (`airflow`/`airflow`). **Not 8080**: another Airflow on the
   developer's machine owns it.
-- Postgres `localhost:5433`, `app`/`app`. Databases `unternehmensdatenbank` (the data) and
-  `unternehmensdatenbank_staging` (empty); Airflow and Hasura use `APP_DB_NAME` from `.env`.
-  **Port 5432 is a different Postgres.**
+- Postgres `localhost:5433`, `app`/`app`, database `unternehmensdatenbank`; Airflow and Hasura use
+  `APP_DB_NAME` from `.env`. **Port 5432 is a different Postgres.**
+- **After a migration, reload Hasura's metadata.** Hasura caches the columns: after V5 it still
+  offered `cluster` and the app's list failed with "database query error" ([datahub-emulation](docs/datahub-emulation.md)).
 - Profiles: `debug`, `datahub` (Keycloak, Hasura, S3).
 - **Three DB roles, as on the hub:** `app` owns the schema (Flyway, host scripts), DAGs run as
   `writer` (rows only, no DDL), Hasura as `reader`. A DAG that needs DDL is wrong, not the grant.

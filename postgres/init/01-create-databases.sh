@@ -34,19 +34,17 @@ create_db "$AIRFLOW_DB_NAME" "$AIRFLOW_DB_USER"
 psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname postgres \
   -c "ALTER ROLE ${AIRFLOW_DB_USER} SET idle_in_transaction_session_timeout = '120s'"
 
-# Data Hub emulation: one owner (migrations), one writer (pipelines), one reader (app, Hasura),
-# and the same three roles for a staging and a prod database. The DML grants live in Flyway
+# Data Hub emulation: one owner (migrations), one writer (pipelines), one reader (app, Hasura).
+# The DML grants live in Flyway
 # (V1__baseline), because the hub creates the roles and we only own what happens inside our database.
 create_role "$APP_DB_USER" "$APP_DB_PASSWORD"
 create_role "$APP_DB_WRITER_USER" "$APP_DB_WRITER_PASSWORD"
 create_role "$APP_DB_READER_USER" "$APP_DB_READER_PASSWORD"
-for db in "$APP_DB_NAME" "$APP_DB_STAGING_NAME"; do
-  create_db "$db" "$APP_DB_USER"
-  psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname "$db" <<EOSQL
+create_db "$APP_DB_NAME" "$APP_DB_USER"
+psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname "$APP_DB_NAME" <<EOSQL
 CREATE EXTENSION IF NOT EXISTS postgis;
 CREATE EXTENSION IF NOT EXISTS vector;
 EOSQL
-done
 
 # Platform services the hub runs for us, each in its own database.
 create_role "$KEYCLOAK_DB_USER" "$KEYCLOAK_DB_PASSWORD"
