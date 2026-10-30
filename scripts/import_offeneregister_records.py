@@ -8,7 +8,7 @@ those still registered at the time. It is example data until Fusionbase delivers
 Per company, three things:
 
 1. **The company**, found by its register number, created if we do not have it. A company is
-   identity only: an id, the register number, `metadata` (V3).
+   identity only: an id and `metadata` (V3); the register number is an identifier (V7).
 2. **Its source record**, one `company_source_records` row under the source `offeneregister`, with
    everything the dump knows in `source_payload`, so nothing is lost:
 
