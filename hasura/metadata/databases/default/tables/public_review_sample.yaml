@@ -10,3 +10,4 @@ select_permissions:
         - stratum
         - drawn_at
       filter: {}
+      allow_aggregations: true
