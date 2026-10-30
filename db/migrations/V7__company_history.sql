@@ -45,6 +45,8 @@ DECLARE
 BEGIN
   -- Overlapping coordinator runs would both compare with the same latest row and write it twice.
   PERFORM pg_advisory_xact_lock(hashtext('record_company_history'));
+  -- A change is what the app shows: value, source or confidence. A new observation id alone is not
+  -- (scripts/import_register_managers.py re-inserts the same names), so nothing is recorded for it.
   -- One value per field: the canonical observation.
   WITH current AS (
     SELECT cfs.company_id, cfs.field_name,
@@ -79,7 +81,7 @@ BEGIN
      OR (c.company_id IS NOT NULL AND (
            l.company_id IS NULL OR l.event = 'removed'
            OR c.value IS DISTINCT FROM l.value
-           OR c.observation_id IS DISTINCT FROM l.observation_id
+           OR c.source_id IS DISTINCT FROM l.source_id
            OR c.confidence IS DISTINCT FROM l.confidence));
   GET DIAGNOSTICS written = ROW_COUNT;
 
@@ -114,7 +116,7 @@ BEGIN
   WHERE (c.company_id IS NULL AND l.event <> 'removed')
      OR (c.company_id IS NOT NULL AND (
            l.company_id IS NULL OR l.event = 'removed'
-           OR c.observation_id IS DISTINCT FROM l.observation_id
+           OR c.source_id IS DISTINCT FROM l.source_id
            OR c.confidence IS DISTINCT FROM l.confidence));
   GET DIAGNOSTICS managers = ROW_COUNT;
   RETURN written + managers;
