@@ -4,10 +4,11 @@ from __future__ import annotations
 from contextlib import nullcontext
 from datetime import datetime, timezone
 from pathlib import Path
+from types import SimpleNamespace
 
 from enrichment import branch_classifier as bc
 from enrichment import branch_observations
-from technology_field import main
+from technology_field import main, train
 from technology_field.main import classify_all, keywords_by_source
 
 YAML = """
@@ -88,8 +89,12 @@ class _Connection:
 READ_AT = datetime(2026, 3, 1, tzinfo=timezone.utc)
 
 
-def _run_classify(monkeypatch, tmp_path: Path, records: list[tuple], shown: list[tuple]) -> tuple[_Cursor, list]:
+def _run_classify(
+    monkeypatch, tmp_path: Path, records: list[tuple], shown: list[tuple], model: object = None
+) -> tuple[_Cursor, list]:
     taxonomy = _taxonomy(tmp_path)
+    monkeypatch.setattr(train, "load_current", lambda: ("v1", model) if model else (None, None))
+    monkeypatch.setattr(train, "stored_text", lambda website: f"Text von {website}")
     cur, inserts = _Cursor(records, shown), []
     monkeypatch.setattr(main.bc, "load_taxonomy", lambda: taxonomy)
     # The write path translates to English through its own cached copy of the real YAML.
@@ -105,8 +110,9 @@ def _run_classify(monkeypatch, tmp_path: Path, records: list[tuple], shown: list
 
 
 def _records() -> list[tuple]:
-    rail = ("rail", "record-rail", READ_AT, {"schienenfahrzeuge": "services", "stellwerk": "services"}, True, True)
-    return [rail] + [(f"other-{i}", f"record-{i}", READ_AT, {}, True, True) for i in range(50)]
+    rail = ("rail", "record-rail", READ_AT, {"schienenfahrzeuge": "services", "stellwerk": "services"}, True, True,
+            "https://rail.de")
+    return [rail] + [(f"other-{i}", f"record-{i}", READ_AT, {}, True, True, f"https://other-{i}.de") for i in range(50)]
 
 
 def test_a_value_is_dated_by_the_page_read_and_old_values_drop_to_zero(monkeypatch, tmp_path: Path) -> None:
@@ -121,3 +127,22 @@ def test_a_value_is_dated_by_the_page_read_and_old_values_drop_to_zero(monkeypat
 def test_nothing_is_written_before_enough_companies_are_read(monkeypatch, tmp_path: Path) -> None:
     cur, inserts = _run_classify(monkeypatch, tmp_path, _records()[:5], [("gone", "technology_field", "Photonics")])
     assert inserts == [] and cur.drops == []
+
+
+class _Model:
+    """A text classifier that is sure only about other-0's website."""
+
+    def __call__(self, text: str) -> SimpleNamespace:
+        sure = "other-0." in text
+        return SimpleNamespace(cats={"Photonik": 0.9 if sure else 0.5, "Bahnindustrie": 0.1 if sure else 0.5})
+
+
+def test_a_promoted_model_fills_only_where_no_keyword_fired(monkeypatch, tmp_path: Path) -> None:
+    _, inserts = _run_classify(monkeypatch, tmp_path, _records(), [], model=_Model())
+    by_company = {k["company_id"]: k for k in inserts}
+    # The keywords keep rail; the model fills other-0 and stays out where it is not sure enough.
+    assert sorted(by_company) == ["other-0", "rail"]
+    assert by_company["rail"]["metadata"]["decided_by"] == "keywords"
+    filled = by_company["other-0"]
+    assert (filled["value_text"], filled["confidence"]) == ("Photonics", 0.53)
+    assert filled["metadata"]["decided_by"] == "textcat" and filled["metadata"]["model_name"] == "branch_textcat:v1"

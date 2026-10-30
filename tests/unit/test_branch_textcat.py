@@ -138,3 +138,26 @@ def test_load_taxonomy_refuses_a_branch_without_an_english_name(tmp_path) -> Non
     path.write_text('branches:\n  "Software":\n    keywords: ["Software"]\n', encoding="utf-8")
     with pytest.raises(ValueError, match="name_en"):
         load_taxonomy(path)
+
+
+def test_german_votes_translate_english_names_and_keep_unknown_ones() -> None:
+    from enrichment.branch_textcat import german_votes
+
+    votes = [vote("Energy Technology", "wrong", "Software Engineering"), vote("Healthcare", "correct")]
+    to_key = {"Energy Technology": "Energietechnik", "Software Engineering": "Software"}
+    assert german_votes(votes, to_key) == [vote("Energietechnik", "wrong", "Software"), vote("Healthcare", "correct")]
+    # Translated, a correction now names a field `human_label` accepts; untranslated it was ignored.
+    assert human_label(german_votes(votes[:1], to_key), FIELDS) == ("Software", set())
+    assert human_label(votes[:1], FIELDS) == (None, {"Energy Technology"})
+
+
+def test_fill_gap_only_where_no_keyword_fired_and_the_model_is_sure() -> None:
+    from enrichment.branch_classifier import Assignment
+    from enrichment.branch_textcat import TEXTCAT_MIN_SCORE, fill_gap
+
+    gap = Assignment(outcome="no_keyword")
+    filled = fill_gap(gap, "Software", TEXTCAT_MIN_SCORE)
+    assert (filled.outcome, filled.branch, filled.decided_by) == ("assigned", "Software", DECIDED_BY_TEXTCAT)
+    assert fill_gap(gap, "Software", TEXTCAT_MIN_SCORE - 0.01) is gap
+    torn = Assignment(outcome="torn")
+    assert fill_gap(torn, "Software", 0.99) is torn

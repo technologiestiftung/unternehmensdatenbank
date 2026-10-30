@@ -30,7 +30,8 @@ from dataclasses import asdict
 from datetime import datetime, timezone
 from typing import Any, Mapping
 
-from enrichment import branch_classifier as bc
+from enrichment import branch_classifier as bc, corpus
+from enrichment import branch_textcat as textcat
 from enrichment.branch_observations import SOURCE_KEY, planned_writes
 from source_enrichment_common import (
     companies_with_website_to_read,
@@ -75,13 +76,12 @@ def read_site(website: str, taxonomy: bc.Taxonomy) -> dict[str, Any]:
     from enrichment.url_patterns import visible_text
 
     homepage = fetch_page(website) or ""
+    pages = content_for(website, homepage) if homepage else None
     # Same names and order as `branch_textcat.classifier_text`, so a model reads what the keywords read.
-    texts = {
-        "services": content_for(website, homepage).text if homepage else "",
-        "homepage": visible_text(homepage),
-    }
+    texts = {"services": pages.text if pages else "", "homepage": visible_text(homepage)}
     return {
         "keywords": keywords_by_source(texts, taxonomy),
+        "pages": [link.url for link in pages.links] if pages else [],
         "had_text": any(t.strip() for t in texts.values()),
         "homepage_loaded": bool(homepage),
         "taxonomy_version": taxonomy.version,
@@ -114,6 +114,12 @@ def run_read() -> None:
                     external_id=f"{SOURCE_KEY}:{company_id}", external_url=website,
                     source_company_name=company_name, source_payload=payload,
                 )
+                # The pages are in the company corpus (S3); this says they are this company's, for training.
+                corpus.record_document(cur, company_id=company_id, source_id=source_id, kind="webpage",
+                                       url=website, namespace="page")
+                for url in payload.get("pages", []):
+                    corpus.record_document(cur, company_id=company_id, source_id=source_id, kind="webpage",
+                                           url=url, namespace="content")
 
         with connection, connection.cursor() as cur:
             finish_sync_run(cur, sync_run_id=sync_run_id, records_seen=len(companies),
@@ -147,27 +153,45 @@ def classify_all(
     }
 
 
+def read_records(cur: Any, source_id: str) -> list[tuple]:
+    """Every company read: (id, record id, read at, keywords, had text, website still published, website)."""
+    cur.execute(
+        """
+        SELECT r.company_id::text, r.id, r.last_synced_at, r.source_payload -> 'keywords',
+               COALESCE((r.source_payload ->> 'had_text')::boolean, false),
+               e.website_url IS NOT DISTINCT FROM r.external_url, r.external_url
+        FROM public.company_source_records r
+        LEFT JOIN public.v_companies_enriched e ON e.id = r.company_id
+        WHERE r.source_id = %s
+          AND r.source_payload ? 'keywords'
+          AND r.source_payload ->> 'failed' IS DISTINCT FROM 'true'
+        """,
+        (source_id,),
+    )
+    return cur.fetchall()
+
+
+def keyword_answers(records: list[tuple], taxonomy: bc.Taxonomy) -> dict[str, bc.Assignment]:
+    """What the keywords say for every company read (`read_records`)."""
+    # A company whose website changed was read off the old one: its keywords count for nothing.
+    # shortcut: it is not read again from the new website; same limit as `website_keywords`.
+    return classify_all(
+        {cid: (keywords if still_published else {}, had_text and still_published)
+         for cid, _, _, keywords, had_text, still_published, _ in records},
+        taxonomy,
+    )
+
+
 def run_classify() -> None:
+    from technology_field.train import load_current, stored_text
+
     taxonomy = bc.load_taxonomy()
     connection = get_connection()
     try:
         with connection, connection.cursor() as cur:
             source_id = _source_id(cur)
             sync_run_id = start_sync_run(cur, source_id=source_id)
-            cur.execute(
-                """
-                SELECT r.company_id::text, r.id, r.last_synced_at, r.source_payload -> 'keywords',
-                       COALESCE((r.source_payload ->> 'had_text')::boolean, false),
-                       e.website_url IS NOT DISTINCT FROM r.external_url
-                FROM public.company_source_records r
-                LEFT JOIN public.v_companies_enriched e ON e.id = r.company_id
-                WHERE r.source_id = %s
-                  AND r.source_payload ? 'keywords'
-                  AND r.source_payload ->> 'failed' IS DISTINCT FROM 'true'
-                """,
-                (source_id,),
-            )
-            records = cur.fetchall()
+            records = read_records(cur, source_id)
             if len(records) < MIN_COMPANIES:
                 log.info("Only %d companies read; %d needed to weigh keywords. Nothing written.",
                          len(records), MIN_COMPANIES)
@@ -187,18 +211,21 @@ def run_classify() -> None:
             for company_id, field_name, value in cur.fetchall():
                 shown.setdefault(company_id, set()).add((field_name, value))
 
-            # A company whose website changed was read off the old one: its keywords count for nothing.
-            # shortcut: it is not read again from the new website; same limit as `website_keywords`.
-            answers = classify_all(
-                {cid: (keywords if still_published else {}, had_text and still_published)
-                 for cid, _, _, keywords, had_text, still_published in records},
-                taxonomy,
-            )
+            answers = keyword_answers(records, taxonomy)
+            # Where no keyword fired, a promoted text classifier may fill the gap (`branch_textcat`).
+            version, model = load_current()
+            if model is not None:
+                for cid, *_, still_published, website in records:
+                    if answers[cid].outcome == "no_keyword" and still_published:
+                        text = stored_text(website)
+                        answers[cid] = textcat.fill_gap(answers[cid], *textcat.predict(model, text))
             written = dropped = 0
             kept: dict[str, set[tuple[str, str]]] = {}
             for company_id, record_id, read_at, *_ in records:
                 row = {**asdict(answers[company_id]), "technology_field": answers[company_id].branch,
                        "taxonomy_version": taxonomy.version, "scope_companies": len(records)}
+                if row["decided_by"] == textcat.DECIDED_BY_TEXTCAT:
+                    row["model_name"] = f"{textcat.MODEL_NAME}:{version}"
                 writes = planned_writes(row, None)
                 for field_name, value, confidence, metadata in writes:
                     insert_text_observation(

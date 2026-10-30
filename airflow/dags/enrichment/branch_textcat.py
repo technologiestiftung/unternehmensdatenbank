@@ -16,8 +16,7 @@ WHERE THE LABELS COME FROM
    and a majority "wrong" without a correction REMOVES the example, so a known mistake is never
    learned. Corrections that are not one of the 77 names are ignored.
    Since V5 (#47) these votes are stored in English (`name_en`), while `fields` and the seed are
-   Berlin's German keys, so nothing matches until the votes are translated back with `Taxonomy`.
-   That has to happen when the trainer gets a caller (#62).
+   Berlin's German keys, so `german_votes` translates them back before anything is compared.
 
 HOW IT IS JUDGED
 
@@ -35,12 +34,11 @@ shown suggestions would drop out and the accuracy would look better than it is.
 
 The keywords give nothing in a gap, so the bar is not a tie with them: the classifier is promoted
 automatically only with at least `BRANCH_TEXTCAT_MIN_HUMAN_HOLDOUT` held-out gap labels and an
-accuracy of at least `BRANCH_TEXTCAT_MIN_ACCURACY` on them. Otherwise `--promote` is a person's call.
+accuracy of at least `BRANCH_TEXTCAT_MIN_ACCURACY` on them, and only if it beats the model in use.
 
-Gap labels exist only once people have judged a gap company: votes in the app on textcat
-suggestions, which are shown only after a person promoted a model with `--promote` and ran
-`classify --textcat`; or corrections that name a field for a `no_keyword` company, for example
-taken over from the `classify-labels` worksheet. Before that, nothing can be promoted automatically.
+Gap labels exist only once people have judged a gap company: a correction in the app that names a
+field for a company the keywords left empty (a hand-checked set entered there counts), or later
+votes on the classifier's own suggestions. Before that, nothing is promoted.
 
 WHERE IT DECIDES
 
@@ -49,15 +47,15 @@ classifier is at least `TEXTCAT_MIN_SCORE` sure. Such rows say `decided_by == "t
 stored at their own confidence (`branch_observations._CONFIDENCE`). Where a keyword fired, the
 keywords still decide: "keywords decide" stays the rule until the votes show otherwise.
 
-No database, no network, no files here; `scripts/train_branch_textcat.py` and the `classify`
-command do the I/O.
+No database, no network, no files here; `technology_field.train` (the weekly training) and the
+`technology_field` DAG (which uses the promoted model) do the I/O.
 """
 from __future__ import annotations
 
 import os
 import random
 from collections import Counter
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Any, Iterable, Mapping
 
 #: Column 1 only. Deliberately not in `purpose_branch.ALL_DECIDED_BY`, which is column 3's vocabulary.
@@ -65,6 +63,13 @@ DECIDED_BY_TEXTCAT = "textcat"
 
 #: The classifier fills a gap only above this probability for its top field.
 TEXTCAT_MIN_SCORE = float(os.getenv("BRANCH_TEXTCAT_MIN_SCORE", "0.6"))
+
+#: The name the model is stored under (`enrichment.model_store`).
+MODEL_NAME = "branch_textcat"
+
+#: Promotion bars (#62). A policy, not a measurement: no model has been judged yet.
+MIN_HUMAN_HOLDOUT = int(os.getenv("BRANCH_TEXTCAT_MIN_HUMAN_HOLDOUT", "30"))
+MIN_ACCURACY = float(os.getenv("BRANCH_TEXTCAT_MIN_ACCURACY", "0.7"))
 
 #: Characters of page text the classifier reads. Long pages are mostly navigation and footers.
 MAX_CHARS = int(os.getenv("BRANCH_TEXTCAT_MAX_CHARS", "5000"))
@@ -97,6 +102,15 @@ def human_label(votes: Iterable[Mapping[str, Any]], fields: set[str]) -> tuple[s
     confirmed = [value for value, t in tally.items() if t["correct"] > t["wrong"] and value in fields]
     rejected = {value for value, t in tally.items() if t["wrong"] > t["correct"]}
     return (confirmed[0] if len(confirmed) == 1 else None), rejected
+
+
+def german_votes(votes: Iterable[Mapping[str, Any]], english_to_key: Mapping[str, str]) -> list[dict[str, Any]]:
+    """Votes as the classifier speaks: the app stores `name_en` (V5), the classifier Berlin's keys.
+    A name that is not one of the 77 is kept as typed, and `human_label` ignores it."""
+    def key(name: str | None) -> str | None:
+        return english_to_key.get(name.strip(), name) if name else name
+
+    return [{**v, "value": key(v.get("value")), "correction": key(v.get("correction"))} for v in votes]
 
 
 def gap_companies(branch_rows: Iterable[Mapping[str, Any]]) -> set[str]:
@@ -161,6 +175,14 @@ def train(examples: list[tuple[str, str]], fields: list[str], *, epochs: int, se
             nlp.update(batch, sgd=optimizer, drop=0.2, losses=losses)
         losses_per_epoch.append(round(float(losses.get("textcat", 0.0)), 4))
     return nlp, losses_per_epoch
+
+
+def fill_gap(assignment: Any, label: str | None, probability: float) -> Any:
+    """The keywords' answer, or the classifier's where they found nothing and it is sure enough."""
+    if assignment.outcome != "no_keyword" or label is None or probability < TEXTCAT_MIN_SCORE:
+        return assignment
+    return replace(assignment, outcome="assigned", branch=label, decided_by=DECIDED_BY_TEXTCAT,
+                   score=round(probability, 3))
 
 
 def predict(nlp: Any, text: str) -> tuple[str | None, float]:
