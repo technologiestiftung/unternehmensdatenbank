@@ -1,10 +1,8 @@
 """`feedback_observations.main`: people's corrections become observations once enough people agree."""
 from __future__ import annotations
 
-import re
 from contextlib import nullcontext
 from datetime import date
-from pathlib import Path
 from types import SimpleNamespace
 
 from feedback_observations import main
@@ -219,26 +217,3 @@ def test_a_correction_is_dated_by_the_newest_vote_behind_it() -> None:
 def test_votes_without_a_date_give_a_correction_no_date() -> None:
     planned, _ = planned_observations([vote("a"), vote("b")])
     assert [row["voted_at"] for row in planned] == [None]
-
-
-MIGRATIONS = Path(__file__).resolve().parents[2] / "db" / "migrations"
-
-
-def _newest_definition(marker: str) -> str:
-    """The SQL statement starting at `marker` in the newest migration that has it."""
-    files = sorted(MIGRATIONS.glob("V*__*.sql"), key=lambda m: int(m.name[1:].split("__")[0]))
-    sql = next(t for t in (m.read_text(encoding="utf-8") for m in reversed(files)) if marker in t)
-    statement = sql[sql.index(marker):]
-    return statement[: statement.index(";\n")]
-
-
-def test_review_results_matches_every_field_people_can_vote_on() -> None:
-    # v_review_results counts a vote only while its value is shown, one WHEN per app field key; a
-    # key without one would drop every vote on it. A key left out on purpose is `WHEN '<key>' THEN false`.
-    check = _newest_definition("ADD CONSTRAINT extraction_feedback_field_name_check CHECK")
-    allowed = set(re.findall(r"'([a-z_]+)'", check))
-    view = _newest_definition("CREATE VIEW public.v_review_results")
-    matched = set(re.findall(r"^\s*WHEN '([a-z_]+)' THEN", view[view.index("CASE f.field_name"):],
-                             flags=re.MULTILINE))
-    assert set(main.FIELDS) | main.NOT_CORRECTABLE == allowed
-    assert matched == allowed

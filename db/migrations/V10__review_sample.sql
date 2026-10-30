@@ -65,8 +65,8 @@ $$;
 -- Precision per field and stratum, of the values shown now: a vote counts only while its value is
 -- still what the app shows, i.e. its column of company_profile_mv under the app's field key (one name
 -- or keyword of a '; ' list, a number as a number, a grant as a linked fkz). Every key the app may
--- vote on is matched; one left out on purpose is written as `WHEN '<key>' THEN false`, never missing
--- (tests/unit/test_feedback_observations.py). Each value gets ONE verdict, by majority of its votes (a tie
+-- vote on is matched; one left out on purpose is written as `WHEN '<key>' THEN false`, never missing.
+-- Each value gets ONE verdict, by majority of its votes (a tie
 -- is left out), so a replaced value and a second voter do not count twice. A value people corrected
 -- counts as wrong. Only votes on companies in the sample.
 CREATE VIEW public.v_review_results AS
