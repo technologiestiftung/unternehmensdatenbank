@@ -1,7 +1,7 @@
 """The building blocks that fill a company's fields from the open web. No API, no key, no bill.
 
 This package is a library, not a DAG. `website_discovery`, `wikidata`, `website_contacts`,
-`website_keywords`, `register_announcements` and `manager_ner` run it; the Technologiefeld DAG is still to be rebuilt on it (issue #18).
+`website_keywords`, `technology_field`, `register_announcements` and `manager_ner` run it.
 
 Website discovery
   url_patterns.py     guess domains from the company name, check DNS, download the live ones
