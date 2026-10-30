@@ -151,6 +151,22 @@ Tested on a copy of the Berlin database on 2026-10-29: a new address read that d
 the register's 2018 address at 1.0 (worth about 0.3 after decay); a source name read a day before
 two people's correction did not replace it, one read after it did.
 
+## History (V7, #54)
+
+`company_field_history` is append-only: a row whenever a shown value appears (`shown`), is replaced by
+another value (`replaced`), keeps its value with a new confidence or source (`confidence_changed`), or
+disappears (`removed`), with the previous value and confidence. `pipeline_coordinator` writes it at the
+end of each run with `record_company_history()`, one comparison of what is shown now with the latest
+row per field, so every rule that picks a winner is covered. Manager names have one line per name.
+The baseline is what was shown on 2026-10-30, dated when each value was chosen; earlier changes were
+never recorded. A run with no change writes nothing (8.5 s on the Berlin set). Changes published
+outside the coordinator (an import, an announcement) are recorded at the next coordinator run.
+
+The app reads it per company: `v_company_history` (the profile's `history`) and, behind a toggle,
+`v_company_claims` (the profile's `claims`): every claim of the app's fields, shown or not. An
+allow-list keeps email, phone, `_withheld` values and bookkeeping out. **Manager names stay in the
+history after they stop being shown**, a new retention of personal data flagged for the privacy review.
+
 ## Tags (V5, #47)
 
 People tag companies in the app: `tags` (free text, unique ignoring case and surrounding spaces) and
