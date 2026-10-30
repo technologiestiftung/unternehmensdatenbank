@@ -34,7 +34,7 @@ DAGS = Path(__file__).resolve().parent
 #: What a "docker" task container gets from the worker: the DAG settings of docker-compose.yml.
 #: Never PATH or PYTHONPATH (the image sets its own), never AIRFLOW_* (Airflow's secrets).
 PIPELINE_ENV_PREFIXES = ("PG_DSN", "DISCOVERY_", "WEBSITE_", "SOURCE_ENRICHMENT_",
-                         "MANAGER_NER_", "URL_DISCOVERY_", "OSM_", "IMPRINT_")
+                         "MANAGER_NER_", "URL_DISCOVERY_", "OSM_", "IMPRINT_", "WIKIDATA_")
 
 
 def _setting(key: str, default: str = "") -> str:
