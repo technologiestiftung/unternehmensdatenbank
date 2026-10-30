@@ -143,7 +143,7 @@ flowchart TD
 | 7 | Adresse | `address` | yes | none | 116,527 of 296,897 |
 | 8 | Rechtsform | `legal_form` | yes | none | 257,244 of 296,897 |
 | 9 | Cluster (n=5) | — | not delivered | column removed with #47 (it held LLM free text, not Berlin's five clusters); back as a new column once a classifier exists | — |
-| 10 | Technologiefeld | `technology_field` (English names) | not delivered | keywords on the website text; DAG to rebuild (#18) | 27 of 106 Berlin companies with a website, measured |
+| 10 | Technologiefeld | `technology_field` (English names) | not delivered | keywords on the website text; DAG `technology_field` (#62) | 27 of 106 Berlin companies with a website, measured |
 | 11 | Website | `website` | yes | `website_discovery` and `wikidata` verify and fill gaps | 4,929 (106 among the first 1,000 active companies checked) |
 | 12 | Geschäftsführung / Kontakt | `management` | contact optional | register Geschäftsführer (`import_register_managers.py`); `manager_ner` (spaCy) on the Impressum; `website_contacts` for email and phone | names from register and Impressum; email and phone stored, not shown |
 | 13 | Tätigkeitsbeschreibung | `business_purpose`, `activity_keywords` | written by Fusionbase's AI | `website_keywords` | keywords published once 500 companies are read |
@@ -174,7 +174,7 @@ configured to override them. Columns 5 and 13 are vendor AI output and are check
 | `register_announcements` | handelsregister.de | DAG, weekly | 900 announcements in 8 weeks; 411 companies created |
 | `feedback_observations` | corrections typed in the app | DAG, hourly, priority 50 | shown once two people agree |
 | `pipeline_coordinator` | all of the above | DAG | picks the winning values |
-| Technologiefeld | website text | to rebuild on `enrichment/` (#18) | none |
+| Technologiefeld | website text | DAG `technology_field` (#62) | none |
 
 Every DAG starts paused; unpausing it in Airflow is the only switch.
 Details per DAG: [airflow/dags/README.md](../airflow/dags/README.md).
@@ -186,7 +186,7 @@ needed. The hub has no GPU.
 
 | Task | Technique today | Next |
 |---|---|---|
-| Technologiefeld, purpose field | keyword weights; a spaCy text classifier only fills rows no keyword reached (`enrichment/branch_textcat.py`) | rebuild as a DAG (#18), compare on voted companies |
+| Technologiefeld, purpose field | keyword weights; a spaCy text classifier only fills rows no keyword reached (`enrichment/branch_textcat.py`) | keywords run as DAG `technology_field`; the text classifier is trained next (#62), compared on voted companies |
 | Is a page the company's own site | rules: Impressum, register number, name and postcode ([website-verification](website-verification.md)) | |
 | Manager names | regular expressions on the Impressum, plus spaCy (`manager_ner`) | weekly training from votes |
 | Cluster, DeepTech, isAI | none | labels first, then a text classifier |
@@ -241,7 +241,7 @@ Running everything locally: [README](../README.md).
 - Fusionbase contract, API access, then its import DAG; closure candidates from quarterly
   differences.
 - Classifiers for Cluster, DeepTech with confidence, and isAI.
-- Technologiefeld DAG on `enrichment/` (#18).
+- Train the Technologiefeld text classifier from the corpus and the votes (#62).
 - First `manager_ner_train` run once 30 companies have votes.
 - Should user corrections become a source; definition of "Amazon-Effekt".
 

@@ -42,7 +42,7 @@ is correctly described by both.
 | writing both columns to Postgres | `airflow/dags/enrichment/branch_observations.py` |
 | the guard | `scripts/check_branch_classifier.py` |
 
-The Technologiefeld has no DAG yet; it is rebuilt on this library next (issue #18).
+The DAG `technology_field` runs it (#62): it reads the homepage and services pages of every company with a website, then weighs the keywords over all companies read and classifies them all again.
 
 ## The rule: a WZ code never fills the Technologiefeld
 
