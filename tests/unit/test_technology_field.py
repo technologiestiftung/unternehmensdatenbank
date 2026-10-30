@@ -96,13 +96,15 @@ READ_AT = datetime(2026, 3, 1, tzinfo=timezone.utc)
 
 
 def _run_classify(
-    monkeypatch, tmp_path: Path, records: list[tuple], shown: list[tuple], model: object = None
+    monkeypatch, tmp_path: Path, records: list[tuple], shown: list[tuple], model: object = None,
+    store_up: bool = True, inserts: list | None = None,
 ) -> tuple[_Cursor, list]:
     taxonomy = _taxonomy(tmp_path)
     monkeypatch.setattr(train, "load_current", lambda: ("v1", model) if model else (None, None))
     monkeypatch.setattr(train, "stored_text", lambda website: f"Text von {website}")
-    monkeypatch.setattr(train, "require_store", lambda: None)
-    cur, inserts = _Cursor(records, shown), []
+    monkeypatch.setattr(train.corpus, "configured", lambda: True)
+    monkeypatch.setattr(train.corpus, "enabled", lambda: store_up)
+    cur, inserts = _Cursor(records, shown), [] if inserts is None else inserts
     monkeypatch.setattr(main.bc, "load_taxonomy", lambda: taxonomy)
     # The write path translates to English through its own cached copy of the real YAML.
     monkeypatch.setattr(branch_observations, "_taxonomy", lambda: taxonomy)
@@ -184,3 +186,13 @@ def test_a_store_failure_stops_the_run_before_anything_is_written(monkeypatch) -
     monkeypatch.setattr(train.corpus, "enabled", lambda: False)
     with pytest.raises(RuntimeError):
         train.require_store()
+
+
+def test_a_store_that_fails_mid_run_writes_nothing_and_drops_nothing(monkeypatch, tmp_path: Path) -> None:
+    shown = [("other-0", "technology_field", "Photonics")]
+    inserts: list = []
+    monkeypatch.setattr(main, "Json", lambda value: inserts.append(("cached", value)))
+    with pytest.raises(RuntimeError):
+        _run_classify(monkeypatch, tmp_path, _records(), shown, model=_Model(), store_up=False, inserts=inserts)
+    # No observation, no cached prediction; drops happen only after the inserts, so none either.
+    assert inserts == []

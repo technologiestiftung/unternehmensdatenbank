@@ -87,8 +87,9 @@ release fields from the register text alone, which is `purpose_field`'s job.
 
 `branch_textcat.py` (spaCy) may fill a `no_keyword` row when it is at least `TEXTCAT_MIN_SCORE` sure
 (`decided_by = "textcat"`). The weekly DAG `technology_field_train` trains it on the keywords' answers
-and the app's votes, with the text from the company corpus. It never overrides keywords, and it is promoted only if it beats the
-keywords on companies people have voted on in the app.
+and the app's votes, with the text from the company corpus. It never overrides keywords. It is
+promoted only on held-out companies people judged and the keywords left empty: at least 30, at least
+70% right, and better than the model in use (policy, not measured; `branch_textcat.py` docstring).
 
 ### `NONE` has four reasons, never added together
 
