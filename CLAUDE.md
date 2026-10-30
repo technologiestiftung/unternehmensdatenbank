@@ -66,6 +66,9 @@ field claim, with a confidence) → `pipeline_coordinator` → `company_canonica
 - **Company identity is a random UUID, never the name** (32,170 Berlin companies have a former name).
   Matching: identifiers first, fuzzy second; `match_method`/`match_confidence` on the source record.
   Merging never deletes (`companies.merged_into`).
+- **The history is append-only** (`company_field_history`, #54): written only by
+  `record_company_history()` in the coordinator, never updated or deleted. `v_company_claims` is an
+  allow-list: a new field the app shows needs its name there, and email, phone and `_withheld` never.
 - **`company_source_records` is not exposed through Hasura.** OffeneRegister's full record (officers,
   raw address) sits there.
 

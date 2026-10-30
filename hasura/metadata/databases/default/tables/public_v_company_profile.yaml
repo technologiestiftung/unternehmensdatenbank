@@ -20,6 +20,22 @@ array_relationships:
           schema: public
         column_mapping:
           id: company_id
+  - name: history
+    using:
+      manual_configuration:
+        remote_table:
+          name: v_company_history
+          schema: public
+        column_mapping:
+          id: company_id
+  - name: claims
+    using:
+      manual_configuration:
+        remote_table:
+          name: v_company_claims
+          schema: public
+        column_mapping:
+          id: company_id
   - name: fundings
     using:
       manual_configuration:

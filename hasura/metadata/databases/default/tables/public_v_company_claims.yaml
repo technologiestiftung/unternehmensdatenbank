@@ -1,0 +1,22 @@
+table:
+  name: v_company_claims
+  schema: public
+configuration:
+  custom_name: company_claims
+select_permissions:
+  # Read-only. Only the app's fields (no email, phone, withheld values or bookkeeping; the view's
+  # allow-list). Loaded only when the company page's "all claims" toggle is on (#54).
+  - role: user
+    permission:
+      columns:
+        - id
+        - company_id
+        - field_key
+        - value
+        - confidence
+        - is_shown
+        - method
+        - source_key
+        - source_name
+        - read_at
+      filter: {}
