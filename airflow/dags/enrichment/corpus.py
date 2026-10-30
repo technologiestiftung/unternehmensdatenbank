@@ -174,3 +174,31 @@ def record_document(
         (company_id, source_id, kind, url, language, record["read_at"], object_key(namespace, url),
          hashlib.sha256(data).hexdigest(), len(data)),
     )
+
+
+def put_bytes(name: str, data: bytes, content_type: str = "application/octet-stream") -> bool:
+    """Store raw bytes under an exact object name (models, not documents). Never raises."""
+    if not enabled():
+        return False
+    try:
+        _s3().put_object(bucket(), name, BytesIO(data), len(data), content_type=content_type)
+        return True
+    except Exception as exc:  # noqa: BLE001
+        _failed(exc, f"writing {name}")
+        return False
+
+
+def get_bytes(name: str) -> bytes | None:
+    """The bytes under an exact object name, or None. Never raises."""
+    if not enabled():
+        return None
+    try:
+        response = _s3().get_object(bucket(), name)
+        try:
+            return response.read()
+        finally:
+            response.close()
+            response.release_conn()
+    except Exception as exc:  # noqa: BLE001
+        _failed(exc, f"reading {name}")
+        return None

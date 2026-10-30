@@ -69,8 +69,11 @@ Docker container instead of a pod. It joins the network named by `pipeline_netwo
 worker's own `PG_DSN` and DAG settings instead of a secret (`airflow/dags/pipeline_task.py`). Every
 task pulls the image first, so a merge to main reaches play without a manual `docker pull`.
 
-A pod shares no disk, so state between runs belongs in Postgres. Not solved yet: `manager_ner_train`
-keeps its spaCy models on disk (`MANAGER_NER_MODEL_DIR`) and needs S3 or a volume on the hub.
+A pod shares no disk, so state between runs belongs in Postgres, and files a later run needs in S3:
+the company corpus (#61) and the trained models (`enrichment.model_store`, under `models/<name>/` in the
+corpus bucket). `manager_ner_train` publishes every run's metrics there and a promoted model with its
+`current.json`; `manager_ner_extract` downloads the current version into `MANAGER_NER_MODEL_DIR`, which
+is only a working copy. The hub needs the bucket and the `CORPUS_S3_*` settings for both.
 
 ```bash
 docker build -f airflow/pipelines.Dockerfile -t udb-pipelines airflow
