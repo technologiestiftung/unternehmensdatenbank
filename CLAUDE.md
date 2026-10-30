@@ -93,7 +93,8 @@ field claim, with a confidence) → `pipeline_coordinator` → `company_canonica
 - **Import DAG modules by package name** (`from enrichment.confidence import …`). A bare import
   after a `sys.path` insert once handed one package another's module.
 - **On the hub, tasks are KubernetesPodOperator pods** from our pipelines image, with no shared disk:
-  state belongs in Postgres (`pipeline_state`), never in `airflow/data/`. Build a task with
+  state belongs in Postgres (`pipeline_state`), files a later run needs in S3 (corpus,
+  `enrichment.model_store`), never in `airflow/data/`. Build a task with
   `pipeline_task(task_id, run_function)`, never a bare `PythonOperator` ([release](docs/release.md)).
 
 ## Website discovery rules (`enrichment/`)

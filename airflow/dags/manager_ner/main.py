@@ -8,10 +8,11 @@ manager_ner_train    Votes and corrections from the app (`extraction_feedback`) 
                      fifth of the companies against itself and the regex extractor, and promoted
                      only if it beats the current model.
 
-Models live under MANAGER_NER_MODEL_DIR: one folder per trained version with its `metrics.json`,
-the model files only for a promoted version, and `current.json` naming the version in use. Without
+Models live in the model store (`enrichment.model_store`, S3) and under MANAGER_NER_MODEL_DIR as a
+working copy: one folder per trained version with its `metrics.json`, the model files only for a
+promoted version, and `current.json` naming the version in use. Without
 one, the base model (de_core_news_md) is used.
-On the Data Hub that directory needs a persistent volume or S3; Airflow there has no shared disk.
+On the Data Hub that directory is lost with the pod; the model store (S3) keeps every version.
 
 Each company is read once, like every other source DAG here: `ceo_name_or_contact` has no upsert
 key, so reading it again would append a second copy. Re-reading everyone with a better model needs
@@ -50,7 +51,7 @@ from manager_ner.ner import (
     train,
     window_text,
 )
-from enrichment import corpus
+from enrichment import corpus, model_store
 from source_enrichment_common import (
     ensure_source,
     finish_sync_run,
@@ -63,6 +64,7 @@ from source_enrichment_common import (
 log = logging.getLogger(__name__)
 
 SOURCE_KEY = "spacy_ner"
+MODEL_NAME = "manager_ner"
 MODEL_DIR = Path(os.getenv("MANAGER_NER_MODEL_DIR", "/opt/airflow/data/models/manager_ner"))
 BASE_MODEL = os.getenv("MANAGER_NER_BASE_MODEL", "de_core_news_md")
 BATCH_SIZE = int(os.getenv("MANAGER_NER_BATCH_SIZE", "50"))
@@ -74,16 +76,16 @@ CONFIDENCE = float(os.getenv("MANAGER_NER_CONFIDENCE", "0.6"))
 
 
 def current_version() -> str | None:
-    try:
-        return json.loads((MODEL_DIR / "current.json").read_text())["version"]
-    except (FileNotFoundError, KeyError, json.JSONDecodeError):
-        return None
+    """The version in use, from the model store (S3) when there is one, else MODEL_DIR."""
+    return model_store.current_version(MODEL_NAME, MODEL_DIR)
 
 
 def load_model(version: str | None) -> Any:
+    """The model of `version`, downloaded from the store into MODEL_DIR if needed; the base model only
+    when there is no version. A version that cannot be found raises FileNotFoundError."""
     import spacy
 
-    return spacy.load(MODEL_DIR / version if version else BASE_MODEL)
+    return spacy.load(model_store.local_copy(MODEL_NAME, version, MODEL_DIR) if version else BASE_MODEL)
 
 
 def read_impressum(website: str) -> tuple[str, str | None]:
@@ -297,6 +299,8 @@ def run_train() -> None:
     (out / "metrics.json").write_text(json.dumps(metrics, indent=2))
     if promoted:
         (MODEL_DIR / "current.json").write_text(json.dumps({"version": new_version}, indent=2))
+    # On the hub this pod's disk is gone after the task: the store (S3) keeps the run and the model.
+    model_store.publish(MODEL_NAME, new_version, MODEL_DIR, metrics, promoted=promoted)
     log.info("Model %s: F1 %.3f -> %.3f (regex %.3f). %s", new_version, before.f1, after.f1, regex.f1,
              "Promoted." if promoted else "Kept the current model.")
 
