@@ -61,9 +61,8 @@ def _source_id(cur: Any) -> str:
 # --- read -----------------------------------------------------------------------------------
 
 
-def read_site(website: str, company_name: str) -> tuple[dict[str, Any], list[tuple[str, str]]]:
-    """Download the homepage and its offer pages. Returns the payload (candidates, pages read) and the
-    pages themselves as (url, html), for the company corpus; the HTML stays out of the payload."""
+def read_site(website: str, company_name: str) -> dict[str, Any]:
+    """Download the homepage and its offer pages; return the candidates and the pages read."""
     from enrichment.content_pages import links_from_homepage
     from enrichment.http_client import fetch_page
 
@@ -76,13 +75,11 @@ def read_site(website: str, company_name: str) -> tuple[dict[str, Any], list[tup
         if html:
             pages.append(link.url)
             offer_html.append(html)
-    payload = {
+    return {
         "candidates": ak.candidates(homepage, offer_html, company_name),
         "pages": pages,
         "homepage_loaded": bool(homepage),
     }
-    documents = ([(website, homepage)] if homepage else []) + list(zip(pages, offer_html))
-    return payload, documents
 
 
 def run_read() -> None:
@@ -95,9 +92,8 @@ def run_read() -> None:
 
         with_terms = failed = 0
         for company_id, company_name, website, attempts in companies:
-            documents: list[tuple[str, str]] = []
             try:
-                payload, documents = read_site(website, company_name)
+                payload = read_site(website, company_name)
             except Exception as exc:  # noqa: BLE001  one unreachable site must not stop the batch
                 log.warning("Website not readable for %s: %s", company_id, type(exc).__name__)
                 payload = {"candidates": [], "pages": [], "error": type(exc).__name__}
@@ -112,7 +108,7 @@ def run_read() -> None:
                     source_company_name=company_name, source_payload=payload,
                 )
                 # The pages are in the company corpus (S3, via fetch_page); this says they are this company's.
-                for url, _ in documents:
+                for url in [website, *payload["pages"]]:
                     corpus.record_document(cur, company_id=company_id, source_id=source_id, kind="webpage",
                                            url=url, namespace="page")
 

@@ -173,7 +173,7 @@ def run_extract() -> None:
         seen = names_written = failed = 0
         for company_id, company_name, website in companies:
             seen += 1
-            text, imprint_url = "", None
+            imprint_url = None
             try:
                 text, imprint_url = read_impressum(website)
                 names = extract_names(nlp, window_text(text))
