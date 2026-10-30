@@ -1,0 +1,12 @@
+table:
+  name: review_sample
+  schema: public
+select_permissions:
+  # Read-only: which companies are in the hand-check sample (V10). Drawn by the coordinator.
+  - role: user
+    permission:
+      columns:
+        - company_id
+        - stratum
+        - drawn_at
+      filter: {}

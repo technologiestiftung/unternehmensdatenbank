@@ -3,6 +3,15 @@ table:
   schema: public
 configuration:
   custom_name: companies
+object_relationships:
+  - name: review_sample
+    using:
+      manual_configuration:
+        remote_table:
+          name: review_sample
+          schema: public
+        column_mapping:
+          id: company_id
 array_relationships:
   - name: comments
     using:

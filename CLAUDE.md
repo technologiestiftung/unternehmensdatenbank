@@ -135,12 +135,13 @@ purpose, so for Berlin only the Technologiefeld can be filled today.
    stop-list in code.
 6. **Keywords decide; the spaCy classifier only fills gaps**, promoted only when it beats the
    keywords on companies people voted on.
-7. **No row of any column is hand-checked yet.** Agreement is not correctness.
+7. **Agreement is not correctness.** Hand checks happen on the fixed `review_sample` (V10, the app's
+   "Stichprobe" filter); precision is `v_review_results`, nothing else.
 
 ## Migrations
 
 `V1__baseline.sql` is the whole schema as of 2026-10-28 (squashed while nothing was deployed), plus
-`V2__source_overview.sql`, `V3__register_fields_as_observations.sql`, `V4__user_feedback_source.sql`, `V5__profile_cleanup_tags_english.sql`, `V6__source_dates.sql`, `V7__register_number_from_identifiers.sql`, `V8__company_history.sql` and `V9__company_documents.sql`. A database migrated before the squash needs its Flyway history reset once
+`V2__source_overview.sql`, `V3__register_fields_as_observations.sql`, `V4__user_feedback_source.sql`, `V5__profile_cleanup_tags_english.sql`, `V6__source_dates.sql`, `V7__register_number_from_identifiers.sql`, `V8__company_history.sql`, `V9__company_documents.sql` and `V10__review_sample.sql`. A database migrated before the squash needs its Flyway history reset once
 ([data-model](docs/data-model.md), "Migration strategy"). **Forward-only:** never edit a migration
 that ran anywhere shared. Flyway runs under `--profile tools`, not with `docker compose up`; on the
 hub as the app's initContainer ([release](docs/release.md)).

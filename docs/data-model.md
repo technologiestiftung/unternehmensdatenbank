@@ -98,7 +98,7 @@ python scripts/import_register_managers.py
 nothing was deployed. `V2__source_overview.sql`, `V3__register_fields_as_observations.sql`,
 `V4__user_feedback_source.sql`, `V5__profile_cleanup_tags_english.sql`, `V6__source_dates.sql`,
 `V7__register_number_from_identifiers.sql`, `V8__company_history.sql` and
-`V9__company_documents.sql` came after. Forward-only from here: never edit a migration that has
+`V9__company_documents.sql` and `V10__review_sample.sql` came after. Forward-only from here: never edit a migration that has
 run anywhere shared, add new ones as `V{N}__description.sql`, and run Flyway before Airflow
 touches the changed schema.
 The headings below keep the pre-squash migration numbers (V3–V10) so git history finds the reasoning.
@@ -151,6 +151,17 @@ re-read); a correction is dated by the newest vote behind it.
 Tested on a copy of the Berlin database on 2026-10-29: a new address read that day at 0.8 replaced
 the register's 2018 address at 1.0 (worth about 0.3 after decay); a source name read a day before
 two people's correction did not replace it, one read after it did.
+
+## Review sample (V10)
+
+Nothing had been checked by a person: every confidence and threshold here is a starting value.
+`review_sample` is a **fixed** set of active companies people check in the app (list filter
+"Stichprobe", then the usual ✓/✗), stratified so every kind of value is judged: 40 with a website,
+25 with a technology field, 20 with managers, 15 with register data only. Drawn in a stable random
+order, not by low confidence, which would make every source look worse than it is.
+`draw_review_sample()` only tops a stratum up, never replaces anyone; `pipeline_coordinator` calls it
+after every run, so the technology-field stratum fills once companies are classified (14 of 25 on
+2026-10-30). `v_review_results` gives the precision per field and stratum from those votes.
 
 ## Company corpus (V9, #61)
 

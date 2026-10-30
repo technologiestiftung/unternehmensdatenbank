@@ -62,6 +62,13 @@ def run_pipeline_coordinator() -> None:
             cur.execute("SELECT public.record_company_history()")
             log.info("History: %d changes recorded.", cur.fetchone()[0])
 
+        # The hand-check sample (V10): topped up, never redrawn, so a stratum fills once data exists.
+        with conn, conn.cursor() as cur:
+            cur.execute("SELECT public.draw_review_sample()")
+            added = cur.fetchone()[0]
+        if added:
+            log.info("Review sample: %d companies added.", added)
+
         # The app reads a stored copy of every profile (`company_profile_mv`); bring it up to date
         # with what was just resolved.
         with conn, conn.cursor() as cur:
