@@ -345,11 +345,15 @@ def failed_read_payload(payload: dict[str, Any], attempts: int) -> dict[str, Any
     return {**payload, "failed": True, "attempts": attempts + 1}
 
 
-def companies_with_website_to_read(cur: Any, *, source_id: str, limit: int) -> list[tuple[str, str, str, int]]:
+def companies_with_website_to_read(
+    cur: Any, *, source_id: str, limit: int, read_key: str | None = None
+) -> list[tuple[str, str, str, int]]:
     """Companies with a published website this source has not read: (id, name, website, attempts).
 
     A company whose last read failed (`failed_read_payload`) comes back until it has been tried
-    `MAX_READ_ATTEMPTS` times, so a dead site cannot hold a batch slot forever.
+    `MAX_READ_ATTEMPTS` times, so a dead site cannot hold a batch slot forever. With `read_key`, a
+    source record whose payload lacks that key counts as unread: one an older writer of the same
+    source left behind.
     """
     cur.execute(
         """
@@ -359,12 +363,13 @@ def companies_with_website_to_read(cur: Any, *, source_id: str, limit: int) -> l
         LEFT JOIN public.company_source_records r ON r.company_id = e.id AND r.source_id = %s
         WHERE e.website_url IS NOT NULL
           AND (r.id IS NULL
+               OR (%s::text IS NOT NULL AND NOT r.source_payload ? %s)
                OR (r.source_payload ->> 'failed' = 'true'
                    AND COALESCE((r.source_payload ->> 'attempts')::int, 0) < %s))
         ORDER BY e.id
         LIMIT %s
         """,
-        (source_id, MAX_READ_ATTEMPTS, limit),
+        (source_id, read_key, read_key, MAX_READ_ATTEMPTS, limit),
     )
     return cur.fetchall()
 

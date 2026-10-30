@@ -95,7 +95,8 @@ def run_read() -> None:
         with connection, connection.cursor() as cur:
             source_id = _source_id(cur)
             sync_run_id = start_sync_run(cur, source_id=source_id)
-            companies = companies_with_website_to_read(cur, source_id=source_id, limit=BATCH_SIZE)
+            companies = companies_with_website_to_read(cur, source_id=source_id, limit=BATCH_SIZE,
+                                                       read_key="keywords")
 
         with_keywords = failed = 0
         for company_id, company_name, website, attempts in companies:
@@ -155,7 +156,7 @@ def run_classify() -> None:
             sync_run_id = start_sync_run(cur, source_id=source_id)
             cur.execute(
                 """
-                SELECT r.company_id::text, r.id, r.source_payload -> 'keywords',
+                SELECT r.company_id::text, r.id, r.last_synced_at, r.source_payload -> 'keywords',
                        COALESCE((r.source_payload ->> 'had_text')::boolean, false),
                        e.website_url IS NOT DISTINCT FROM r.external_url
                 FROM public.company_source_records r
@@ -190,11 +191,11 @@ def run_classify() -> None:
             # shortcut: it is not read again from the new website; same limit as `website_keywords`.
             answers = classify_all(
                 {cid: (keywords if still_published else {}, had_text and still_published)
-                 for cid, _, keywords, had_text, still_published in records},
+                 for cid, _, _, keywords, had_text, still_published in records},
                 taxonomy,
             )
             written = dropped = 0
-            for company_id, record_id, *_ in records:
+            for company_id, record_id, read_at, *_ in records:
                 row = {**asdict(answers[company_id]), "technology_field": answers[company_id].branch,
                        "taxonomy_version": taxonomy.version, "scope_companies": len(records)}
                 writes = planned_writes(row, None)
@@ -203,6 +204,8 @@ def run_classify() -> None:
                         cur, company_id=company_id, source_record_id=record_id, source_id=source_id,
                         sync_run_id=sync_run_id, field_name=field_name, value_text=value,
                         confidence=confidence, metadata=metadata,
+                        # The value is as old as the page it came from, not this run (#49).
+                        source_updated_at=read_at,
                     )
                 for field_name, value in shown.get(company_id, set()) - {(f, v) for f, v, _, _ in writes}:
                     cur.execute(
