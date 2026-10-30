@@ -5,7 +5,7 @@ The edit-time hook (`guard_after_edit.py`) catches a breakage in the turn it hap
 edits under the watched directories. A commit is the moment the change becomes history, so this is
 where everything runs:
 
-**`scripts/free_checks.sh`**: ruff over the whole repo, the unit tests and the seven rule guards.
+**`scripts/free_checks.sh`**: ruff over the whole repo, the unit tests and the six rule guards.
 The same script CI and no-mistakes run (decided 2026-10-28). It lints everything, so there is no
 separate pass over the staged files. No database, no network: until then
    this hook also ran tests pinned to the Osnabrück example data, which needed Postgres; they went

@@ -68,5 +68,5 @@ Database: `unternehmensdatenbank` (the Berlin data).
   in Airflow to run it.
 - **Migrations:** `db/migrations/`, `V1__baseline.sql` plus `V2__source_overview.sql`. Forward-only.
   Flyway runs as a one-shot service (`--profile tools`), not with `docker compose up`.
-- **Checks:** `scripts/free_checks.sh` (ruff, unit tests, seven guards; no database, no network).
+- **Checks:** `scripts/free_checks.sh` (ruff, unit tests, six guards; no database, no network).
   CI, no-mistakes and the Claude hooks run the same script. See [guards-and-tests](docs/guards-and-tests.md).

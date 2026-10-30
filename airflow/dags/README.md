@@ -6,7 +6,7 @@ Eleven DAG packages and one library. Every DAG starts paused (Airflow's default,
 | package | DAG id | schedule | what it does |
 |---|---|---|---|
 | `pipeline_coordinator/` | `pipeline_coordinator` | triggered | the ONLY thing that decides which observation wins a field |
-| `website_discovery/` | `website_discovery` | `@hourly`, a full batch starts the next | guesses domains, reads the Impressum, keeps only websites the page proves are the company's (`confidence.identifies_company`). Rechecks after `WEBSITE_DISCOVERY_RECHECK_DAYS` (90). The OpenStreetMap step is off (`WEBSITE_DISCOVERY_OSM=false`): the public Overpass server refused requests |
+| `website_discovery/` | `website_discovery` | `@hourly`, a full batch starts the next | guesses domains, reads the Impressum, keeps only websites the page proves are the company's (`confidence.identifies_company`). Rechecks after `WEBSITE_DISCOVERY_RECHECK_DAYS` (90). |
 | `wikidata/` | `wikidata` | `@daily`, a full batch starts the next | websites Wikidata lists for Berlin organisations (one SPARQL query a day, CC0), matched by register number and name or a unique name of a company that is not dissolved, each verified like a guessed domain (`pipeline.verify_proposed`); only a page that identifies the company is shown |
 | `website_contacts/` | `website_contacts` | triggered | the company's own `info@`-style email and phone from the Impressum of its proven website (source `impressum_contacts`). Stored, never resolved, so never shown. A failed read is retried, 3 times at most |
 | `website_keywords/` | `website_keywords` | triggered | keywords from meta tags and services/products headings; generic ones measured out over all companies read; publishes `activity_keywords` once 500 companies are read; retried 3 times at most |
@@ -18,7 +18,7 @@ Eleven DAG packages and one library. Every DAG starts paused (Airflow's default,
 | `feedback_observations/` | `feedback_observations` | `@hourly` | people's corrections from the app as observations of `user_feedback` (priority 50); shown once two people agree, never who. Triggers the coordinator only when something changed |
 | `manager_ner/` | `manager_ner_extract` | triggered | spaCy reads the Impressum and writes Geschäftsführer names (source `spacy_ner`) |
 | | `manager_ner_train` | `@weekly` | turns the app's votes into training data; promotes a model only if it beats the current one on a held-out fifth |
-| `enrichment/` | — | — | the library: URL patterns, OSM matching, Impressum regex, confidence, classification. `__init__.py` is the map |
+| `enrichment/` | — | — | the library: URL patterns, Impressum regex, confidence, classification. `__init__.py` is the map |
 
 Grants are linked to companies by `refresh_company_funding_links()` after a load.
 

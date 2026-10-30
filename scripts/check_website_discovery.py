@@ -838,13 +838,6 @@ check_true(
 check_true("both postcodes are compared, not just the first",
     conf.POSTCODE_MATCH in _evidence("<html>x</html>", {**_fields, "postcodes": ["12345", "49074"]}))
 
-# Phone numbers are written every possible way, and the parts that differ are at the front.
-check_true("the same number written two ways matches", pl._same_phone("+49 541 7607780", "0541/760 77 80"))
-check_true("brackets and spacing do not matter", pl._same_phone("(0541) 7607780", "+49 541 7607780"))
-check_true("a different number does not match", not pl._same_phone("0541 7607780", "0541 7607781"))
-check_true("a number too short to identify a line does not match", not pl._same_phone("12345", "+49 541 12345"))
-check_true("a missing number does not match", not pl._same_phone(None, "+49 541 7607780"))
-
 # ---------------------------------------------------------------------------------------
 # All five German court registers, and every number on the page
 # ---------------------------------------------------------------------------------------

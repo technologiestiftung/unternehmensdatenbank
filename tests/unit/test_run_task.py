@@ -47,7 +47,7 @@ def test_a_pod_hands_the_return_value_to_airflow_only_when_asked(monkeypatch, tm
 def test_a_docker_task_gets_the_dag_settings_and_nothing_else() -> None:
     from pipeline_task import pipeline_environment
 
-    worker = {"PG_DSN": "host=db", "WEBSITE_KEYWORDS_BATCH_SIZE": "50", "WEBSITE_DISCOVERY_OSM": "false",
+    worker = {"PG_DSN": "host=db", "WEBSITE_KEYWORDS_BATCH_SIZE": "50", "WEBSITE_DISCOVERY_WORKERS": "8",
               "PATH": "/usr/bin", "PYTHONPATH": "/opt/airflow", "AIRFLOW__CORE__FERNET_KEY": "x"}
     assert pipeline_environment(worker) == {
-        "PG_DSN": "host=db", "WEBSITE_KEYWORDS_BATCH_SIZE": "50", "WEBSITE_DISCOVERY_OSM": "false"}
+        "PG_DSN": "host=db", "WEBSITE_KEYWORDS_BATCH_SIZE": "50", "WEBSITE_DISCOVERY_WORKERS": "8"}

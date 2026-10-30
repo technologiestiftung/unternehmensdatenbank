@@ -112,7 +112,7 @@ def _discover_with_former_name(monkeypatch, register_on_imprint: str) -> tuple[o
     company = CompanyCandidate(id="1", company_name="Neuname GmbH", address=None, postcode=None, city="Berlin",
                                registration_number="Amtsgericht Berlin (Charlottenburg) HRB 1",
                                former_names=("Altname GmbH",))
-    return pipeline.discover(company, use_osm=False), skipped
+    return pipeline.discover(company), skipped
 
 
 def test_a_former_name_domain_becomes_the_website_when_the_page_proves_the_company(monkeypatch) -> None:

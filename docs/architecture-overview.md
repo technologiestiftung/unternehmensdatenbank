@@ -164,7 +164,7 @@ configured to override them. Columns 5 and 13 are vendor AI output and are check
 |---|---|---|---|
 | Fusionbase import | Fusionbase API | DAG, quarterly, to build | none yet |
 | OffeneRegister import | Handelsregister snapshot 2017–2019 | scripts, once | 296,486 Berlin companies |
-| `website_discovery` | URL patterns, Impressum and register check (OSM step in code, off) | DAG, priority 100 | 4,929 websites |
+| `website_discovery` | URL patterns, Impressum and register check | DAG, priority 100 | 4,929 websites |
 | `wikidata` | official websites (P856) Wikidata lists for Berlin organisations, verified like a guessed domain | DAG, daily | 229 websites proven for 531 matched companies (local copy, 2026-10-30) |
 | `website_contacts` | Impressum of the proven website | DAG | 27 emails, 25 phones from 37 websites; not shown |
 | `website_keywords` | services/products pages of the proven website | DAG | 22 of 37 websites gave candidates |

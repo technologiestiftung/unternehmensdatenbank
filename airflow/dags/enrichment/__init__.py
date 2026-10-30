@@ -5,11 +5,8 @@ This package is a library, not a DAG. `website_discovery`, `wikidata`, `website_
 
 Website discovery
   url_patterns.py     guess domains from the company name, check DNS, download the live ones
-  osm_snapshot.py,    match the company to OpenStreetMap; shops and offices there often carry a
-  osm_lookup.py       `website` tag. `overpass_client.py` and `osm_scorer.py` do the querying
-                      and the name matching
   wikidata.py         one SPARQL query: official websites (P856) of Berlin organisations
-  pipeline.py         runs both methods for one company and merges what they say;
+  pipeline.py         runs the URL guesses for one company and merges what they say;
                       `verify_proposed` checks a URL another source proposes (Wikidata)
   confidence.py       the ONLY place that turns evidence into a number between 0 and 1
   own_site.py         the single predicate for "is this page the company's own site", as

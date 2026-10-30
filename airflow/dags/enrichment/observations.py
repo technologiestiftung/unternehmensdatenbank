@@ -70,18 +70,19 @@ log = logging.getLogger(__name__)
 #: (issue #18); rows written before it stay under `combined_discovery` as history, re-scored to the
 #: new rule by `website_discovery.main.rescore_websites`.
 SOURCE_KEY = "website_discovery"
-SOURCE_NAME = "Website discovery (URL patterns + OpenStreetMap, checked against the Impressum)"
+SOURCE_NAME = "Website discovery (URL patterns, checked against the Impressum)"
 #: Every source this write path has filed websites under, for re-scoring.
 WEBSITE_SOURCE_KEYS = ("combined_discovery", SOURCE_KEY)
 
 #: Evidence names that mean "this is a page about the company, not the company's page".
 _THIRD_PARTY_EVIDENCE = frozenset({"directory_host", "host_name_mismatch"})
 
-#: Method name in a result -> the stage key used in the tier ledger.
+#: Method name in a result -> the stage key used in the tier ledger. Rows of the removed OSM step
+#: (#57) keep their `osm` tier.
 _METHOD_TO_STAGE = {"url_pattern": "url", "osm": "osm"}
 
-#: The two methods, and the name each one gets in the database.
-TIER_NAMES = (("url", "url_pattern"), ("osm", "osm"))
+#: The method, and the name it gets in the database.
+TIER_NAMES = (("url", "url_pattern"),)
 
 
 def field_name_for(answer: dict[str, Any]) -> str:
@@ -109,11 +110,11 @@ def _tier_metadata(
     if stage not in stages_run:
         return {"status": "not_reached", "reason": skip_reason or "not_requested"}
 
-    method = {"url": "url_pattern", "osm": "osm"}[stage]
+    method = {"url": "url_pattern"}[stage]
     proposed = any(
         method in (answer.get("methods") or []) for answer in result.get("answers") or []
     )
-    prefix = {"url": "url_patterns:", "osm": "osm:"}[stage]
+    prefix = {"url": "url_patterns:"}[stage]
     error = next((e for e in result.get("errors") or [] if e.startswith(prefix)), None)
     if error:
         return {"status": "tried", "outcome": "error", "error": error}
@@ -155,9 +156,6 @@ def build_payload(
         "candidates_generated": result.get("candidates_generated"),
         "candidates_resolved": result.get("candidates_resolved"),
         "candidates_probed": result.get("candidates_probed"),
-        "osm_objects_seen": result.get("osm_objects_seen"),
-        "osm_id": result.get("osm_id"),
-        "osm_match_score": result.get("osm_match_score"),
         "answers": result.get("answers") or [],
         "elapsed_s": result.get("elapsed_s"),
         "errors": result.get("errors") or [],
@@ -255,28 +253,7 @@ def write_company_result(
             confidence=answer.get("confidence") or 0.0,
         )
 
-    # 3. The OpenStreetMap object, when one matched. Useful on its own: it is a stable handle
-    #    for the business on the map, whether or not the map knew a website.
-    if result.get("osm_id"):
-        insert_text_observation(
-            cur,
-            company_id=company.id,
-            source_record_id=source_record_id,
-            source_id=source_id,
-            sync_run_id=sync_run_id,
-            field_name="osm_id",
-            value_text=result["osm_id"],
-            metadata={
-                "provider": SOURCE_KEY,
-                "match_score": result.get("osm_match_score"),
-                "osm_website": result.get("osm_website"),
-                "discovered_via": "overpass_api",
-            },
-            confidence=result.get("osm_match_score"),
-        )
-
-
-    # 4. A recheck that no longer finds a website this source found before must not leave it
+    # 3. A recheck that no longer finds a website this source found before must not leave it
     #    published. Every website re-found above was just rewritten, so it carries this
     #    transaction's now(); a row older than that was not found again and drops below the bar.
     #    Not after a failed check: an outage on our side must not take websites offline.
