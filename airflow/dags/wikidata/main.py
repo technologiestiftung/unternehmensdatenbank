@@ -1,6 +1,6 @@
 """Websites Wikidata lists for Berlin companies, verified like a guessed domain (issue #26).
 
-Two tasks:
+Three tasks:
 
 1. **match**, at most once a day. One SPARQL query (`enrichment.wikidata`) and every item is matched
    to a company in SQL, with the one name key (`normalize_company_name`):
@@ -15,6 +15,8 @@ Two tasks:
    `pipeline.verify_proposed`, the same page reading and `confidence.score` as an OSM website tag.
    Nothing on the page ties it to the company -> below the bar, never shown. On 2026-10-30, 229 of
    the 531 were proven, 139 of them new to website_discovery; no result was hand-checked.
+3. **store_texts**, between the two (`run_texts`): each matched item's German Wikipedia article and
+   Wikidata description go into the company corpus (`enrichment.corpus`, #61), for training.
 
 The page, not the match, proves a website. An item that no longer matches keeps its record,
 inactive, and is still verified every 90 days. A website drops to confidence 0 only when no record
