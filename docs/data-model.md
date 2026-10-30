@@ -97,7 +97,8 @@ python scripts/import_register_managers.py
 `V1__baseline.sql` is the whole schema as of 2026-10-28; everything before it was squashed while
 nothing was deployed. `V2__source_overview.sql`, `V3__register_fields_as_observations.sql`,
 `V4__user_feedback_source.sql`, `V5__profile_cleanup_tags_english.sql`, `V6__source_dates.sql`,
-`V7__register_number_from_identifiers.sql` and `V8__company_history.sql` came after. Forward-only from here: never edit a migration that has
+`V7__register_number_from_identifiers.sql`, `V8__company_history.sql` and
+`V9__company_documents.sql` came after. Forward-only from here: never edit a migration that has
 run anywhere shared, add new ones as `V{N}__description.sql`, and run Flyway before Airflow
 touches the changed schema.
 The headings below keep the pre-squash migration numbers (V3–V10) so git history finds the reasoning.
@@ -151,7 +152,19 @@ Tested on a copy of the Berlin database on 2026-10-29: a new address read that d
 the register's 2018 address at 1.0 (worth about 0.3 after decay); a source name read a day before
 two people's correction did not replace it, one read after it did.
 
-## History (V7, #54)
+## Company corpus (V9, #61)
+
+Every page and text read about a company is kept once in S3 (`enrichment.corpus`; MinIO on the hub,
+RustFS locally in the `datahub` profile), latest version only. `page_cache` uses it as its backend,
+so a page any DAG downloaded in the last 90 days (`CORPUS_MAX_AGE_DAYS`) is served to every other DAG:
+on 20 company websites the Impressum took 32.5 s downloaded and 10.7 s from the store. An unreachable
+store is switched off for the run after the first failure. `company_documents` is the index: which
+texts belong to which company (web pages from `website_contacts`, `website_keywords`, `manager_ner`;
+the Wikipedia article and Wikidata description from `wikidata`), for training the classifiers.
+**Personal data is stored in full** (an Impressum names people), decided by the developer on
+2026-10-30; pipelines only, not in Hasura. Wikipedia text is CC BY-SA.
+
+## History (V8, #54)
 
 `company_field_history` is append-only: a row whenever a shown value appears (`shown`), is replaced by
 another value (`replaced`), keeps its value with a new confidence or source (`confidence_changed`), or

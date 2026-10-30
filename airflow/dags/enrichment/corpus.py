@@ -36,7 +36,7 @@ from typing import Any
 
 log = logging.getLogger(__name__)
 
-#: The kinds of text the corpus holds; `company_documents.kind` has the same CHECK (V8).
+#: The kinds of text the corpus holds; `company_documents.kind` has the same CHECK (V9).
 KINDS = ("webpage", "wikipedia", "wikidata_description")
 
 _lock = threading.Lock()

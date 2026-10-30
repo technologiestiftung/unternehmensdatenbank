@@ -67,6 +67,9 @@ field claim, with a confidence) → `pipeline_coordinator` → `company_canonica
 - **Company identity is a random UUID, never the name** (32,170 Berlin companies have a former name).
   Matching: identifiers first, fuzzy second; `match_method`/`match_confidence` on the source record.
   Merging never deletes (`companies.merged_into`).
+- **Download through the corpus** (`page_cache` / `http_client.fetch_page`, S3, #61), never a bare
+  `session().get` for a company's page: every DAG then shares one download, and the text lands in
+  `company_documents` for training. It holds personal data in full: pipelines only.
 - **The history is append-only** (`company_field_history`, #54): written only by
   `record_company_history()` in the coordinator, never updated or deleted. `v_company_claims` is an
   allow-list: a new field the app shows needs its name there, and email, phone and `_withheld` never.
@@ -136,7 +139,7 @@ purpose, so for Berlin only the Technologiefeld can be filled today.
 ## Migrations
 
 `V1__baseline.sql` is the whole schema as of 2026-10-28 (squashed while nothing was deployed), plus
-`V2__source_overview.sql`, `V3__register_fields_as_observations.sql`, `V4__user_feedback_source.sql`, `V5__profile_cleanup_tags_english.sql`, `V6__source_dates.sql`, `V7__register_number_from_identifiers.sql` and `V8__company_history.sql`. A database migrated before the squash needs its Flyway history reset once
+`V2__source_overview.sql`, `V3__register_fields_as_observations.sql`, `V4__user_feedback_source.sql`, `V5__profile_cleanup_tags_english.sql`, `V6__source_dates.sql`, `V7__register_number_from_identifiers.sql`, `V8__company_history.sql` and `V9__company_documents.sql`. A database migrated before the squash needs its Flyway history reset once
 ([data-model](docs/data-model.md), "Migration strategy"). **Forward-only:** never edit a migration
 that ran anywhere shared. Flyway runs under `--profile tools`, not with `docker compose up`; on the
 hub as the app's initContainer ([release](docs/release.md)).
