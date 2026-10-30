@@ -1,6 +1,6 @@
 # DAGs
 
-Ten DAG packages and one library. Every DAG starts paused (Airflow's default,
+Eleven DAG packages and one library. Every DAG starts paused (Airflow's default,
 `dags_are_paused_at_creation`); unpausing it in Airflow is the only switch.
 
 | package | DAG id | schedule | what it does |
@@ -10,6 +10,7 @@ Ten DAG packages and one library. Every DAG starts paused (Airflow's default,
 | `wikidata/` | `wikidata` | `@daily`, a full batch starts the next | websites Wikidata lists for Berlin organisations (one SPARQL query a day, CC0), matched by register number and name or a unique name of a company that is not dissolved, each verified like a guessed domain (`pipeline.verify_proposed`); only a page that identifies the company is shown |
 | `website_contacts/` | `website_contacts` | triggered | the company's own `info@`-style email and phone from the Impressum of its proven website (source `impressum_contacts`). Stored, never resolved, so never shown. A failed read is retried, 3 times at most |
 | `website_keywords/` | `website_keywords` | triggered | keywords from meta tags and services/products headings; generic ones measured out over all companies read; publishes `activity_keywords` once 500 companies are read; retried 3 times at most |
+| `technology_field/` | `technology_field` | triggered | Berlin's Technologiefeld from the keywords on the homepage and services pages (`branch_classifier`); keywords weighed over all companies read, so every run classifies them all again; writes once 500 companies are read; a value a company loses drops to confidence 0; retried 3 times at most |
 | `register_announcements/` | `register_announcements` | `@weekly` | Berlin's register announcements of the last 8 weeks from handelsregister.de (2 requests, the result list only, never a detail page). Linked by register number, then name and city (never to a deleted company); unknown companies are created. Publishes the latest as `register_announcement`, a hint next to `register_status`, never a change of it |
 | `berlin_zuwendungen/` | `berlin_zuwendungen` | `@monthly` | Land Berlin grants to HRA/HRB recipients into `company_fundings`, linked by register number |
 | `foerderkatalog/` | `foerderkatalog` | `@monthly` | every Berlin grant from the Förderkatalog des Bundes into `company_fundings` |

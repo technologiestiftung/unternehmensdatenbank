@@ -17,7 +17,7 @@ WHERE THE LABELS COME FROM
    learned. Corrections that are not one of the 77 names are ignored.
    Since V5 (#47) these votes are stored in English (`name_en`), while `fields` and the seed are
    Berlin's German keys, so nothing matches until the votes are translated back with `Taxonomy`.
-   That has to happen when the trainer gets a caller (#18).
+   That has to happen when the trainer gets a caller (#62).
 
 HOW IT IS JUDGED
 
