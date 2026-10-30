@@ -101,8 +101,6 @@ class CompanyResult:
     candidates_resolved: int = 0
     candidates_probed: int = 0
     parked_rejected: int = 0
-    #: Of `candidates_probed`, the guesses from former names (their extra cost).
-    former_name_probes: int = 0
     osm_objects_seen: int = 0
     osm_id: str | None = None
     osm_match_score: float | None = None
@@ -539,8 +537,6 @@ def discover(
                 result.candidates_resolved += found.candidates_resolved
                 result.candidates_probed += found.candidates_probed
                 result.parked_rejected += len(found.rejected_parked)
-                if label:
-                    result.former_name_probes += found.candidates_probed
 
                 for probe in found.live:
                     # `probe.html` is already the body of `final_url` — handing it over stops
