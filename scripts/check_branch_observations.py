@@ -4,7 +4,7 @@
 Free. No API, no model, no database, no network, and it runs in under a second — which is what lets
 the `PostToolUse` hook run it after every edit under `combined_discovery/`, `scripts/` or `tests/`.
 
-The other seven guards check what the classifiers DECIDE. This one checks what gets STORED, which is
+The other five guards check what the classifiers DECIDE. This one checks what gets STORED, which is
 a different set of mistakes with a different blast radius: a wrong decision is one bad row in a file,
 a wrong write is a wrong column in `v_companies_enriched` for thousands of companies.
 

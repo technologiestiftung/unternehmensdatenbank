@@ -36,10 +36,10 @@ and this file files them under `directory_url` as well. Two independent guards, 
 "Looked at" is the company's source record of this source, written first and always. (A
 `search_query` marker observation said the same and was removed with #47.)
 
-- `discovery_tier`, two of them, one per method — what each method did. The value is the
-  method name; the metadata says whether it ran. Without these, "we asked OpenStreetMap and it
-  had nothing" and "we never asked OpenStreetMap" look identical in the database, and the
-  second one silently reads as evidence that a company has no website.
+- `discovery_tier`, one per method (only `url_pattern` since the OSM step was removed, #57) —
+  what each method did. The value is the method name; the metadata says whether it ran. Without
+  it, "we tried the URL guesses and they found nothing" and "we never tried them" look identical
+  in the database, and the second one silently reads as evidence that a company has no website.
 
 ## What this does NOT write
 
@@ -236,12 +236,11 @@ def write_company_result(
                 # `psycopg2.extras.Json` cannot serialise one — so the contract this file's header
                 # claims, `dataclasses.asdict(pipeline.discover(...))`, would raise here. The
                 # normalised answers in `results.jsonl` already hold sorted lists
-                # (`pipeline.py:815`), which is why feeding it the file is the tested path. Sorting
+                # (`pipeline._answer_dict`), which is why feeding it the file is the tested path. Sorting
                 # defensively costs nothing and makes both callers safe.
                 "evidence": sorted(answer.get("evidence") or []),
-                # Which methods actually ran for this company, so a reader can tell "OpenStreetMap
-                # had nothing" from "OpenStreetMap was never asked" without joining to the tier
-                # rows. Same reason those rows exist; this is the per-claim copy.
+                # Which methods actually ran for this company, so a reader can tell "a method had
+                # nothing" from "a method was never asked" without joining to the tier rows. Same reason those rows exist; this is the per-claim copy.
                 "stages_run": sorted(stages_run),
                 "why": answer.get("why"),
                 "pattern": answer.get("pattern"),
