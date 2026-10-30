@@ -81,14 +81,11 @@ def current_version() -> str | None:
 
 
 def load_model(version: str | None) -> Any:
-    """The model of `version`, downloaded from the store into MODEL_DIR if needed; the base model when
-    there is none or the version cannot be found (logged)."""
+    """The model of `version`, downloaded from the store into MODEL_DIR if needed; the base model only
+    when there is no version. A version that cannot be found raises FileNotFoundError."""
     import spacy
 
-    folder = model_store.local_copy(MODEL_NAME, version, MODEL_DIR) if version else None
-    if version and folder is None:
-        log.warning("Model %s not found locally or in the store; using %s.", version, BASE_MODEL)
-    return spacy.load(folder if folder else BASE_MODEL)
+    return spacy.load(model_store.local_copy(MODEL_NAME, version, MODEL_DIR) if version else BASE_MODEL)
 
 
 def read_impressum(website: str) -> tuple[str, str | None]:

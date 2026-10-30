@@ -48,14 +48,18 @@ def current_version(name: str, local_dir: Path) -> str | None:
         return None
 
 
-def local_copy(name: str, version: str, local_dir: Path) -> Path | None:
-    """The local folder of a version, downloaded from S3 if it is not there yet; None if neither has it."""
+def local_copy(name: str, version: str, local_dir: Path) -> Path:
+    """The local folder of a version, downloaded from S3 if it is not there yet.
+
+    Raises FileNotFoundError if neither has it: a named version that cannot be loaded fails the task
+    (Airflow retries it), never a silent fallback to another model.
+    """
     folder = local_dir / version
     if (folder / "meta.json").exists():
         return folder
     data = corpus.get_bytes(_key(name, f"{version}.tar.gz"))
     if data is None:
-        return None
+        raise FileNotFoundError(f"Model {name} {version} is neither in {local_dir} nor in the store.")
     # Unpacked next to its place and renamed into it, so a folder only exists once it is complete.
     local_dir.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(dir=local_dir) as tmp:

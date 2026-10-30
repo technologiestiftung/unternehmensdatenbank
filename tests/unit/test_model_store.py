@@ -4,6 +4,8 @@ from __future__ import annotations
 import json
 import shutil
 
+import pytest
+
 from enrichment import model_store
 
 
@@ -41,4 +43,13 @@ def test_without_a_store_everything_stays_local(tmp_path, monkeypatch) -> None: 
     monkeypatch.delenv("CORPUS_S3_ENDPOINT", raising=False)
     (tmp_path / "current.json").write_text('{"version": "v9"}')
     assert model_store.current_version("ner", tmp_path) == "v9"
-    assert model_store.local_copy("ner", "v9", tmp_path) is None  # nothing local, nothing to download
+    with pytest.raises(FileNotFoundError):  # nothing local, nothing to download
+        model_store.local_copy("ner", "v9", tmp_path)
+
+
+def test_a_named_version_missing_from_the_store_fails_instead_of_falling_back(s3, tmp_path) -> None:  # noqa: ANN001
+    model_store.publish("ner", "v1", tmp_path, _train(tmp_path, "v1"), promoted=True)
+    del s3.objects["models/ner/v1.tar.gz"]  # the pointer survived, the model files did not
+    assert model_store.current_version("ner", tmp_path / "pod") == "v1"
+    with pytest.raises(FileNotFoundError):
+        model_store.local_copy("ner", "v1", tmp_path / "pod")
