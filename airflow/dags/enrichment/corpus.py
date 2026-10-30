@@ -30,6 +30,7 @@ import json
 import logging
 import os
 import threading
+import time
 from datetime import datetime, timedelta, timezone
 from io import BytesIO
 from typing import Any
@@ -181,32 +182,53 @@ def record_document(
     )
 
 
+#: Model objects are few and large: they ignore the page-cache breaker and try this often before raising.
+MODEL_ATTEMPTS = 3
+MODEL_RETRY_SECONDS = 2.0
+
+
+def _missing(exc: Exception) -> bool:
+    return type(exc).__name__ == "S3Error" and getattr(exc, "code", "") == "NoSuchKey"
+
+
+def _strict(call: Any) -> Any:
+    """`call()`, retried with a growing pause; the last failure raises. A missing object is an answer."""
+    for attempt in range(1, MODEL_ATTEMPTS + 1):
+        try:
+            return call()
+        except Exception as exc:
+            if _missing(exc) or attempt == MODEL_ATTEMPTS:
+                raise
+            log.warning("corpus: model object attempt %d failed (%s); retrying.", attempt, type(exc).__name__)
+            time.sleep(MODEL_RETRY_SECONDS * attempt)
+
+
 def put_bytes(name: str, data: bytes, content_type: str = "application/octet-stream") -> None:
     """Store raw bytes under an exact object name (models, not documents). A no-op when no store is
-    configured; any failure raises, an unreachable store included, so a model is never lost quietly."""
+    configured; a failure raises after `MODEL_ATTEMPTS` tries, so a model is never lost quietly."""
     if not configured():
         return
-    if _unreachable:
-        raise ConnectionError("Company corpus unreachable earlier in this run.")
-    _s3().put_object(bucket(), name, BytesIO(data), len(data), content_type=content_type)
+    _strict(lambda: _s3().put_object(bucket(), name, BytesIO(data), len(data), content_type=content_type))
 
 
 def get_bytes(name: str) -> bytes | None:
     """The bytes under an exact object name; None only when no store is configured or the object does
-    not exist. Any other failure raises, an unreachable store included: a model read that failed must
+    not exist. Any other failure raises after `MODEL_ATTEMPTS` tries: a model read that failed must
     not look like a model that is not there."""
     if not configured():
         return None
-    if _unreachable:
-        raise ConnectionError("Company corpus unreachable earlier in this run.")
-    try:
+
+    def read() -> bytes:
         response = _s3().get_object(bucket(), name)
         try:
             return response.read()
         finally:
             response.close()
             response.release_conn()
+
+    try:
+        return _strict(read)
     except Exception as exc:
-        if type(exc).__name__ == "S3Error" and getattr(exc, "code", "") == "NoSuchKey":
+        if _missing(exc):
             return None
         raise

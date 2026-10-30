@@ -47,4 +47,5 @@ def s3(monkeypatch):  # noqa: ANN001, ANN201
     monkeypatch.setattr(corpus, "_client", fake)
     monkeypatch.setattr(corpus, "_bucket_ready", True)
     monkeypatch.setattr(corpus, "_unreachable", False)
+    monkeypatch.setattr(corpus, "MODEL_RETRY_SECONDS", 0)
     return fake
