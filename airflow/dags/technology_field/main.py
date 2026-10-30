@@ -11,7 +11,10 @@ lets `pipeline_coordinator` publish the result:
    run weighs over all companies read so far and classifies each of them again. A company that no
    longer gets a value keeps its row at confidence 0, below the coordinator's bar: never deleted.
    Nothing is written until `MIN_COMPANIES` are read, because a weight measured over 50 companies
-   lets one rare word decide.
+   lets one rare word decide. Where no keyword fired, a promoted text classifier may fill the gap;
+   its prediction is cached in the source record with the model version (`textcat`), so a company
+   is predicted again only for a new model or after it was read again. If the store fails during
+   the run, the task fails before writing: a text it did not return is not a text that is gone.
 
 **No state outside Postgres**, as in `website_keywords`: "already read" is the source record.
 
@@ -29,6 +32,8 @@ from collections import Counter
 from dataclasses import asdict
 from datetime import datetime, timezone
 from typing import Any, Mapping
+
+from psycopg2.extras import Json
 
 from enrichment import branch_classifier as bc, corpus
 from enrichment import branch_textcat as textcat
@@ -182,8 +187,35 @@ def keyword_answers(records: list[tuple], taxonomy: bc.Taxonomy) -> dict[str, bc
     )
 
 
+def gap_predictions(
+    gaps: Mapping[str, tuple[str, Mapping[str, Any] | None]], version: str, model: Any
+) -> tuple[dict[str, Mapping[str, Any]], dict[str, dict[str, Any]]]:
+    """(prediction per gap company, the new ones to cache) for {company_id: (website, cached)}.
+
+    A cached prediction of `version` is reused; otherwise the model reads the stored text. Without a
+    stored text the cached prediction stays, even an older model's, rather than one made on nothing.
+    """
+    from technology_field.train import stored_text
+
+    predictions: dict[str, Mapping[str, Any]] = {}
+    new: dict[str, dict[str, Any]] = {}
+    for company_id, (website, cached) in gaps.items():
+        if cached and cached.get("model_version") == version:
+            predictions[company_id] = cached
+            continue
+        text = stored_text(website)
+        if not text:
+            if cached:
+                predictions[company_id] = cached
+            continue
+        label, probability = textcat.predict(model, text)
+        predictions[company_id] = new[company_id] = {"model_version": version, "label": label,
+                                                     "probability": probability}
+    return predictions, new
+
+
 def run_classify() -> None:
-    from technology_field.train import load_current, stored_text
+    from technology_field.train import load_current, require_store
 
     taxonomy = bc.load_taxonomy()
     connection = get_connection()
@@ -214,18 +246,38 @@ def run_classify() -> None:
             answers = keyword_answers(records, taxonomy)
             # Where no keyword fired, a promoted text classifier may fill the gap (`branch_textcat`).
             version, model = load_current()
+            predictions: dict[str, Mapping[str, Any]] = {}
             if model is not None:
-                for cid, *_, still_published, website in records:
-                    if answers[cid].outcome == "no_keyword" and still_published:
-                        text = stored_text(website)
-                        answers[cid] = textcat.fill_gap(answers[cid], *textcat.predict(model, text))
+                cur.execute(
+                    """
+                    SELECT company_id::text, source_payload -> 'textcat'
+                    FROM public.company_source_records
+                    WHERE source_id = %s AND source_payload ? 'textcat'
+                    """,
+                    (source_id,),
+                )
+                cached = dict(cur.fetchall())
+                predictions, new = gap_predictions(
+                    {cid: (website, cached.get(cid)) for cid, *_, still_published, website in records
+                     if answers[cid].outcome == "no_keyword" and still_published},
+                    version, model,
+                )
+                require_store()
+                for cid, prediction in predictions.items():
+                    answers[cid] = textcat.fill_gap(answers[cid], prediction["label"], prediction["probability"])
+                record_ids = {cid: record_id for cid, record_id, *_ in records}
+                for cid, prediction in new.items():
+                    cur.execute(
+                        "UPDATE public.company_source_records SET source_payload = source_payload || %s WHERE id = %s",
+                        (Json({"textcat": prediction}), record_ids[cid]),
+                    )
             written = dropped = 0
             kept: dict[str, set[tuple[str, str]]] = {}
             for company_id, record_id, read_at, *_ in records:
                 row = {**asdict(answers[company_id]), "technology_field": answers[company_id].branch,
                        "taxonomy_version": taxonomy.version, "scope_companies": len(records)}
                 if row["decided_by"] == textcat.DECIDED_BY_TEXTCAT:
-                    row["model_name"] = f"{textcat.MODEL_NAME}:{version}"
+                    row["model_name"] = f"{textcat.MODEL_NAME}:{predictions[company_id]['model_version']}"
                 writes = planned_writes(row, None)
                 for field_name, value, confidence, metadata in writes:
                     insert_text_observation(

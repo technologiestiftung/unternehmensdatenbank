@@ -5,7 +5,8 @@ The rules live in `enrichment.branch_textcat`; this file does the I/O.
 - **Labels:** what the keywords assigned (the seed), overridden by the app's votes on
   `technology_field`, translated back from English to Berlin's keys (`german_votes`).
 - **Text:** the homepage and services pages the `technology_field` DAG read, from the company corpus
-  (S3). Nothing is downloaded; a company whose pages are no longer stored is left out.
+  (S3). Nothing is downloaded; a company whose pages are no longer stored is left out. If the store
+  fails during the run, the task fails instead of training on what was left.
 - **Judged only against people.** A fixed fifth of the companies people voted on is held out
   (`manager_ner.ner.is_holdout`, the same stable split) and never trained on. Of those, only the
   companies the keywords left empty count: there the model would decide.
@@ -28,7 +29,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from enrichment import branch_classifier as bc
+from enrichment import branch_classifier as bc, corpus
 from enrichment import branch_textcat as textcat
 from enrichment import model_store
 from manager_ner.ner import is_holdout
@@ -65,6 +66,12 @@ def stored_text(website: str) -> str:
         return ""
     return textcat.classifier_text({"services": content_for(website, homepage, fetch=False).text,
                                     "homepage": visible_text(homepage)})
+
+
+def require_store() -> None:
+    """Fail the task if the store failed during this run: a text it did not return is not a text that is gone."""
+    if corpus.configured() and not corpus.enabled():
+        raise RuntimeError("The company corpus failed during this run; retry instead of acting on missing texts.")
 
 
 def should_promote(new: tuple[float, int], current: tuple[float, int] | None) -> bool:
@@ -105,6 +112,7 @@ def run_train() -> None:
             for cid, a in keyword_answers(records, taxonomy).items()]
     texts = {cid: text for cid, *_, still_published, website in records
              if still_published and (text := stored_text(website))}
+    require_store()
     labelled = textcat.training_set(rows, texts, votes, fields)
     held_out = {cid for cid in votes if is_holdout(cid)}
     examples = [pair for cid, pair in sorted(labelled.labelled.items()) if cid not in held_out]

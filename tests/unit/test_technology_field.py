@@ -6,6 +6,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from types import SimpleNamespace
 
+import pytest
+
 from enrichment import branch_classifier as bc
 from enrichment import branch_observations
 from technology_field import main, train
@@ -55,15 +57,19 @@ class _Cursor:
     """Just enough of a psycopg2 cursor for `run_classify`: the read records, the values shown."""
 
     def __init__(self, records: list[tuple], shown: list[tuple]) -> None:
-        self.records, self.shown, self.rows, self.drops = records, shown, [], []
+        self.records, self.shown, self.rows, self.drops, self.cached = records, shown, [], [], []
 
     def execute(self, sql: str, params: tuple = ()) -> None:
-        if "FROM public.company_source_records" in sql:
+        if "'textcat'" in sql:
+            self.rows = []
+        elif "FROM public.company_source_records" in sql:
             self.rows = self.records
         elif "FROM public.company_field_observations" in sql:
             self.rows = self.shown
-        elif sql.lstrip().startswith("UPDATE"):
+        elif "UPDATE public.company_field_observations" in sql:
             self.drops.append(params)
+        elif "UPDATE public.company_source_records" in sql:
+            self.cached.append(params)
 
     def fetchall(self) -> list:
         return self.rows
@@ -95,6 +101,7 @@ def _run_classify(
     taxonomy = _taxonomy(tmp_path)
     monkeypatch.setattr(train, "load_current", lambda: ("v1", model) if model else (None, None))
     monkeypatch.setattr(train, "stored_text", lambda website: f"Text von {website}")
+    monkeypatch.setattr(train, "require_store", lambda: None)
     cur, inserts = _Cursor(records, shown), []
     monkeypatch.setattr(main.bc, "load_taxonomy", lambda: taxonomy)
     # The write path translates to English through its own cached copy of the real YAML.
@@ -138,7 +145,7 @@ class _Model:
 
 
 def test_a_promoted_model_fills_only_where_no_keyword_fired(monkeypatch, tmp_path: Path) -> None:
-    _, inserts = _run_classify(monkeypatch, tmp_path, _records(), [], model=_Model())
+    cur, inserts = _run_classify(monkeypatch, tmp_path, _records(), [], model=_Model())
     by_company = {k["company_id"]: k for k in inserts}
     # The keywords keep rail; the model fills other-0 and stays out where it is not sure enough.
     assert sorted(by_company) == ["other-0", "rail"]
@@ -146,3 +153,34 @@ def test_a_promoted_model_fills_only_where_no_keyword_fired(monkeypatch, tmp_pat
     filled = by_company["other-0"]
     assert (filled["value_text"], filled["confidence"]) == ("Photonics", 0.53)
     assert filled["metadata"]["decided_by"] == "textcat" and filled["metadata"]["model_name"] == "branch_textcat:v1"
+    # Every gap company's prediction is cached with the model version, merged into its payload.
+    assert len(cur.cached) == 50 and cur.drops == []
+
+
+class _NoModel:
+    def __call__(self, text: str) -> None:
+        raise AssertionError("the model was called")
+
+
+def test_a_cached_prediction_of_the_model_in_use_is_reused(monkeypatch) -> None:
+    monkeypatch.setattr(train, "stored_text", lambda website: "Text")
+    cached = {"model_version": "v1", "label": "Photonik", "probability": 0.9}
+    predictions, new = main.gap_predictions({"a": ("https://a.de", cached)}, "v1", _NoModel())
+    assert predictions == {"a": cached} and new == {}
+
+
+def test_a_new_model_predicts_again_but_never_on_no_text(monkeypatch) -> None:
+    monkeypatch.setattr(train, "stored_text", lambda website: "" if "gone" in website else "other-0.")
+    old = {"model_version": "v0", "label": "Bahnindustrie", "probability": 0.7}
+    predictions, new = main.gap_predictions(
+        {"a": ("https://other-0.de", old), "gone": ("https://gone.de", old), "none": ("https://gone.de/x", None)},
+        "v1", _Model())
+    assert new == {"a": {"model_version": "v1", "label": "Photonik", "probability": 0.9}}
+    assert predictions == {**new, "gone": old}
+
+
+def test_a_store_failure_stops_the_run_before_anything_is_written(monkeypatch) -> None:
+    monkeypatch.setattr(train.corpus, "configured", lambda: True)
+    monkeypatch.setattr(train.corpus, "enabled", lambda: False)
+    with pytest.raises(RuntimeError):
+        train.require_store()
