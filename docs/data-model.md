@@ -97,8 +97,8 @@ python scripts/import_register_managers.py
 `V1__baseline.sql` is the whole schema as of 2026-10-28; everything before it was squashed while
 nothing was deployed. `V2__source_overview.sql`, `V3__register_fields_as_observations.sql`,
 `V4__user_feedback_source.sql`, `V5__profile_cleanup_tags_english.sql`, `V6__source_dates.sql`,
-`V7__register_number_from_identifiers.sql`, `V8__company_history.sql` and
-`V9__company_documents.sql` and `V10__review_sample.sql` came after. Forward-only from here: never edit a migration that has
+`V7__register_number_from_identifiers.sql`, `V8__company_history.sql`, `V9__company_documents.sql`
+and `V10__review_sample.sql` came after. Forward-only from here: never edit a migration that has
 run anywhere shared, add new ones as `V{N}__description.sql`, and run Flyway before Airflow
 touches the changed schema.
 The headings below keep the pre-squash migration numbers (V3–V10) so git history finds the reasoning.
@@ -162,7 +162,7 @@ technology field is checked first: it needs a website, so a website-first order 
 companies whose website was later dropped. Drawn in a stable random
 order, not by low confidence, which would make every source look worse than it is.
 `draw_review_sample()` only tops a stratum up, never replaces anyone; `pipeline_coordinator` calls it
-after every run, so the technology-field stratum fills once companies are classified.
+on every run, before the profile refresh, so the technology-field stratum fills once companies are classified.
 `v_review_results` gives the precision per field and stratum of the values shown **now**: a vote on a
 value that was since replaced no longer counts, and each value gets one verdict by majority of its
 votes (a tie is left out), so two voters do not count twice.
