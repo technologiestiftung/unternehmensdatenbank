@@ -7,9 +7,9 @@ Each run does two things, then lets `pipeline_coordinator` publish the result:
    longer qualifies drops to `UNVERIFIED_CAP`, below the bar, and the coordinator un-publishes it.
    This is how the rule of 2026-10-28 reaches the websites found before it. Cheap and idempotent.
 2. **discover.** One batch of companies this source has not looked at yet: guess domains from the
-   name (`url_patterns`), optionally match OpenStreetMap, download the page and its Impressum, and
-   check whose they are, including whether a Geschäftsführer on the Impressum is one of the
-   company's register officers. Every candidate URL is stored; only a proven one can become the
+   name and up to 3 former names (`url_patterns`), optionally match OpenStreetMap, download the
+   page and its Impressum, and check whose they are, including whether a Geschäftsführer on the
+   Impressum is one of the company's register officers. Every candidate URL is stored; only a proven one can become the
    company's website.
 
 **No state outside Postgres.** "Already looked at" is the company's source record under this source,
@@ -35,6 +35,7 @@ from typing import Any
 from enrichment import confidence as conf
 from enrichment import name_frequency, pipeline
 from enrichment.officers import load_officers
+from enrichment.register_names import load_former_names
 from enrichment.observations import SOURCE_KEY, SOURCE_NAME, WEBSITE_SOURCE_KEYS, write_company_result
 from source_enrichment_common import (
     fetch_companies_without_source,
@@ -140,12 +141,14 @@ def run_discover() -> int:
                                       metadata={"dag_id": DAG_ID, "rule": RULE})
             sync_run_id = start_sync_run(cur, source_id=source_id)
             officers = load_officers(cur, [c.id for c in companies])
+            former_names = load_former_names(cur, [c.id for c in companies])
             common = _common_words(cur)
 
         stages = {"url"} | ({"osm"} if USE_OSM else set())
         skip = {} if USE_OSM else {"osm": "WEBSITE_DISCOVERY_OSM is off"}
         found = errors = 0
-        prepared = [dataclasses.replace(c, officers=officers.get(c.id, frozenset())) for c in companies]
+        prepared = [dataclasses.replace(c, officers=officers.get(c.id, frozenset()), former_names=former_names.get(c.id, ()))
+                    for c in companies]
         # Pages are fetched in threads; every write stays on this thread and its one connection.
         with ThreadPoolExecutor(max_workers=WORKERS) as pool:
             jobs = {pool.submit(pipeline.discover, c, use_osm=USE_OSM, common_words=common): c

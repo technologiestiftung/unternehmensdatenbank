@@ -88,3 +88,41 @@ def test_only_a_clean_recheck_retires_websites_it_did_not_find_again() -> None:
     assert retires_unconfirmed({"website": None, "errors": []})
     assert retires_unconfirmed({"website": None})
     assert not retires_unconfirmed({"website": None, "errors": ["url_patterns: ConnectionError: ..."]})
+
+
+def _discover_with_former_name(monkeypatch, register_on_imprint: str) -> tuple[object, list[set[str]]]:
+    """`pipeline.discover` for "Neuname GmbH", formerly "Altname GmbH", whose site is `altname.de`.
+    The current name finds nothing live; the former name finds `altname.de`."""
+    from enrichment import pipeline, url_patterns
+    from source_enrichment_common import CompanyCandidate
+
+    skipped: list[set[str]] = []
+
+    def find_live_urls(name, city=None, skip_hosts=frozenset()):
+        skipped.append(set(skip_hosts))
+        found = url_patterns.UrlPatternResult(guessed_hosts={f"{name.split()[0].lower()}.de"})
+        if name == "Altname GmbH":
+            found.live = [url_patterns.Probe("https://altname.de", "https://altname.de", 200, "<html>x</html>")]
+            found.pattern_by_host = {"altname.de": "name"}
+        return found
+
+    extracted = {"register_numbers": [register_on_imprint], "postcode": None, "postcodes": [], "text_snippet": ""}
+    monkeypatch.setattr(url_patterns, "find_live_urls", find_live_urls)
+    monkeypatch.setattr(pipeline, "_imprint_for", lambda url, homepage=None: (url, url + "/impressum", extracted))
+    company = CompanyCandidate(id="1", company_name="Neuname GmbH", address=None, postcode=None, city="Berlin",
+                               registration_number="Amtsgericht Berlin (Charlottenburg) HRB 1",
+                               former_names=("Altname GmbH",))
+    return pipeline.discover(company, use_osm=False), skipped
+
+
+def test_a_former_name_domain_becomes_the_website_when_the_page_proves_the_company(monkeypatch) -> None:
+    result, skipped = _discover_with_former_name(monkeypatch, "HRB 1")
+    assert result.website == "https://altname.de"
+    assert result.pattern == "former_name:name"
+    # The former name does not try the hosts the current name already guessed.
+    assert skipped == [set(), {"neuname.de"}]
+
+
+def test_a_former_name_domain_without_proof_is_not_the_website(monkeypatch) -> None:
+    result, _ = _discover_with_former_name(monkeypatch, "HRB 999")
+    assert result.website is None

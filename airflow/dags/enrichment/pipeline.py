@@ -53,6 +53,9 @@ log = logging.getLogger(__name__)
 #: true guesses are unaffected: `zweirad-liebig.de` and `bruecklyn.de` score 1.0, and
 #: `muellertiefbau.de` for "Müller Hoch- und Tiefbau" scores 0.67.
 MIN_NAME_COVERAGE = 0.6
+#: Former names tried per company. 32,061 of the 32,170 Berlin companies with a former name have at
+#: most 3; each costs up to `url_patterns.MAX_PROBES` more page loads.
+MAX_FORMER_NAMES = 3
 
 
 @dataclass
@@ -171,10 +174,13 @@ def _page_evidence(
     extracted: dict[str, Any] | None,
     redirected_off_host: bool = False,
     common: set[str] | frozenset[str] = frozenset(),
+    host_name: str | None = None,
 ) -> tuple[set[str], str | None]:
     """Everything the page itself says about whether it belongs to this company.
 
-    Returns (evidence names, the register number seen on the page).
+    Returns (evidence names, the register number seen on the page). `host_name` is the name the
+    domain was guessed from, a former name for a former-name guess: the domain checks compare
+    against it. Identity is still proven by the page, against the company as it is today.
 
     `own_site_verdict` is the platform's single predicate for "is this the company's own site
     or a page about it". It is used here unchanged and on purpose: every past instance of a
@@ -183,7 +189,8 @@ def _page_evidence(
     evidence: set[str] = set()
     page_text = url_patterns.visible_text(html or "")
 
-    verdict = own_site_verdict(url, company.company_name)
+    host_name = host_name or company.company_name
+    verdict = own_site_verdict(url, host_name)
     if verdict == "directory_host":
         evidence.add(conf.DIRECTORY_HOST)
         return evidence, None
@@ -221,9 +228,9 @@ def _page_evidence(
     # An industry word can BE the whole of a company's name — "S & E Automobile Verwaltungs- und
     # Beteiligungsgesellschaft mbH" reduces to the single word "automobile" — and awarding the
     # exact-name bonus there rewards the very thing GENERIC_HOST exists to punish.
-    if not generic and _host_is_exact_name(url, company.company_name):
+    if not generic and _host_is_exact_name(url, host_name):
         evidence.add(conf.HOST_EXACT)
-    elif url_patterns.name_coverage(url, company.company_name) < MIN_NAME_COVERAGE:
+    elif url_patterns.name_coverage(url, host_name) < MIN_NAME_COVERAGE:
         # The domain carries a fragment of the name rather than the name. Measured on the domain
         # itself, which is why this no longer depends on knowing which rule guessed it.
         evidence.add(conf.HOST_PARTIAL_NAME)
@@ -515,38 +522,48 @@ def discover(
         return answers[origin]
 
     # ---- 1. URL patterns -----------------------------------------------------------------
+    # The current name first, then the names the register had before: a domain often keeps the
+    # old name. A former name only decides which domains are tried and how the domain is judged;
+    # the page must still identify the company as it is today (`_page_evidence`).
     if use_url_patterns:
-        try:
-            found = url_patterns.find_live_urls(company.company_name, company.city)
-            result.candidates_generated = found.candidates_generated
-            result.candidates_resolved = found.candidates_resolved
-            result.candidates_probed = found.candidates_probed
-            result.parked_rejected = len(found.rejected_parked)
+        tried: set[str] = set()
+        names = [(company.company_name, "")] + [
+            (name, "former_name:") for name in getattr(company, "former_names", ())[:MAX_FORMER_NAMES]]
+        for name, label in names:
+            try:
+                found = url_patterns.find_live_urls(name, company.city, skip_hosts=tried)
+                tried |= found.guessed_hosts
+                result.candidates_generated += found.candidates_generated
+                result.candidates_resolved += found.candidates_resolved
+                result.candidates_probed += found.candidates_probed
+                result.parked_rejected += len(found.rejected_parked)
 
-            for probe in found.live:
-                # `probe.html` is already the body of `final_url` — handing it over stops
-                # `best_imprint` re-downloading the homepage it was just given.
-                got = _imprint_for(probe.final_url, homepage=probe.html)
-                extracted = got[2] if got else None
-                imprint_url = got[1] if got else None
-                evidence, register_seen = _page_evidence(
-                    probe.final_url,
-                    company,
-                    html=probe.html,
-                    extracted=extracted,
-                    redirected_off_host=probe.redirected_off_host,
-                    common=common,
-                )
-                entry = answer_for(probe.final_url)
-                entry.methods.append(conf.METHOD_URL_PATTERN)
-                entry.evidence |= evidence
-                entry.imprint_url = entry.imprint_url or imprint_url
-                entry.register_number_seen = entry.register_number_seen or register_seen
-                _remember_phone(entry, extracted)
-                host = (urlparse(probe.url).hostname or "").lower()
-                entry.pattern = entry.pattern or found.pattern_by_host.get(host)
-        except Exception as exc:  # noqa: BLE001
-            result.errors.append(f"url_patterns: {type(exc).__name__}: {exc}")
+                for probe in found.live:
+                    # `probe.html` is already the body of `final_url` — handing it over stops
+                    # `best_imprint` re-downloading the homepage it was just given.
+                    got = _imprint_for(probe.final_url, homepage=probe.html)
+                    extracted = got[2] if got else None
+                    imprint_url = got[1] if got else None
+                    evidence, register_seen = _page_evidence(
+                        probe.final_url,
+                        company,
+                        html=probe.html,
+                        extracted=extracted,
+                        redirected_off_host=probe.redirected_off_host,
+                        common=common,
+                        host_name=name,
+                    )
+                    entry = answer_for(probe.final_url)
+                    entry.methods.append(conf.METHOD_URL_PATTERN)
+                    entry.evidence |= evidence
+                    entry.imprint_url = entry.imprint_url or imprint_url
+                    entry.register_number_seen = entry.register_number_seen or register_seen
+                    _remember_phone(entry, extracted)
+                    host = (urlparse(probe.url).hostname or "").lower()
+                    pattern = found.pattern_by_host.get(host)
+                    entry.pattern = entry.pattern or (label + pattern if pattern else None)
+            except Exception as exc:  # noqa: BLE001
+                result.errors.append(f"url_patterns: {type(exc).__name__}: {exc}")
 
     # ---- 2. OpenStreetMap ----------------------------------------------------------------
     if use_osm:

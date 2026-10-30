@@ -116,6 +116,8 @@ class CompanyCandidate:
     #: The company's register officers as `imprint_extractor.person_key` comparison keys, for the
     #: Geschäftsführer match. Personal data: loaded only where a page is verified, never stored.
     officers: frozenset[str] = frozenset()
+    #: Names the register had for it before; domains often keep one (`enrichment.pipeline.discover`).
+    former_names: tuple[str, ...] = ()
 
 
 def get_connection() -> Any:
