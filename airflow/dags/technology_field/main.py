@@ -11,7 +11,10 @@ lets `pipeline_coordinator` publish the result:
    run weighs over all companies read so far and classifies each of them again. A company that no
    longer gets a value keeps its row at confidence 0, below the coordinator's bar: never deleted.
    Nothing is written until `MIN_COMPANIES` are read, because a weight measured over 50 companies
-   lets one rare word decide.
+   lets one rare word decide. Where no keyword fired, a promoted text classifier may fill the gap;
+   its prediction is cached in the source record with the model version (`textcat`), so a company
+   is predicted again only for a new model or after it was read again. If the store fails during
+   the run, the task fails before writing: a text it did not return is not a text that is gone.
 
 **No state outside Postgres**, as in `website_keywords`: "already read" is the source record.
 
@@ -30,7 +33,10 @@ from dataclasses import asdict
 from datetime import datetime, timezone
 from typing import Any, Mapping
 
-from enrichment import branch_classifier as bc
+from psycopg2.extras import Json
+
+from enrichment import branch_classifier as bc, corpus
+from enrichment import branch_textcat as textcat
 from enrichment.branch_observations import SOURCE_KEY, planned_writes
 from source_enrichment_common import (
     companies_with_website_to_read,
@@ -75,13 +81,12 @@ def read_site(website: str, taxonomy: bc.Taxonomy) -> dict[str, Any]:
     from enrichment.url_patterns import visible_text
 
     homepage = fetch_page(website) or ""
+    pages = content_for(website, homepage) if homepage else None
     # Same names and order as `branch_textcat.classifier_text`, so a model reads what the keywords read.
-    texts = {
-        "services": content_for(website, homepage).text if homepage else "",
-        "homepage": visible_text(homepage),
-    }
+    texts = {"services": pages.text if pages else "", "homepage": visible_text(homepage)}
     return {
         "keywords": keywords_by_source(texts, taxonomy),
+        "pages": [link.url for link in pages.links] if pages else [],
         "had_text": any(t.strip() for t in texts.values()),
         "homepage_loaded": bool(homepage),
         "taxonomy_version": taxonomy.version,
@@ -114,6 +119,12 @@ def run_read() -> None:
                     external_id=f"{SOURCE_KEY}:{company_id}", external_url=website,
                     source_company_name=company_name, source_payload=payload,
                 )
+                # The pages are in the company corpus (S3); this says they are this company's, for training.
+                corpus.record_document(cur, company_id=company_id, source_id=source_id, kind="webpage",
+                                       url=website, namespace="page")
+                for url in payload.get("pages", []):
+                    corpus.record_document(cur, company_id=company_id, source_id=source_id, kind="webpage",
+                                           url=url, namespace="content")
 
         with connection, connection.cursor() as cur:
             finish_sync_run(cur, sync_run_id=sync_run_id, records_seen=len(companies),
@@ -147,27 +158,72 @@ def classify_all(
     }
 
 
+def read_records(cur: Any, source_id: str) -> list[tuple]:
+    """Every company read: (id, record id, read at, keywords, had text, website still published, website)."""
+    cur.execute(
+        """
+        SELECT r.company_id::text, r.id, r.last_synced_at, r.source_payload -> 'keywords',
+               COALESCE((r.source_payload ->> 'had_text')::boolean, false),
+               e.website_url IS NOT DISTINCT FROM r.external_url, r.external_url
+        FROM public.company_source_records r
+        LEFT JOIN public.v_companies_enriched e ON e.id = r.company_id
+        WHERE r.source_id = %s
+          AND r.source_payload ? 'keywords'
+          AND r.source_payload ->> 'failed' IS DISTINCT FROM 'true'
+        """,
+        (source_id,),
+    )
+    return cur.fetchall()
+
+
+def keyword_answers(records: list[tuple], taxonomy: bc.Taxonomy) -> dict[str, bc.Assignment]:
+    """What the keywords say for every company read (`read_records`)."""
+    # A company whose website changed was read off the old one: its keywords count for nothing.
+    # shortcut: it is not read again from the new website; same limit as `website_keywords`.
+    return classify_all(
+        {cid: (keywords if still_published else {}, had_text and still_published)
+         for cid, _, _, keywords, had_text, still_published, _ in records},
+        taxonomy,
+    )
+
+
+def gap_predictions(
+    gaps: Mapping[str, tuple[str, Mapping[str, Any] | None]], version: str, model: Any
+) -> tuple[dict[str, Mapping[str, Any]], dict[str, dict[str, Any]]]:
+    """(prediction per gap company, the new ones to cache) for {company_id: (website, cached)}.
+
+    A cached prediction of `version` is reused; otherwise the model reads the stored text. Without a
+    stored text the cached prediction stays, even an older model's, rather than one made on nothing.
+    """
+    from technology_field.train import stored_text
+
+    predictions: dict[str, Mapping[str, Any]] = {}
+    new: dict[str, dict[str, Any]] = {}
+    for company_id, (website, cached) in gaps.items():
+        if cached and cached.get("model_version") == version:
+            predictions[company_id] = cached
+            continue
+        text = stored_text(website)
+        if not text:
+            if cached:
+                predictions[company_id] = cached
+            continue
+        label, probability = textcat.predict(model, text)
+        predictions[company_id] = new[company_id] = {"model_version": version, "label": label,
+                                                     "probability": probability}
+    return predictions, new
+
+
 def run_classify() -> None:
+    from technology_field.train import load_current, require_store
+
     taxonomy = bc.load_taxonomy()
     connection = get_connection()
     try:
         with connection, connection.cursor() as cur:
             source_id = _source_id(cur)
             sync_run_id = start_sync_run(cur, source_id=source_id)
-            cur.execute(
-                """
-                SELECT r.company_id::text, r.id, r.last_synced_at, r.source_payload -> 'keywords',
-                       COALESCE((r.source_payload ->> 'had_text')::boolean, false),
-                       e.website_url IS NOT DISTINCT FROM r.external_url
-                FROM public.company_source_records r
-                LEFT JOIN public.v_companies_enriched e ON e.id = r.company_id
-                WHERE r.source_id = %s
-                  AND r.source_payload ? 'keywords'
-                  AND r.source_payload ->> 'failed' IS DISTINCT FROM 'true'
-                """,
-                (source_id,),
-            )
-            records = cur.fetchall()
+            records = read_records(cur, source_id)
             if len(records) < MIN_COMPANIES:
                 log.info("Only %d companies read; %d needed to weigh keywords. Nothing written.",
                          len(records), MIN_COMPANIES)
@@ -187,18 +243,41 @@ def run_classify() -> None:
             for company_id, field_name, value in cur.fetchall():
                 shown.setdefault(company_id, set()).add((field_name, value))
 
-            # A company whose website changed was read off the old one: its keywords count for nothing.
-            # shortcut: it is not read again from the new website; same limit as `website_keywords`.
-            answers = classify_all(
-                {cid: (keywords if still_published else {}, had_text and still_published)
-                 for cid, _, _, keywords, had_text, still_published in records},
-                taxonomy,
-            )
+            answers = keyword_answers(records, taxonomy)
+            # Where no keyword fired, a promoted text classifier may fill the gap (`branch_textcat`).
+            version, model = load_current()
+            predictions: dict[str, Mapping[str, Any]] = {}
+            if model is not None:
+                cur.execute(
+                    """
+                    SELECT company_id::text, source_payload -> 'textcat'
+                    FROM public.company_source_records
+                    WHERE source_id = %s AND source_payload ? 'textcat'
+                    """,
+                    (source_id,),
+                )
+                cached = dict(cur.fetchall())
+                predictions, new = gap_predictions(
+                    {cid: (website, cached.get(cid)) for cid, *_, still_published, website in records
+                     if answers[cid].outcome == "no_keyword" and still_published},
+                    version, model,
+                )
+                require_store()
+                for cid, prediction in predictions.items():
+                    answers[cid] = textcat.fill_gap(answers[cid], prediction["label"], prediction["probability"])
+                record_ids = {cid: record_id for cid, record_id, *_ in records}
+                for cid, prediction in new.items():
+                    cur.execute(
+                        "UPDATE public.company_source_records SET source_payload = source_payload || %s WHERE id = %s",
+                        (Json({"textcat": prediction}), record_ids[cid]),
+                    )
             written = dropped = 0
             kept: dict[str, set[tuple[str, str]]] = {}
             for company_id, record_id, read_at, *_ in records:
                 row = {**asdict(answers[company_id]), "technology_field": answers[company_id].branch,
                        "taxonomy_version": taxonomy.version, "scope_companies": len(records)}
+                if row["decided_by"] == textcat.DECIDED_BY_TEXTCAT:
+                    row["model_name"] = f"{textcat.MODEL_NAME}:{predictions[company_id]['model_version']}"
                 writes = planned_writes(row, None)
                 for field_name, value, confidence, metadata in writes:
                     insert_text_observation(

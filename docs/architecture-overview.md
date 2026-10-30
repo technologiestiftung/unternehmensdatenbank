@@ -186,7 +186,7 @@ needed. The hub has no GPU.
 
 | Task | Technique today | Next |
 |---|---|---|
-| Technologiefeld, purpose field | keyword weights; a spaCy text classifier only fills rows no keyword reached (`enrichment/branch_textcat.py`) | keywords run as DAG `technology_field`; the text classifier is trained next (#62), compared on voted companies |
+| Technologiefeld, purpose field | keyword weights; a spaCy text classifier only fills rows no keyword reached (`enrichment/branch_textcat.py`) | keywords run as DAG `technology_field`; the text classifier is trained weekly (`technology_field_train`), promoted only on held-out companies people judged (none yet) |
 | Is a page the company's own site | rules: Impressum, register number, name and postcode ([website-verification](website-verification.md)) | |
 | Manager names | regular expressions on the Impressum, plus spaCy (`manager_ner`) | weekly training from votes |
 | Cluster, DeepTech, isAI | none | labels first, then a text classifier |
@@ -241,7 +241,7 @@ Running everything locally: [README](../README.md).
 - Fusionbase contract, API access, then its import DAG; closure candidates from quarterly
   differences.
 - Classifiers for Cluster, DeepTech with confidence, and isAI.
-- Train the Technologiefeld text classifier from the corpus and the votes (#62).
+- Hand-check about 200 Technologiefeld values in the app (corrections count as labels); the text classifier cannot be promoted before people judged companies the keywords left empty.
 - First `manager_ner_train` run once 30 companies have votes.
 - Should user corrections become a source; definition of "Amazon-Effekt".
 

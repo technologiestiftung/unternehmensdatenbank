@@ -31,7 +31,7 @@ Register
 
 Industry classification (three columns that must never be mixed: docs/branch-classification.md)
   branch_classifier.py, branch_taxonomy.yaml   Technologiefeld from the words a company publishes
-  branch_textcat.py                            spaCy text classifier, seeded by the keywords
+  branch_textcat.py                            spaCy text classifier, seeded by the keywords, trained by technology_field_train
   purpose_branch.py                            the same 77 fields from the register purpose
   wz_cluster.py, wz_titles.yaml                the official WZ cluster, a lookup
 

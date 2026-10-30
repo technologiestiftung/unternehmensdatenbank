@@ -159,7 +159,7 @@ RustFS locally in the `datahub` profile), latest version only. `page_cache` uses
 so a page any DAG downloaded in the last 90 days (`CORPUS_MAX_AGE_DAYS`) is served to every other DAG:
 on 20 company websites the Impressum took 32.5 s downloaded and 10.7 s from the store. An unreachable
 store is switched off for the run after the first failure. `company_documents` is the index: which
-texts belong to which company (web pages from `website_contacts`, `website_keywords`, `manager_ner`;
+texts belong to which company (web pages from `website_contacts`, `website_keywords`, `technology_field`, `manager_ner`;
 the Wikipedia article and Wikidata description from `wikidata`), for training the classifiers.
 **Personal data is stored in full** (an Impressum names people), decided by the developer on
 2026-10-30; pipelines only, not in Hasura. Wikipedia text is CC BY-SA.
