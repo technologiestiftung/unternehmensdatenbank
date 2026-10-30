@@ -40,8 +40,9 @@ scripts/free_checks.sh                              # every free check, as CI ru
   developer's machine owns it.
 - Postgres `localhost:5433`, `app`/`app`, database `unternehmensdatenbank`; Airflow and Hasura use
   `APP_DB_NAME` from `.env`. **Port 5432 is a different Postgres.**
-- **After a migration, reload Hasura's metadata.** Hasura caches the columns: after V5 it still
-  offered `cluster` and the app's list failed with "database query error" ([datahub-emulation](docs/datahub-emulation.md)).
+- **After a migration or a `hasura/metadata` change, restart Hasura** (`docker compose restart hasura`).
+  It caches the columns and applies the metadata only on start: after V5 it still offered `cluster`,
+  and `history` (#59) was missing until a restart ([datahub-emulation](docs/datahub-emulation.md)).
 - Profiles: `debug`, `datahub` (Keycloak, Hasura, S3).
 - **Three DB roles, as on the hub:** `app` owns the schema (Flyway, host scripts), DAGs run as
   `writer` (rows only, no DDL), Hasura as `reader`. A DAG that needs DDL is wrong, not the grant.
