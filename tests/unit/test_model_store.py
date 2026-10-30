@@ -73,3 +73,21 @@ def test_a_store_that_fails_raises_instead_of_meaning_no_version(s3, tmp_path, m
     monkeypatch.setattr(corpus, "_unreachable", True)  # an earlier page read lost the store
     with pytest.raises(ConnectionError):
         model_store.current_version("ner", tmp_path / "pod")
+
+
+def test_a_store_that_fails_on_write_raises_and_leaves_no_pointer(s3, tmp_path, monkeypatch) -> None:  # noqa: ANN001
+    monkeypatch.setattr(corpus, "_unreachable", True)  # an earlier page read lost the store
+    with pytest.raises(ConnectionError):
+        model_store.publish("ner", "v1", tmp_path, _train(tmp_path, "v1"), promoted=True)
+    monkeypatch.setattr(corpus, "_unreachable", False)
+
+    def broken(_bucket, name, *_args, **_kw):  # noqa: ANN001, ANN002, ANN003, ANN202
+        if name.endswith(".tar.gz"):
+            raise S3Error("AccessDenied")
+        return put(_bucket, name, *_args, **_kw)
+
+    put = s3.put_object
+    monkeypatch.setattr(s3, "put_object", broken)
+    with pytest.raises(S3Error):
+        model_store.publish("ner", "v1", tmp_path, {"version": "v1"}, promoted=True)
+    assert "models/ner/current.json" not in s3.objects

@@ -78,8 +78,9 @@ def local_copy(name: str, version: str, local_dir: Path) -> Path:
 
 def publish(name: str, version: str, local_dir: Path, metrics: dict[str, Any], *, promoted: bool) -> None:
     """Keep a training run in S3: always its metrics; the model files and the pointer when promoted.
-    The caller has written the same into `local_dir` already."""
-    if not corpus.enabled():
+    The caller has written the same into `local_dir` already. Raises when the store cannot be written;
+    the pointer is written only after the model files."""
+    if not corpus.configured():
         return
     corpus.put_bytes(_key(name, f"{version}/metrics.json"), json.dumps(metrics, indent=2).encode(),
                      "application/json")
@@ -88,8 +89,6 @@ def publish(name: str, version: str, local_dir: Path, metrics: dict[str, Any], *
     buffer = io.BytesIO()
     with tarfile.open(fileobj=buffer, mode="w:gz") as archive:
         archive.add(local_dir / version, arcname=".")
-    if corpus.put_bytes(_key(name, f"{version}.tar.gz"), buffer.getvalue(), "application/gzip"):
-        corpus.put_bytes(_key(name, "current.json"), json.dumps({"version": version}).encode(), "application/json")
-        log.info("Model %s %s published to the store.", name, version)
-    else:
-        log.warning("Model %s %s could not be published; it exists only in %s.", name, version, local_dir)
+    corpus.put_bytes(_key(name, f"{version}.tar.gz"), buffer.getvalue(), "application/gzip")
+    corpus.put_bytes(_key(name, "current.json"), json.dumps({"version": version}).encode(), "application/json")
+    log.info("Model %s %s published to the store.", name, version)

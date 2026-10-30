@@ -20,7 +20,7 @@ without a privacy review.
 
 Configured by `CORPUS_S3_ENDPOINT` (host:port), `CORPUS_S3_ACCESS_KEY`, `CORPUS_S3_SECRET_KEY`,
 `CORPUS_S3_BUCKET`, `CORPUS_S3_SECURE`. Without an endpoint every function here is a no-op, and a
-store that fails behaves exactly like an empty one: nothing here raises, except `get_bytes` (models).
+store that fails behaves exactly like an empty one: nothing here raises, except `get_bytes` and `put_bytes` (models).
 """
 from __future__ import annotations
 
@@ -181,16 +181,14 @@ def record_document(
     )
 
 
-def put_bytes(name: str, data: bytes, content_type: str = "application/octet-stream") -> bool:
-    """Store raw bytes under an exact object name (models, not documents). Never raises."""
-    if not enabled():
-        return False
-    try:
-        _s3().put_object(bucket(), name, BytesIO(data), len(data), content_type=content_type)
-        return True
-    except Exception as exc:  # noqa: BLE001
-        _failed(exc, f"writing {name}")
-        return False
+def put_bytes(name: str, data: bytes, content_type: str = "application/octet-stream") -> None:
+    """Store raw bytes under an exact object name (models, not documents). A no-op when no store is
+    configured; any failure raises, an unreachable store included, so a model is never lost quietly."""
+    if not configured():
+        return
+    if _unreachable:
+        raise ConnectionError("Company corpus unreachable earlier in this run.")
+    _s3().put_object(bucket(), name, BytesIO(data), len(data), content_type=content_type)
 
 
 def get_bytes(name: str) -> bytes | None:
