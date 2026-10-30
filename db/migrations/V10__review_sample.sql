@@ -63,7 +63,10 @@ END
 $$;
 
 -- Precision per field and stratum, of the values shown now: a vote counts only while its value is
--- still shown (in v_field_provenance). Each value gets ONE verdict, by majority of its votes (a tie
+-- still what the app shows, i.e. its column of company_profile_mv under the app's field key (one name
+-- or keyword of a '; ' list, a number as a number, a grant as a linked fkz). Every key the app may
+-- vote on is matched; one left out on purpose is written as `WHEN '<key>' THEN false`, never missing
+-- (tests/unit/test_feedback_observations.py). Each value gets ONE verdict, by majority of its votes (a tie
 -- is left out), so a replaced value and a second voter do not count twice. A value people corrected
 -- counts as wrong. Only votes on companies in the sample.
 CREATE VIEW public.v_review_results AS
@@ -73,8 +76,28 @@ CREATE VIEW public.v_review_results AS
                WHEN 1 THEN 'correct' WHEN -1 THEN 'wrong' END AS verdict
      FROM public.review_sample s
        JOIN public.extraction_feedback f ON f.company_id = s.company_id AND f.value <> ''
-    WHERE EXISTS (SELECT 1 FROM public.v_field_provenance p
-                   WHERE p.company_id = f.company_id AND p.field_name = f.field_name AND p.value = f.value)
+       JOIN public.company_profile_mv p ON p.id = f.company_id
+    WHERE CASE f.field_name
+            WHEN 'name' THEN f.value = p.name
+            WHEN 'address' THEN f.value = p.address
+            WHEN 'legal_form' THEN f.value = p.legal_form
+            WHEN 'register_status' THEN f.value = p.register_status
+            WHEN 'wz_code' THEN f.value = p.wz_code
+            WHEN 'established_at' THEN f.value = p.established_at::text
+            WHEN 'employee_count' THEN CASE WHEN f.value ~ '^-?[0-9]+(\.[0-9]+)?$' THEN f.value::numeric = p.employee_count END
+            WHEN 'revenue' THEN CASE WHEN f.value ~ '^-?[0-9]+(\.[0-9]+)?$' THEN f.value::numeric = p.revenue END
+            WHEN 'fundings' THEN EXISTS (SELECT 1 FROM public.company_funding_links l
+                                          WHERE l.company_id = f.company_id AND l.fkz = f.value)
+            WHEN 'technology_field' THEN f.value = p.technology_field
+            WHEN 'website' THEN f.value = p.website
+            WHEN 'management' THEN f.value = ANY (string_to_array(p.management, '; '))
+            WHEN 'business_purpose' THEN f.value = p.business_purpose
+            WHEN 'deeptech' THEN f.value = p.deeptech_class
+            WHEN 'is_ai' THEN f.value = p.is_ai::text
+            WHEN 'activity_keywords' THEN f.value = ANY (string_to_array(p.activity_keywords, '; '))
+            WHEN 'register_announcement' THEN f.value = p.register_announcement
+            WHEN 'registration_number' THEN f.value = p.registration_number
+          END
     GROUP BY s.stratum, f.company_id, f.field_name, f.value
  )
  SELECT stratum,
@@ -87,7 +110,7 @@ CREATE VIEW public.v_review_results AS
    FROM verdicts
   GROUP BY stratum, field_name;
 COMMENT ON VIEW public.v_review_results IS
-  'Hand-checked precision per field and stratum of the values shown now, from the app''s votes on the review sample: one verdict per value by majority (ties left out). Missing values (a vote on an empty field) are not counted here.';
+  'Hand-checked precision per field and stratum of the values shown now, from the app''s votes on the review sample: a vote counts only while its value is what company_profile_mv shows; one verdict per value by majority (ties left out). Missing values (a vote on an empty field) are not counted here.';
 
 GRANT SELECT, INSERT ON public.review_sample TO ${writer_role};
 GRANT SELECT ON public.review_sample, public.v_review_results TO ${reader_role};
