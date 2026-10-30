@@ -756,15 +756,21 @@ class UrlPatternResult:
     rejected_parked: list[str] = field(default_factory=list)
     #: host -> the rule that guessed it, so the winning URL can say which pattern found it.
     pattern_by_host: dict[str, str] = field(default_factory=dict)
+    #: Every host guessed, so a second name does not try the same ones again.
+    guessed_hosts: set[str] = field(default_factory=set)
 
 
-def find_live_urls(company_name: str, city: str | None = None) -> UrlPatternResult:
+def find_live_urls(
+    company_name: str, city: str | None = None, skip_hosts: set[str] | frozenset[str] = frozenset()
+) -> UrlPatternResult:
     """Run all three stages for one company and return the live, non-parked URLs.
 
-    Order is preserved: `live[0]` came from the best-ranked guess that survived.
+    Order is preserved: `live[0]` came from the best-ranked guess that survived. `skip_hosts` are
+    not tried again (hosts another name of the same company already guessed).
     """
     result = UrlPatternResult()
-    candidates = generate_candidates(company_name, city)
+    candidates = [c for c in generate_candidates(company_name, city) if c.host not in skip_hosts]
+    result.guessed_hosts = {c.host for c in candidates}
     result.candidates_generated = len(candidates)
 
     resolving = [c for c in candidates if resolves(c.host)]

@@ -8,6 +8,7 @@ recipients were already keyed by it, and one key means a name matches the same w
 from __future__ import annotations
 
 import re
+from typing import Any
 
 #: `register_status` in English (#47, 2026-10-29). The register says aktiv, erloschen, in Liquidation;
 #: sources map their own words to these, and nothing else spells them out.
@@ -51,3 +52,21 @@ def legal_form(name: str) -> str | None:
         if pattern.search(core):
             return form
     return None
+
+
+def load_former_names(cur: Any, company_ids: list[str]) -> dict[str, tuple[str, ...]]:
+    """The names each company was registered under before, from its register source records
+    (`source_payload.former_names`; 32,170 Berlin companies have one)."""
+    cur.execute(
+        """
+        SELECT r.company_id::text, r.source_payload -> 'former_names'
+        FROM public.company_source_records r
+        JOIN public.sources s ON s.id = r.source_id AND s.source_type = 'register'
+        WHERE r.company_id = ANY(%s::uuid[]) AND jsonb_typeof(r.source_payload -> 'former_names') = 'array'
+        """,
+        (company_ids,),
+    )
+    found: dict[str, tuple[str, ...]] = {}
+    for company_id, names in cur.fetchall():
+        found[company_id] = tuple(dict.fromkeys([*found.get(company_id, ()), *names]))
+    return found

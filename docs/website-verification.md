@@ -56,6 +56,13 @@ extra suspicion.
 - **A brand before the legal form** ("3pc GmbH Neue Kommunikation") is guessed first
   (`url_patterns.brand_stem`). A host that *equals* the brand carries the name; one that merely
   contains it does not.
+- **Former names are guessed too** (#55), up to 3 per company (`pipeline.MAX_FORMER_NAMES`): 32,170
+  Berlin companies have one, and a domain often keeps the old name. The domain is judged against the
+  name it was guessed from; the page must still identify the company as it is today. Measured on
+  1,000 active Berlin companies with a former name (2026-10-30): 113 websites proven, 5 of them only
+  through a former name (all 5 checked: 2 by the own register number, 1 by a Geschäftsführer, 2
+  plausible), for 76% more page loads on these companies. All 5 came from the first former name;
+  trying only one would save 16% of the extra loads.
 - **Structured data (JSON-LD)** is the only place a site states its own name as data
   (`structured_data.py`). It may lift the "host does not match the name" refusal
   (`confidence._LIFTED_BY`), but never on a listing page: a listing's structured data names the
