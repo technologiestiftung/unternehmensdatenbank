@@ -56,12 +56,14 @@ field claim, with a confidence) → `pipeline_coordinator` → `company_canonica
 - **`pipeline_coordinator` alone decides which observation wins.** Sources write observations, then
   trigger it.
 - **Priority sorts before confidence, so it is absolute:** nothing at priority 100 beats anything at
-  50. Within one priority, confidence decides.
+  50. Within one priority, confidence decides, **weighed by age** (`resolver.HALF_LIVES`, #49): the
+  age runs from when the source read the value (`source_updated_at`), never from when we stored it.
 - **`website_url` is a view column**, not a table column; enriched fields live in
   `company_canonical_field_sources`, read through `v_companies_enriched`.
 - **`companies` is identity only (V3).** Name, address, status and the other register facts are
   observations too (`resolver.REGISTER_FIELDS`), shown by `v_companies_enriched` under the old column
-  names. Never add a value column to `companies`: nothing could compete with it.
+  names. Never add a value column to `companies`: nothing could compete with it. The register number
+  lives only in `company_identifiers` (V7); the views show the newest as `registration_number`.
 - **Company identity is a random UUID, never the name** (32,170 Berlin companies have a former name).
   Matching: identifiers first, fuzzy second; `match_method`/`match_confidence` on the source record.
   Merging never deletes (`companies.merged_into`).
@@ -103,7 +105,7 @@ Read [website-verification](docs/website-verification.md) before touching `confi
 - **`enrichment/observations.py` is the write path for discovery.** `sorted()` the `evidence` set
   before `Json()`.
 - Search-engine discovery was measured and removed; a new search source must feed the same
-  verification and `confidence.py`. The OpenStreetMap step is off (`WEBSITE_DISCOVERY_OSM=false`).
+  verification and `confidence.py`, as `wikidata` does (`pipeline.verify_proposed`). The OpenStreetMap step is off (`WEBSITE_DISCOVERY_OSM=false`).
 
 ## Industry classification: THREE columns, never mixed
 
@@ -130,7 +132,7 @@ purpose, so for Berlin only the Technologiefeld can be filled today.
 ## Migrations
 
 `V1__baseline.sql` is the whole schema as of 2026-10-28 (squashed while nothing was deployed), plus
-`V2__source_overview.sql`, `V3__register_fields_as_observations.sql`, `V4__user_feedback_source.sql` and `V5__profile_cleanup_tags_english.sql`. A database migrated before the squash needs its Flyway history reset once
+`V2__source_overview.sql`, `V3__register_fields_as_observations.sql`, `V4__user_feedback_source.sql`, `V5__profile_cleanup_tags_english.sql`, `V6__source_dates.sql` and `V7__register_number_from_identifiers.sql`. A database migrated before the squash needs its Flyway history reset once
 ([data-model](docs/data-model.md), "Migration strategy"). **Forward-only:** never edit a migration
 that ran anywhere shared. Flyway runs under `--profile tools`, not with `docker compose up`; on the
 hub as the app's initContainer ([release](docs/release.md)).

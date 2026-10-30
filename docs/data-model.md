@@ -8,7 +8,7 @@ Several sources talk about the same company and may disagree. We lose none of it
 
 | Table | Holds |
 |---|---|
-| `companies` | identity only: a random UUID, the register number, `merged_into` |
+| `companies` | identity only: a random UUID and `merged_into` (the register number is in `company_identifiers`) |
 | `company_source_records` | the whole record one source delivered, one row per `(source_id, external_id)` |
 | `company_field_observations` | one claim per field: company, source, field name, value, confidence |
 | `company_canonical_field_sources` | which observation won each field, and when it was chosen |
@@ -40,8 +40,11 @@ stored profile and did not get slower. Every shown value stayed the same (checks
 profiles, and a fresh import gave the same values as the migrated database), and grant links went from 26,236 to 26,241: names with letters like é now get the same
 key as grant recipients (`normalize_company_name` in SQL, one key everywhere).
 
-`companies` keeps: `id`, `registration_number`, `merged_into`, `metadata`, `data_last_updated_at`,
-`created_at`, `updated_at`. (`data_quality_score` and `canonical_updated_at` were removed with #47.)
+`companies` keeps: `id`, `merged_into`, `metadata`, `data_last_updated_at`, `created_at`,
+`updated_at`. (`data_quality_score` and `canonical_updated_at` were removed with #47.) The register
+number is an identifier like any other, in `company_identifiers` only (V7): a company can have
+several, after a change of legal form. The views' `registration_number` is the newest one, as
+"Amtsgericht Berlin (Charlottenburg) HRB 1".
 
 ### `register_status`
 
@@ -72,7 +75,7 @@ with a digit are kept, so a name split by a comma ("Muster, Erika") goes as well
 has no city, the registered seat is the city (179,959 rows).
 
 One script, into a migrated database (`./scripts/dev-up.sh` creates and migrates
-`unternehmensdatenbank`). It creates each company (identity only) or finds it by register number,
+`unternehmensdatenbank`). It creates each company (identity only) or finds it by its register identifier,
 keeps everything the dump knows in `company_source_records` under the source `offeneregister`
 (register court, type and number, seat, status, the seven document flags, former names (32,170
 companies), register moves (25,584), officers (348,904) and the raw address; not exposed through
@@ -93,7 +96,8 @@ python scripts/import_register_managers.py
 
 `V1__baseline.sql` is the whole schema as of 2026-10-28; everything before it was squashed while
 nothing was deployed. `V2__source_overview.sql`, `V3__register_fields_as_observations.sql`,
-`V4__user_feedback_source.sql` and `V5__profile_cleanup_tags_english.sql` came after. Forward-only from here: never edit a migration that has
+`V4__user_feedback_source.sql`, `V5__profile_cleanup_tags_english.sql`, `V6__source_dates.sql` and
+`V7__register_number_from_identifiers.sql` came after. Forward-only from here: never edit a migration that has
 run anywhere shared, add new ones as `V{N}__description.sql`, and run Flyway before Airflow
 touches the changed schema.
 The headings below keep the pre-squash migration numbers (V3–V10) so git history finds the reasoning.
@@ -125,6 +129,28 @@ How a record from any source finds its company, in this order:
 Merging never deletes: the duplicate keeps `merged_into`, and its records and observations move to
 the survivor.
 
+## Age: older values weigh less (V6, #49)
+
+Every observation knows when its **source** read the value: `source_updated_at`, else
+`observed_at`. The register read Berlin between 2017-06-12 and 2019-01-31; a website is read the day
+a DAG downloads it (a write without a source date sets `source_updated_at` to that day, again on every
+re-read); a correction is dated by the newest vote behind it.
+
+- **Decay only ranks.** Within one priority the coordinator compares `confidence × 0.5 ^ (age /
+  half-life)`. The bar still filters on the stored confidence, so an old value with nothing newer
+  stays shown, and the ⓘ (`v_field_provenance.observed_at`) says when the source read it.
+- **Half-lives** (`resolver.HALF_LIVES`, decided 2026-10-29, starting values to be measured once
+  Fusionbase overlaps with OffeneRegister): website 3 years; address, postcode and city 5;
+  register_status 2; name and legal_form 10. Fields not listed do not decay; the founding date never.
+  Manager names are a list, every name above the bar is shown, so age does not drop one.
+- **Corrections give way to newer sources.** A correction from the app (priority 50) stands until
+  another source has a qualifying value it read after the latest vote behind the correction; then
+  that source's value is shown. An older source value never beats a newer correction.
+
+Tested on a copy of the Berlin database on 2026-10-29: a new address read that day at 0.8 replaced
+the register's 2018 address at 1.0 (worth about 0.3 after decay); a source name read a day before
+two people's correction did not replace it, one read after it did.
+
 ## Tags (V5, #47)
 
 People tag companies in the app: `tags` (free text, unique ignoring case and surrounding spaces) and
@@ -146,7 +172,8 @@ correction of their own), count against it. Nobody counts both ways: only a pers
 on a field counts. On the list fields (managers, keywords) that is per shown value, and confirming
 one value counts against no other. One person net gives confidence 0.30, below every bar (0.50,
 websites 0.35), so nothing shows; two give 0.60 and three or more 0.75, which the coordinator
-publishes over any other source, the register included. **A field no other source fills takes the
+publishes over any other source, the register included, until a source reads a newer value
+("Age", above). **A field no other source fills takes the
 first correction**: one person then gives 0.60. Asked on every run, so when a source delivers a
 value later, a single person's correction steps back to 0.30 and the source's value is shown.
 Priority 50 is deliberate: register values carry 1.0 and verified websites up to 0.99, so at

@@ -44,6 +44,22 @@ _FIELD_MIN_CONF = 0.50
 
 _TMP_TABLE = "_cfw_winners"
 
+#: Years after which a value counts half when ranked against another value of the same field (#49,
+#: decided 2026-10-29; starting values, to be measured once Fusionbase overlaps with OffeneRegister).
+#: The age runs from when the SOURCE read the value (`source_updated_at`, else `observed_at`). Decay
+#: only ranks: the bar filters on the stored confidence, so an old value with nothing newer stays
+#: shown, and the app says when it was read. A field not listed does not decay; `established_at` never.
+HALF_LIVES: dict[str, float] = {
+    "website": 3,
+    "address": 5, "postcode": 5, "city": 5,
+    "register_status": 2,
+    "name": 10, "legal_form": 10,
+}
+
+#: The source key of people's corrections (`feedback_observations`). A correction stands until another
+#: source has a qualifying value it read AFTER the latest vote behind the correction (#49).
+PEOPLE_SOURCE = "user_feedback"
+
 
 def _ensure_tmp(cur: Any) -> None:
     cur.execute(
@@ -85,24 +101,39 @@ def _apply_canonical(
 
     # --- Step 1: find winners, load into temp table ---
     value_expr = f"o.{value_col}" + (f"::{cast_as}" if cast_as else "")
+    half_life = HALF_LIVES.get(logical_field)
     not_null_check = f"o.{value_col} IS NOT NULL"
 
     cur.execute(
         f"""
         INSERT INTO {_TMP_TABLE} (company_id, obs_id, source_id)
-        WITH candidates AS (
+        WITH qualifying AS (
           SELECT
             o.company_id,
             o.id                              AS obs_id,
             o.source_id,
             {value_expr}                      AS val,
-            COALESCE(o.confidence, 0.5)       AS conf,
+            -- Ranked by age: halves every `half_life` years since the source read it.
+            COALESCE(o.confidence, 0.5) * CASE WHEN %(half_life)s::float IS NULL THEN 1 ELSE power(
+              0.5, GREATEST(0, extract(epoch FROM now() - COALESCE(o.source_updated_at, o.observed_at)))
+                   / 31557600.0 / %(half_life)s::float) END AS conf,
+            COALESCE(o.source_updated_at, o.observed_at) AS read_at,
+            s.key = %(people)s                AS from_people,
             s.priority
           FROM public.company_field_observations o
           JOIN public.sources s ON s.id = o.source_id
-          WHERE o.field_name = ANY(%s)
+          WHERE o.field_name = ANY(%(fields)s)
             AND {not_null_check}
-            AND COALESCE(o.confidence, 0) >= %s
+            AND COALESCE(o.confidence, 0) >= %(min_confidence)s
+        ),
+        newest AS (
+          SELECT company_id, max(read_at) AS read_at FROM qualifying WHERE NOT from_people GROUP BY company_id
+        ),
+        candidates AS (
+          -- A correction gives way to a source value read after the vote behind it.
+          SELECT c.* FROM qualifying c
+          LEFT JOIN newest n ON n.company_id = c.company_id
+          WHERE NOT c.from_people OR n.read_at IS NULL OR n.read_at <= c.read_at
         ),
         agreement AS (
           SELECT
@@ -130,7 +161,8 @@ def _apply_canonical(
         )
         SELECT company_id, obs_id, source_id FROM winners
         """,
-        (obs_field_names, min_confidence),
+        {"fields": obs_field_names, "min_confidence": min_confidence, "half_life": half_life,
+         "people": PEOPLE_SOURCE},
     )
     n_winners = cur.rowcount
 
