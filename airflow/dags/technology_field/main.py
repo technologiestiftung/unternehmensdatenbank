@@ -195,6 +195,7 @@ def run_classify() -> None:
                 taxonomy,
             )
             written = dropped = 0
+            kept: dict[str, set[tuple[str, str]]] = {}
             for company_id, record_id, read_at, *_ in records:
                 row = {**asdict(answers[company_id]), "technology_field": answers[company_id].branch,
                        "taxonomy_version": taxonomy.version, "scope_companies": len(records)}
@@ -207,7 +208,10 @@ def run_classify() -> None:
                         # The value is as old as the page it came from, not this run (#49).
                         source_updated_at=read_at,
                     )
-                for field_name, value in shown.get(company_id, set()) - {(f, v) for f, v, _, _ in writes}:
+                kept[company_id] = {(f, v) for f, v, _, _ in writes}
+                written += len(writes)
+            for company_id, values in shown.items():
+                for field_name, value in values - kept.get(company_id, set()):
                     cur.execute(
                         """
                         UPDATE public.company_field_observations SET confidence = 0, updated_at = now()
@@ -216,7 +220,6 @@ def run_classify() -> None:
                         (company_id, source_id, field_name, value),
                     )
                     dropped += 1
-                written += len(writes)
 
             finish_sync_run(cur, sync_run_id=sync_run_id, records_seen=len(records),
                             records_created=written, records_updated=dropped, records_failed=0)
