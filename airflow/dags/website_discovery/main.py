@@ -7,9 +7,9 @@ Each run does two things, then lets `pipeline_coordinator` publish the result:
    longer qualifies drops to `UNVERIFIED_CAP`, below the bar, and the coordinator un-publishes it.
    This is how the rule of 2026-10-28 reaches the websites found before it. Cheap and idempotent.
 2. **discover.** One batch of companies this source has not looked at yet: guess domains from the
-   name (`url_patterns`), optionally match OpenStreetMap, download the page and its Impressum, and
-   check whose they are, including whether a Geschäftsführer on the Impressum is one of the
-   company's register officers. Every candidate URL is stored; only a proven one can become the
+   name and up to 3 former names (`url_patterns`), optionally match OpenStreetMap, download the
+   page and its Impressum, and check whose they are, including whether a Geschäftsführer on the
+   Impressum is one of the company's register officers. Every candidate URL is stored; only a proven one can become the
    company's website.
 
 **No state outside Postgres.** "Already looked at" is the company's source record under this source,
