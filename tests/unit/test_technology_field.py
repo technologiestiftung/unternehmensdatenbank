@@ -6,6 +6,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from enrichment import branch_classifier as bc
+from enrichment import branch_observations
 from technology_field import main
 from technology_field.main import classify_all, keywords_by_source
 
@@ -91,6 +92,8 @@ def _run_classify(monkeypatch, tmp_path: Path, records: list[tuple], shown: list
     taxonomy = _taxonomy(tmp_path)
     cur, inserts = _Cursor(records, shown), []
     monkeypatch.setattr(main.bc, "load_taxonomy", lambda: taxonomy)
+    # The write path translates to English through its own cached copy of the real YAML.
+    monkeypatch.setattr(branch_observations, "_taxonomy", lambda: taxonomy)
     monkeypatch.setattr(main, "MIN_COMPANIES", 10)
     monkeypatch.setattr(main, "get_connection", lambda: _Connection(cur))
     monkeypatch.setattr(main, "ensure_source", lambda *a, **k: "source")
