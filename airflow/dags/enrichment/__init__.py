@@ -23,6 +23,7 @@ Reading pages
   imprint_extractor.py               regex: register number, VAT ID, Geschäftsführer, contact
   page_cache.py, content_pages.py    cache downloaded pages; fetch the services pages
   corpus.py                          the company corpus: every text read, once, in S3 (#61)
+  model_store.py                     trained models and their metrics, in the corpus's S3 bucket
   activity_keywords.py               product/service keywords from meta tags and services-page headings
 
 Register
