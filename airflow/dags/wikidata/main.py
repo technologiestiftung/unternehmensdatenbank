@@ -102,7 +102,7 @@ def match_items(cur: Any, items: list[wikidata.Item], *, source_id: str) -> tupl
     cur.execute(
         """
         WITH named AS (
-          SELECT w.qid, n.company_id, w.register_digits, c.registration_number,
+          SELECT w.qid, n.company_id, w.register_digits,
                  st.value_text IS DISTINCT FROM %(dissolved)s AS live
           FROM _wd w
           JOIN public.company_field_observations n
@@ -114,7 +114,10 @@ def match_items(cur: Any, items: list[wikidata.Item], *, source_id: str) -> tupl
         ),
         by_register AS (
           SELECT qid, company_id FROM named
-          WHERE register_digits IS NOT NULL AND registration_number ~ ('\\m' || register_digits || '\\M')
+          WHERE register_digits IS NOT NULL AND EXISTS (
+            SELECT 1 FROM public.company_identifiers i
+            WHERE i.company_id = named.company_id AND i.scheme = 'register'
+              AND i.value ~ ('\\m' || register_digits || '\\M'))
         ),
         by_name AS (
           SELECT qid, (array_agg(company_id))[1] AS company_id FROM named

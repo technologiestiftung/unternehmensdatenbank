@@ -49,6 +49,7 @@ import os
 import re
 import sqlite3
 import sys
+import uuid
 from collections import defaultdict
 from pathlib import Path
 from typing import Any
@@ -199,13 +200,14 @@ def main() -> int:
             cur, key=SOURCE_KEY, name="OffeneRegister (Handelsregister snapshot 2017–2019)",
             source_type="register", metadata={"file": Path(sys.argv[1]).name, "federal_state": FEDERAL_STATE},
         )
-        cur.execute("SELECT registration_number, id FROM public.companies WHERE registration_number IS NOT NULL")
+        cur.execute("SELECT 'Amtsgericht ' || value, company_id FROM public.company_identifiers WHERE scheme = 'register'")
         company_ids = dict(cur.fetchall())
         new = {row["registration_number"]: row for _, row in companies if row["registration_number"] not in company_ids}
-        created = execute_values(cur, """
-            INSERT INTO public.companies (registration_number, metadata) VALUES %s
-            RETURNING registration_number, id
-        """, [(number, Json(row["metadata"])) for number, row in new.items()], page_size=5000, fetch=True)
+        # The ids are made here: `companies` holds no number to map a returned id back to. The register
+        # identifier is written with the other identifiers below.
+        created = {number: str(uuid.uuid4()) for number in new}
+        execute_values(cur, "INSERT INTO public.companies (id, metadata) VALUES %s",
+                       [(created[number], Json(row["metadata"])) for number, row in new.items()], page_size=5000)
         company_ids.update(created)
 
         records, identifiers = [], []

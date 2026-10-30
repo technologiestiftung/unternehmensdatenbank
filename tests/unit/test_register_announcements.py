@@ -39,7 +39,7 @@ def test_berlin_rows_are_read_and_other_courts_are_not() -> None:
     assert first.published_on == date(2026, 10, 28)
     assert first.category == "Löschungsankündigung"
     assert first.register == "Berlin (Charlottenburg) HRB 211322"
-    assert first.registration_number == "Amtsgericht Berlin (Charlottenburg) HRB 211322"
+    assert first.register == "Berlin (Charlottenburg) HRB 211322"
     assert (first.name, first.city) == ("Beststrom24 UG (haftungsbeschränkt)", "Berlin")
 
 

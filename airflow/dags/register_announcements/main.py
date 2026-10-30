@@ -93,11 +93,6 @@ class Announcement:
     name: str
     city: str | None
 
-    @property
-    def registration_number(self) -> str:
-        """As `companies.registration_number` holds it: "Amtsgericht Berlin (Charlottenburg) HRB 211322"."""
-        return f"Amtsgericht {self.register}"
-
 
 def parse_java_date(value: str) -> date:
     match = _JAVA_DATE.match(value.strip())
@@ -198,11 +193,8 @@ def _company_for(cur: Any, item: Announcement, source_id: str) -> tuple[str, str
     row = cur.fetchone()
     if row:
         return row[0], "identifier", []
-    # A company can exist under its registration number without the identifier row; never a second one.
-    cur.execute("SELECT id FROM public.companies WHERE registration_number = %s", (item.registration_number,))
-    row = cur.fetchone()
     method, candidates = "identifier", []
-    if row is None and item.city:
+    if item.city:
         # The name key is computed in SQL, by the function the name index and the grant links use.
         # Straight on the published observations, not `v_companies_enriched`: the view computes every
         # company's register fields before it filters, about 10 s per announcement.
@@ -229,11 +221,11 @@ def _company_for(cur: Any, item: Announcement, source_id: str) -> tuple[str, str
         method = "created"
         cur.execute(
             """
-            INSERT INTO public.companies (registration_number, metadata)
-            VALUES (%s, jsonb_build_object('created_by', %s::text))
+            INSERT INTO public.companies (metadata)
+            VALUES (jsonb_build_object('created_by', %s::text))
             RETURNING id
             """,
-            (item.registration_number, SOURCE_KEY),
+            (SOURCE_KEY,),
         )
         row = cur.fetchone()
     company_id = row[0]

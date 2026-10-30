@@ -40,8 +40,11 @@ stored profile and did not get slower. Every shown value stayed the same (checks
 profiles, and a fresh import gave the same values as the migrated database), and grant links went from 26,236 to 26,241: names with letters like é now get the same
 key as grant recipients (`normalize_company_name` in SQL, one key everywhere).
 
-`companies` keeps: `id`, `registration_number`, `merged_into`, `metadata`, `data_last_updated_at`,
-`created_at`, `updated_at`. (`data_quality_score` and `canonical_updated_at` were removed with #47.)
+`companies` keeps: `id`, `merged_into`, `metadata`, `data_last_updated_at`, `created_at`,
+`updated_at`. (`data_quality_score` and `canonical_updated_at` were removed with #47.) The register
+number is an identifier like any other, in `company_identifiers` only (V7): a company can have
+several, after a change of legal form. The views' `registration_number` is the newest one, as
+"Amtsgericht Berlin (Charlottenburg) HRB 1".
 
 ### `register_status`
 
