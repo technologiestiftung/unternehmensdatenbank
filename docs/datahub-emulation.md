@@ -44,16 +44,13 @@ docker compose --profile datahub up -d     # Keycloak, Hasura, S3
 The role **names** reach the migrations as Flyway placeholders (`${writer_role}`, `${reader_role}`),
 so the hub can name them its own way.
 
-**After a migration, reload Hasura's metadata.** Hasura reads the columns of every table and view
-once and keeps them. After V5 renamed and dropped profile columns it still offered the old ones, so
-the app's company list failed with `database query error` (`column ... cluster does not exist`):
-
-```bash
-curl -s localhost:8090/v1/metadata -H "x-hasura-admin-secret: $HASURA_ADMIN_SECRET" \
-  -d '{"type":"reload_metadata","args":{"reload_sources":true}}'
-```
-
-Restarting the Hasura container does the same.
+**After a migration or a change in `hasura/metadata`, restart Hasura:** `docker compose restart hasura`.
+Hasura reads the columns of every table and view once and keeps them, and the `cli-migrations` image
+applies `hasura/metadata` only when it starts. Two failures of the app on 2026-10-30 came from this:
+the company list failed with `database query error` (`column ... cluster does not exist`, Hasura still
+offered the columns V5 dropped), and the company page with `field 'history' not found` (the
+relationship from #59 was in git, not in the running Hasura). A `reload_metadata` call fixes the
+first only: it re-reads the database, not the files.
 
 ## Hasura
 
