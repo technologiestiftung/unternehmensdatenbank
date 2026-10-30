@@ -93,7 +93,7 @@ python scripts/import_register_managers.py
 
 `V1__baseline.sql` is the whole schema as of 2026-10-28; everything before it was squashed while
 nothing was deployed. `V2__source_overview.sql`, `V3__register_fields_as_observations.sql`,
-`V4__user_feedback_source.sql`, `V5__profile_cleanup_tags_english.sql` and `V6__source_dates.sql` came after. Forward-only from here: never edit a migration that has
+`V4__user_feedback_source.sql`, `V5__profile_cleanup_tags_english.sql`, `V6__source_dates.sql` and `V7__company_history.sql` came after. Forward-only from here: never edit a migration that has
 run anywhere shared, add new ones as `V{N}__description.sql`, and run Flyway before Airflow
 touches the changed schema.
 The headings below keep the pre-squash migration numbers (V3–V10) so git history finds the reasoning.
@@ -146,6 +146,33 @@ re-read); a correction is dated by the newest vote behind it.
 Tested on a copy of the Berlin database on 2026-10-29: a new address read that day at 0.8 replaced
 the register's 2018 address at 1.0 (worth about 0.3 after decay); a source name read a day before
 two people's correction did not replace it, one read after it did.
+
+## History (V7, #54)
+
+`company_field_history` is append-only: a row whenever a shown value appears (`shown`), is replaced by
+another value (`replaced`), keeps its value with a new confidence or source (`confidence_changed`), or
+disappears (`removed`), with the previous value and confidence. `pipeline_coordinator` writes it at the
+end of each run with `record_company_history()`, one comparison of what is shown now with the latest
+row per field, so every rule that picks a winner is covered. Manager names have one line per name.
+The baseline is what was shown on 2026-10-30, dated when each value was chosen; earlier changes were
+never recorded. A run with no change writes nothing (8.5 s on the Berlin set). Changes published
+outside the coordinator (an import, an announcement) are recorded at the next coordinator run.
+
+The app reads it per company: `v_company_history` (the profile's `history`) and, behind a toggle,
+`v_company_claims` (the profile's `claims`): every claim of the app's fields, shown or not. An
+allow-list keeps email, phone, `_withheld` values and bookkeeping out. **Manager names stay in the
+history after they stop being shown**, a new retention of personal data flagged for the privacy review.
+**The claims list also shows what was never shown**, to every logged-in user: manager names the rules
+did not publish (too low a confidence, or read off the wrong page) and corrections below the bar (one
+person's at 0.30, or one nobody supports any more). Decided on 2026-10-30, flagged for the privacy
+review (#54).
+
+A `removed` row has two shapes. For an ordinary field, `value` is empty and `previous_value` and
+`previous_confidence` hold what disappeared. For `management`, a line is the name itself: `value`
+holds the name, `previous_value` is empty, and `previous_confidence` holds its last confidence.
+
+Two coordinator runs never write the history at the same time: the DAG runs once at a time
+(`max_active_runs=1`) and `record_company_history()` takes a lock first, so no change is written twice.
 
 ## Tags (V5, #47)
 
