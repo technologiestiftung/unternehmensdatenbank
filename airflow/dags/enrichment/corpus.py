@@ -107,33 +107,38 @@ def _s3() -> Any:
         return _client
 
 
-def get(namespace: str, key: str, *, fresher_than: timedelta | None = None) -> dict[str, Any] | None:
-    """The stored record, or None: missing, older than `fresher_than` (default `max_age()`), or the
-    store unreachable. Never raises."""
+def get(namespace: str, key: str) -> dict[str, Any] | None:
+    """The stored record, or None: missing, read more than `max_age()` ago, or the store unreachable.
+    Its age runs from `read_at`, when the text was downloaded, not from when the object was last
+    written: copying a probed page to `page` must not make an old page new. Never raises."""
     if not enabled():
         return None
     try:
         client = _s3()
         name = object_key(namespace, key)
         stat = client.stat_object(bucket(), name)
-        if stat.last_modified < datetime.now(timezone.utc) - (fresher_than or max_age()):
-            return None
         response = client.get_object(bucket(), name)
         try:
-            return json.loads(gzip.decompress(response.read()))
+            record = json.loads(gzip.decompress(response.read()))
         finally:
             response.close()
             response.release_conn()
+        record.setdefault("read_at", stat.last_modified.isoformat())
+        if datetime.fromisoformat(record["read_at"]) < datetime.now(timezone.utc) - max_age():
+            return None
+        return record
     except Exception as exc:  # noqa: BLE001  a miss and a broken store must look the same
         _failed(exc, f"reading {namespace}")
         return None
 
 
 def put(namespace: str, key: str, record: dict[str, Any]) -> str | None:
-    """Store a record, overwriting the previous version. Returns the object key, None on failure."""
+    """Store a record, overwriting the previous version. Returns the object key, None on failure.
+    A record without `read_at` was read just now; one copied from the store keeps its own."""
     if not enabled():
         return None
     try:
+        record = {**record, "read_at": record.get("read_at") or datetime.now(timezone.utc).isoformat()}
         body = gzip.compress(json.dumps(record, ensure_ascii=False).encode("utf-8"))
         name = object_key(namespace, key)
         _s3().put_object(bucket(), name, BytesIO(body), len(body), content_type="application/gzip")
@@ -144,25 +149,28 @@ def put(namespace: str, key: str, record: dict[str, Any]) -> str | None:
 
 
 def record_document(
-    cur: Any, *, company_id: str, source_id: str, kind: str, url: str, text: str,
-    namespace: str, language: str | None = None, read_at: Any = None,
+    cur: Any, *, company_id: str, source_id: str, kind: str, url: str, namespace: str,
+    language: str | None = None,
 ) -> None:
-    """Index one stored text as belonging to a company (`company_documents`). The text itself is in S3
-    under `object_key(namespace, url)`; nothing is indexed when the corpus is off."""
-    if not enabled() or not text:
-        return
+    """Index one stored text as belonging to a company (`company_documents`). Read back from the store,
+    so `sha256` and `bytes` describe the stored HTML or text and `read_at` is when it was downloaded;
+    nothing is indexed when the corpus is off or holds no text under `object_key(namespace, url)`."""
     if kind not in KINDS:
         raise ValueError(f"unknown kind {kind!r}")
-    data = text.encode("utf-8")
+    record = get(namespace, url)
+    content = (record or {}).get("html") or (record or {}).get("text")
+    if not content:
+        return
+    data = content.encode("utf-8")
     cur.execute(
         """
         INSERT INTO public.company_documents
           (company_id, source_id, kind, url, language, read_at, s3_key, sha256, bytes)
-        VALUES (%s, %s, %s, %s, %s, COALESCE(%s, now()), %s, %s, %s)
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
         ON CONFLICT (company_id, source_id, kind, url) DO UPDATE SET
           language = EXCLUDED.language, read_at = EXCLUDED.read_at, s3_key = EXCLUDED.s3_key,
           sha256 = EXCLUDED.sha256, bytes = EXCLUDED.bytes
         """,
-        (company_id, source_id, kind, url, language, read_at, object_key(namespace, url),
+        (company_id, source_id, kind, url, language, record["read_at"], object_key(namespace, url),
          hashlib.sha256(data).hexdigest(), len(data)),
     )

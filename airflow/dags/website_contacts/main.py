@@ -157,7 +157,7 @@ def run_read() -> None:
                 # The Impressum is in the company corpus (S3, via fetch_page); this says it is this company's.
                 if imprint_url:
                     corpus.record_document(cur, company_id=company_id, source_id=source_id, kind="webpage",
-                                           url=imprint_url, text=text, namespace="page")
+                                           url=imprint_url, namespace="page")
                 for field_name, value in found.items():
                     insert_text_observation(
                         cur, company_id=company_id, source_record_id=record_id, source_id=source_id,

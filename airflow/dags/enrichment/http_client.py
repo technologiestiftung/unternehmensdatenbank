@@ -107,7 +107,7 @@ def fetch_page(url: str) -> str | None:
 
     for namespace in ("page", "probe"):
         cached = page_cache.get(namespace, url)
-        if cached and cached.get("html") and 200 <= (cached.get("status_code") or 200) < 300:
+        if page_cache.loaded(cached):
             if namespace != "page":
                 page_cache.put("page", url, cached)
             return cached["html"]

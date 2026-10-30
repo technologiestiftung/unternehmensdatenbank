@@ -237,23 +237,28 @@ def run_texts() -> int:
                        r.source_payload ->> 'wikipedia_url',
                        EXISTS (SELECT 1 FROM public.company_documents d
                                WHERE d.company_id = r.company_id AND d.source_id = r.source_id
+                                 AND d.kind = 'wikidata_description' AND d.url = r.external_url
+                                 AND d.read_at > now() - %s * interval '1 day'),
+                       EXISTS (SELECT 1 FROM public.company_documents d
+                               WHERE d.company_id = r.company_id AND d.source_id = r.source_id
                                  AND d.kind = 'wikipedia' AND d.url = r.source_payload ->> 'wikipedia_url'
                                  AND d.read_at > now() - %s * interval '1 day')
                 FROM public.company_source_records r
                 WHERE r.source_id = %s AND r.is_active
                 """,
-                (corpus.max_age().days, source_id),
+                (corpus.max_age().days, corpus.max_age().days, source_id),
             )
             records = cur.fetchall()
         stored = 0
-        for company_id, item_url, description, article, fresh in records:
+        for company_id, item_url, description, article, description_fresh, article_fresh in records:
             with connection, connection.cursor() as cur:
-                if description and corpus.put("wikidata_description", item_url, {"url": item_url, "text": description}):
+                if (description and not description_fresh
+                        and corpus.put("wikidata_description", item_url, {"url": item_url, "text": description})):
                     corpus.record_document(cur, company_id=company_id, source_id=source_id,
-                                           kind="wikidata_description", url=item_url, text=description,
+                                           kind="wikidata_description", url=item_url,
                                            namespace="wikidata_description", language="de")
                     stored += 1
-                if article and not fresh:
+                if article and not article_fresh:
                     try:
                         text = wikidata.wikipedia_text(article)
                     except Exception as exc:  # noqa: BLE001  one missing article must not stop the rest
@@ -261,7 +266,7 @@ def run_texts() -> int:
                         continue
                     if text and corpus.put("wikipedia", article, {"url": article, "text": text}):
                         corpus.record_document(cur, company_id=company_id, source_id=source_id,
-                                               kind="wikipedia", url=article, text=text,
+                                               kind="wikipedia", url=article,
                                                namespace="wikipedia", language="de")
                         stored += 1
         log.info("%d texts stored in the company corpus (Wikipedia articles and Wikidata descriptions).", stored)

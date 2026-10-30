@@ -112,9 +112,9 @@ def run_read() -> None:
                     source_company_name=company_name, source_payload=payload,
                 )
                 # The pages are in the company corpus (S3, via fetch_page); this says they are this company's.
-                for url, html in documents:
+                for url, _ in documents:
                     corpus.record_document(cur, company_id=company_id, source_id=source_id, kind="webpage",
-                                           url=url, text=html, namespace="page")
+                                           url=url, namespace="page")
 
         with connection, connection.cursor() as cur:
             finish_sync_run(cur, sync_run_id=sync_run_id, records_seen=len(companies),

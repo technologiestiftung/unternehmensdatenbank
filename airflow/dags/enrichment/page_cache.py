@@ -95,15 +95,25 @@ def get(namespace: str, key: str) -> dict[str, Any] | None:
         return None
 
 
+def loaded(record: dict[str, Any] | None) -> bool:
+    """Did the page load: HTML, and a 2xx status (a record without one came from a page that loaded)."""
+    return bool(record and record.get("html")) and 200 <= (record.get("status_code") or 200) < 300
+
+
 def put(namespace: str, key: str, record: dict[str, Any]) -> None:
     """Store a record. Never raises, for the same reason `get` does not.
 
     Written to a temporary file and moved into place, because the runner fetches with eight threads
     and a half-written file read back as a page is worse than no cache. `os.replace` is atomic on
     both Windows and Linux.
+
+    The S3 store keeps only pages that loaded: a failure stored there would be served to every DAG
+    for 90 days, so a short outage is retried instead. The directory keeps failures, so a
+    measurement replay does not pay the timeout again.
     """
     if not _directory():
-        corpus.put(namespace, key, record)
+        if loaded(record):
+            corpus.put(namespace, key, record)
         return
     path = _path_for(namespace, key)
     try:
