@@ -56,6 +56,12 @@ x-airflow-common: &airflow-common
     # default to the owner `app`; see docs/datahub-emulation.md.
     PG_DSN: host=postgres port=5432 dbname=${APP_DB_NAME:-unternehmensdatenbank} user=${APP_DB_WRITER_USER:-writer} password=${APP_DB_WRITER_PASSWORD:-writer}
     SOURCE_ENRICHMENT_BATCH_SIZE: ${SOURCE_ENRICHMENT_BATCH_SIZE:-50}
+    # The company corpus (#61): every page and text read, in S3. The `s3` service is in the `datahub`
+    # profile; without it the DAGs log one warning and work without the store.
+    CORPUS_S3_ENDPOINT: ${CORPUS_S3_ENDPOINT:-s3:9000}
+    CORPUS_S3_ACCESS_KEY: ${S3_ACCESS_KEY:-localaccess}
+    CORPUS_S3_SECRET_KEY: ${S3_SECRET_KEY:-localsecret}
+    CORPUS_S3_BUCKET: ${CORPUS_S3_BUCKET:-company-corpus}
     # Skip companies whose register_status is not 'active' (153,915 of the 296,486 Berlin companies).
     # See source_enrichment_common.ACTIVE_ONLY.
     DISCOVERY_ACTIVE_ONLY: ${DISCOVERY_ACTIVE_ONLY:-true}
@@ -328,7 +334,7 @@ services:
 
   s3:
     # RustFS, not MinIO: MinIO stopped publishing images, and RustFS is a CIVITAS/CORE add-on that
-    # speaks the same S3 API. Nothing in this repo uses S3 yet.
+    # speaks the same S3 API. The company corpus (#61, enrichment.corpus) keeps its texts here.
     image: rustfs/rustfs:1.0.4
     profiles:
       - datahub

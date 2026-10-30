@@ -4,6 +4,8 @@ beautifulsoup4>=4.12.3
 lxml>=5.0
 rapidfuzz>=3.9.0
 psycopg2-binary>=2.9.9
+# The company corpus (issue #61): S3 on the hub (MinIO), RustFS locally. pip-audit clean 2026-10-30.
+minio>=7.2.20,<8
 PyYAML>=6.0
 # manager_ner: spaCy and its German model, pinned together (the model is built for 3.8).
 spacy>=3.8,<3.9

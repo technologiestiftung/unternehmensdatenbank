@@ -36,6 +36,7 @@ import re
 from datetime import datetime, timezone
 from urllib.parse import urlparse
 
+from enrichment import corpus
 from source_enrichment_common import (
     companies_with_website_to_read,
     ensure_source,
@@ -153,6 +154,10 @@ def run_read() -> None:
                     external_id=f"{SOURCE_KEY}:{company_id}", external_url=website,
                     source_company_name=company_name, source_payload=payload,
                 )
+                # The Impressum is in the company corpus (S3, via fetch_page); this says it is this company's.
+                if imprint_url:
+                    corpus.record_document(cur, company_id=company_id, source_id=source_id, kind="webpage",
+                                           url=imprint_url, namespace="page")
                 for field_name, value in found.items():
                     insert_text_observation(
                         cur, company_id=company_id, source_record_id=record_id, source_id=source_id,

@@ -1,0 +1,22 @@
+table:
+  name: v_company_history
+  schema: public
+configuration:
+  custom_name: company_history
+select_permissions:
+  # Read-only. Loaded on the company page only, through the profile's `history` relationship (#54).
+  - role: user
+    permission:
+      columns:
+        - id
+        - company_id
+        - field_key
+        - event
+        - value
+        - previous_value
+        - confidence
+        - previous_confidence
+        - source_key
+        - source_name
+        - changed_at
+      filter: {}

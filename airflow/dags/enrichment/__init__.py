@@ -22,6 +22,7 @@ Reading pages
   http_client.py, imprint_probe.py   find and download the Impressum
   imprint_extractor.py               regex: register number, VAT ID, Geschäftsführer, contact
   page_cache.py, content_pages.py    cache downloaded pages; fetch the services pages
+  corpus.py                          the company corpus: every text read, once, in S3 (#61)
   activity_keywords.py               product/service keywords from meta tags and services-page headings
 
 Register

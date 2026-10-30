@@ -56,6 +56,12 @@ def run_pipeline_coordinator() -> None:
         log.info("Resolution complete, canonical records changed — %s",
                  " ".join(f"{name}={n}" for name, n in changed.items()))
 
+        # What changed in this run, for the company page's history (#54). Append-only; one
+        # comparison of what is shown now with the latest history row per field.
+        with conn, conn.cursor() as cur:
+            cur.execute("SELECT public.record_company_history()")
+            log.info("History: %d changes recorded.", cur.fetchone()[0])
+
         # The app reads a stored copy of every profile (`company_profile_mv`); bring it up to date
         # with what was just resolved.
         with conn, conn.cursor() as cur:
@@ -81,6 +87,7 @@ def _make_dag():  # noqa: ANN201
         schedule=None,
         start_date=datetime(2026, 8, 4, tzinfo=timezone.utc),
         catchup=False,
+        max_active_runs=1,
         tags=["pipeline", "coordinator"],
     ) as dag:
         pipeline_task("resolve_and_score", run_pipeline_coordinator)

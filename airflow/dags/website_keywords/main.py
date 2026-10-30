@@ -32,6 +32,7 @@ from typing import Any
 from psycopg2.extras import Json
 
 from enrichment import activity_keywords as ak
+from enrichment import corpus
 from source_enrichment_common import (
     companies_with_website_to_read,
     ensure_source,
@@ -106,6 +107,10 @@ def run_read() -> None:
                     external_id=f"{SOURCE_KEY}:{company_id}", external_url=website,
                     source_company_name=company_name, source_payload=payload,
                 )
+                # The pages are in the company corpus (S3, via fetch_page); this says they are this company's.
+                for url in [website, *payload["pages"]]:
+                    corpus.record_document(cur, company_id=company_id, source_id=source_id, kind="webpage",
+                                           url=url, namespace="page")
 
         with connection, connection.cursor() as cur:
             finish_sync_run(cur, sync_run_id=sync_run_id, records_seen=len(companies),

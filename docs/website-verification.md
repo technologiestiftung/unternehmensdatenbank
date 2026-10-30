@@ -74,9 +74,10 @@ extra suspicion.
 
 ## Pages are cached, so extraction changes are cheap to try
 
-`COMBINED_PAGE_CACHE_DIR` turns on a disk cache of raw HTML and status. It is **off in Airflow**: a DAG
-must see today's web. Only raw pages are cached, never conclusions, so a change to extraction applies on
-the next read. About 150–300 MB per 1,000 companies, under the git-ignored `airflow/data/`; cached
+`COMBINED_PAGE_CACHE_DIR` turns on a disk cache of raw HTML and status, for measurement runs. Inside
+Airflow the cache is the company corpus in S3 instead: a page that loaded is served for 90 days, a failed
+download is not kept (`enrichment/page_cache.py`). Only raw pages are cached, never conclusions, so a
+change to extraction applies on the next read. About 150–300 MB per 1,000 companies, under the git-ignored `airflow/data/`; cached
 Impressum pages carry managing-director names.
 
 ## Lessons that cost real time

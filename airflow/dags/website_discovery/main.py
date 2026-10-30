@@ -18,7 +18,8 @@ A record older than `RECHECK_AFTER_DAYS` (90) counts as not looked at, so every 
 again each quarter; a website a clean recheck no longer finds drops below the bar
 (`observations.write_company_result`, step 4). A full batch starts the next run itself, and the hourly schedule restarts the
 chain if it breaks; a run with nothing to do ends after `discover` and triggers nothing.
-The page cache stays off unless `COMBINED_PAGE_CACHE_DIR` is set.
+Downloaded pages that loaded are kept in the company corpus (S3, `page_cache`) when
+`CORPUS_S3_ENDPOINT` is set; a failed download is not kept, so the next run tries again.
 
 **Personal data.** Register officers are loaded per batch as comparison keys only, used in memory,
 and never written: the stored evidence says `officer_name_on_imprint`, never which person matched.
