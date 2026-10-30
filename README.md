@@ -35,7 +35,7 @@ first, then confidence**. The app reads `v_company_profile`. Details: [data-mode
 
 ```bash
 cp .env.example .env
-./scripts/dev-up.sh     # Fernet key, Postgres, migrations (staging, then prod), Airflow
+./scripts/dev-up.sh     # Fernet key, Postgres, migrations, Airflow
 ```
 
 Airflow: http://localhost:8082 (airflow / airflow). To load the Berlin companies, see "Loading the
@@ -60,7 +60,7 @@ docker compose down                                     # add -v to destroy all 
 | Keycloak | http://localhost:8180/admin | admin / admin · app user dev / dev |
 | S3 (RustFS) | http://localhost:9001 | localaccess / localsecret |
 
-Databases: `unternehmensdatenbank` (the Berlin data) and `unternehmensdatenbank_staging` (empty).
+Database: `unternehmensdatenbank` (the Berlin data).
 
 ## DAGs, migrations, checks
 

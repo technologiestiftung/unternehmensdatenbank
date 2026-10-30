@@ -22,7 +22,7 @@ docker run -d --name "$pg" --network "$net" \
   -e APP_DB_USER=hub_owner -e APP_DB_PASSWORD=pw \
   -e APP_DB_WRITER_USER=hub_writer -e APP_DB_WRITER_PASSWORD=pw \
   -e APP_DB_READER_USER=hub_reader -e APP_DB_READER_PASSWORD=pw \
-  -e APP_DB_NAME=udb -e APP_DB_STAGING_NAME=udb_staging \
+  -e APP_DB_NAME=udb \
   -e KEYCLOAK_DB_USER=keycloak -e KEYCLOAK_DB_PASSWORD=pw -e KEYCLOAK_DB_NAME=keycloak \
   -e HASURA_DB_USER=hasura -e HASURA_DB_PASSWORD=pw -e HASURA_DB_NAME=hasura \
   -v "$PWD/postgres/init:/docker-entrypoint-initdb.d:ro" \
