@@ -104,9 +104,9 @@ touches the changed schema.
 The headings below keep the pre-squash migration numbers (V3–V10) so git history finds the reasoning.
 
 **A local database migrated before the squash** still has the old files in its Flyway history, and
-Flyway refuses to run until that is reset. Only for a database with every migration up to V10
-applied (`flyway info`); one without V10 lacks the two `register_announcement` columns, so build it
-fresh:
+Flyway refuses to run until that is reset. Only for a database with every pre-squash migration up to
+the old V10 applied (`flyway info`); one without it lacks the two `register_announcement` columns, so
+build it fresh:
 
 ```bash
 docker compose exec -T postgres psql -U app -d unternehmensdatenbank -c "DROP TABLE flyway_schema_history"
@@ -152,7 +152,7 @@ Tested on a copy of the Berlin database on 2026-10-29: a new address read that d
 the register's 2018 address at 1.0 (worth about 0.3 after decay); a source name read a day before
 two people's correction did not replace it, one read after it did.
 
-## Review sample (V10)
+## Review sample (`V10__review_sample.sql`)
 
 Nothing had been checked by a person: every confidence and threshold here is a starting value.
 `review_sample` is a **fixed** set of active companies people check in the app (list filter
@@ -292,7 +292,7 @@ Two DAGs read more from a website `website_discovery` has proven to be the compa
 Both read each company once. A failed read is stored with `failed: true` and an `attempts` count and
 retried on later runs, 3 times at most; it counts for nothing, including the 500.
 
-## Register announcements (V10)
+## Register announcements (pre-squash V10)
 
 `register_announcements` reads Berlin's register announcements from handelsregister.de weekly. The
 court keeps each up for 8 weeks, so a weekly run misses none. It reads only the result list
