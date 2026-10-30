@@ -162,6 +162,17 @@ The app reads it per company: `v_company_history` (the profile's `history`) and,
 `v_company_claims` (the profile's `claims`): every claim of the app's fields, shown or not. An
 allow-list keeps email, phone, `_withheld` values and bookkeeping out. **Manager names stay in the
 history after they stop being shown**, a new retention of personal data flagged for the privacy review.
+**The claims list also shows what was never shown**, to every logged-in user: manager names the rules
+did not publish (too low a confidence, or read off the wrong page) and corrections below the bar (one
+person's at 0.30, or one nobody supports any more). Decided on 2026-10-30, flagged for the privacy
+review (#54).
+
+A `removed` row has two shapes. For an ordinary field, `value` is empty and `previous_value` and
+`previous_confidence` hold what disappeared. For `management`, a line is the name itself: `value`
+holds the name, `previous_value` is empty, and `previous_confidence` holds its last confidence.
+
+Two coordinator runs never write the history at the same time: the DAG runs once at a time
+(`max_active_runs=1`) and `record_company_history()` takes a lock first, so no change is written twice.
 
 ## Tags (V5, #47)
 
