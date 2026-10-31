@@ -34,7 +34,6 @@ from enrichment import branch_textcat as textcat
 from enrichment import model_store
 from manager_ner.ner import is_holdout
 from source_enrichment_common import get_connection
-from technology_field.main import _source_id, keyword_answers, read_records
 
 log = logging.getLogger(__name__)
 
@@ -96,6 +95,10 @@ def _votes(cur: Any) -> dict[str, list[dict[str, Any]]]:
 
 
 def run_train() -> None:
+    # Imported here, not at the top: importing `main` builds its DAG, and Airflow would then find
+    # `technology_field` in this file too and refuse one of the two (AirflowDagDuplicatedIdException).
+    from technology_field.main import _source_id, keyword_answers, read_records
+
     taxonomy = bc.load_taxonomy()
     fields = set(taxonomy.branch_names())
     english_to_key = {taxonomy.english(branch): branch for branch in fields}
