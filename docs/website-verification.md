@@ -89,8 +89,9 @@ Impressum pages carry managing-director names.
   fails from this network on CAPTCHAs within a dozen queries. A new search source must feed the same
   verification and `confidence.py`, never a scorer of its own.
 - **Wikidata** (DAG `wikidata`, #26) proposes the official website (P856) of Berlin organisations it
-  matches to a company. Each URL is checked exactly like an OSM `website` tag
-  (`pipeline.verify_proposed`, method `wikidata`, the OSM base); nothing on the page means below the
+  matches to a company. Each URL is checked like a guessed domain
+  (`pipeline.verify_proposed`, method `wikidata`, the curated-record base `BASE_OSM`, named after the
+  removed OSM step); nothing on the page means below the
   bar. Measured on a copy of the Berlin database on 2026-10-30: 531 companies matched (31 by register
   number and name), 229 websites proven (209 by the register number on the page), 139 of them for
   companies discovery had found nothing for; 57 agreed with discovery's URL, 34 named another one.

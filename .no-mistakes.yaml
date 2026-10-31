@@ -12,5 +12,5 @@ commands:
 
 test:
   instructions: |
-    Run the configured test command only. It covers ruff, the unit tests and the seven rule guards.
+    Run the configured test command only. It covers ruff, the unit tests and the six rule guards.
     Do not start the Docker stack, Airflow or any DAG, and never call a model or a search engine. If a change needs coverage, add a unit test under tests/unit/.

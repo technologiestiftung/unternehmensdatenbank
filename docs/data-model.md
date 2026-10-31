@@ -111,6 +111,24 @@ docker compose exec -T postgres psql -U app -d unternehmensdatenbank -c "DROP TA
 docker compose --profile tools run --rm flyway baseline -baselineVersion=1 -baselineDescription=baseline
 ```
 
+**Copying the database to a server** (play, 2026-10-31): dump only `public`, restore into an empty
+database. Tested on a copy without extensions: every table's row count matched, the restore took
+3 minutes. Three things a plain dump gets wrong: the local image has PostGIS and pgvector, which a
+plain `postgres:15` lacks (the schema uses neither), so leave out PostGIS's `spatial_ref_sys`; the
+dump creates `public` itself; and it carries neither database-level nor PUBLIC rights.
+
+```bash
+pg_dump -U app -Fc -n public --exclude-table=public.spatial_ref_sys -f udb.dump unternehmensdatenbank
+# on the server, as postgres, into a new database owned by app:
+psql -d unternehmensdatenbank -c "DROP SCHEMA public"
+pg_restore -d unternehmensdatenbank --exit-on-error udb.dump
+psql -d unternehmensdatenbank -c "GRANT TEMPORARY ON DATABASE unternehmensdatenbank TO writer" \
+  -c "GRANT USAGE ON SCHEMA public TO PUBLIC"
+```
+
+The dump holds the personal data in `company_source_records`, `company_managers` and
+`company_documents`: a server outside local development needs the privacy review first (#18).
+
 Working queries: [core-queries-current.sql](core-queries-current.sql).
 
 ## Identifiers and matching (V2 before the squash)
@@ -168,7 +186,7 @@ votes (a tie is left out), so two voters do not count twice.
 ## Company corpus (V9, #61)
 
 Every page and text read about a company is kept once in S3 (`enrichment.corpus`; MinIO on the hub,
-RustFS locally in the `datahub` profile), latest version only. `page_cache` uses it as its backend,
+RustFS locally in the `local-s3` profile), latest version only. `page_cache` uses it as its backend,
 so a page any DAG downloaded in the last 90 days (`CORPUS_MAX_AGE_DAYS`) is served to every other DAG:
 on 20 company websites the Impressum took 32.5 s downloaded and 10.7 s from the store. An unreachable
 store is switched off for the run after the first failure. `company_documents` is the index: which

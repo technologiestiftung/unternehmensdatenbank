@@ -255,15 +255,16 @@ services:
         condition: service_healthy
     volumes:
       - ./db/migrations:/flyway/sql
-    command:
-      - -url=jdbc:postgresql://postgres:5432/${APP_DB_NAME:-unternehmensdatenbank}
-      - -user=${APP_DB_USER:-app}
-      - -password=${APP_DB_PASSWORD:-app}
-      - -placeholders.writer_role=${APP_DB_WRITER_USER:-writer}
-      - -placeholders.reader_role=${APP_DB_READER_USER:-reader}
-      - -locations=filesystem:/flyway/sql
-      - -connectRetries=60
-      - migrate
+    # Settings as variables, not arguments: `run --rm flyway info` replaces the command, not these.
+    environment:
+      FLYWAY_URL: jdbc:postgresql://postgres:5432/${APP_DB_NAME:-unternehmensdatenbank}
+      FLYWAY_USER: ${APP_DB_USER:-app}
+      FLYWAY_PASSWORD: ${APP_DB_PASSWORD:-app}
+      FLYWAY_PLACEHOLDERS_WRITER_ROLE: ${APP_DB_WRITER_USER:-writer}
+      FLYWAY_PLACEHOLDERS_READER_ROLE: ${APP_DB_READER_USER:-reader}
+      FLYWAY_LOCATIONS: filesystem:/flyway/sql
+      FLYWAY_CONNECT_RETRIES: 60
+    command: [migrate]
 
   # --- Data Hub emulation: the platform services the hub runs for us ---------------------------
   # Profile `datahub`. Versions follow what the hub runs where known; see docs/datahub-emulation.md.
