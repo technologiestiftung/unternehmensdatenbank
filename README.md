@@ -17,7 +17,7 @@ Which source fills which column: [docs/target-columns.md](docs/target-columns.md
 | Airflow | 3.3.2 | pipelines |
 | Flyway | 12 | migrations, shipped as an image ([release](docs/release.md)) |
 | Python | 3.12 | DAG code |
-| Keycloak · Hasura · RustFS (S3) | 26.8 · 2.51 · 1.0 | the hub's services, profile `datahub` ([emulation](docs/datahub-emulation.md)) |
+| Keycloak · Hasura · RustFS (S3) | 26.8 · 2.51 · 1.0 | the hub's services, profiles `datahub` and `local-s3` ([emulation](docs/datahub-emulation.md)) |
 
 ## How a value is stored
 
@@ -45,7 +45,8 @@ OffeneRegister Berlin set" in [data-model](docs/data-model.md).
 docker compose --profile tools run --rm flyway          # pending migrations ( | flyway info )
 docker compose build                                    # after Dockerfile or requirements changes
 docker compose --profile debug run --rm airflow-cli bash
-docker compose --profile datahub up -d                  # Keycloak, Hasura, S3
+docker compose --profile datahub up -d                  # Keycloak, Hasura
+docker compose --profile local-s3 up -d                 # S3 (dev-up.sh starts it)
 docker compose down                                     # add -v to destroy all data
 ```
 

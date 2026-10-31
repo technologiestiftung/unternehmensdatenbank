@@ -24,6 +24,9 @@ docker compose up -d postgres
 echo "Running Flyway migrations..."
 docker compose --profile tools run --rm flyway
 
+echo "Starting the local S3 (company corpus, model store)..."
+docker compose --profile local-s3 up -d s3
+
 echo "Building and starting Airflow..."
 docker compose up -d --build
 
@@ -35,6 +38,6 @@ Stack started.
 - Username: airflow
 - Password: airflow
 
-Data Hub services (Keycloak, Hasura, S3): docker compose --profile datahub up -d
+Data Hub services (Keycloak, Hasura): docker compose --profile datahub up -d
 
 EOF
