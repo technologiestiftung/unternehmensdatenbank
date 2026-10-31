@@ -36,7 +36,7 @@ def page(*rows: str) -> str:
 PAGE = page(
     row(0, "Amtsgericht Berlin (Charlottenburg) HRB 100001", "Beispiel Technologies GmbH", "Berlin", "aktuell",
         [("Beispiel UG (haftungsbeschränkt)", "Potsdam"), ("beispiel Technologies GmbH", "Berlin")]),
-    row(1, "Amtsgericht Berlin (Charlottenburg) HRB 100001 B", "Andere GmbH", "Berlin", "gelöscht", []),
+    row(1, "Amtsgericht Berlin (Charlottenburg) HRB 100002 B", "Andere GmbH", "Berlin", "gelöscht", []),
 )
 
 

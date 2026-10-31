@@ -197,7 +197,7 @@ def write_lookup(cur: Any, *, company_id: str, register: str, entry: Entry | Non
     if entry:
         payload |= asdict(entry)
     record_id, _ = upsert_source_record(
-        cur, company_id=company_id, source_id=source_id, external_id=f"hr:{register}", external_url=URL,
+        cur, company_id=company_id, source_id=source_id, external_id=f"hr:{register.removesuffix(' B')}", external_url=URL,
         source_company_name=entry.name if entry else "", source_payload=payload,
     )
     fields = planned_fields(entry) if entry else {}
