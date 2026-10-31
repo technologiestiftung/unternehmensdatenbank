@@ -9,7 +9,7 @@ Website discovery
   common_crawl.py     Impressum pages in the Common Crawl that name a Berlin register number
   proposals.py        verify the websites such a source proposes, shared by both DAGs
   pipeline.py         runs the URL guesses for one company and merges what they say;
-                      `verify_proposed` checks a URL another source proposes (Wikidata)
+                      `verify_proposed` checks a URL another source proposes (Wikidata, Common Crawl)
   confidence.py       the ONLY place that turns evidence into a number between 0 and 1
   own_site.py         the single predicate for "is this page the company's own site", as
                       opposed to a directory or register page ABOUT it

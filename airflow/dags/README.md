@@ -1,6 +1,6 @@
 # DAGs
 
-Eleven DAG packages and one library. Every DAG starts paused (Airflow's default,
+Twelve DAG packages and one library. Every DAG starts paused (Airflow's default,
 `dags_are_paused_at_creation`); unpausing it in Airflow is the only switch.
 
 | package | DAG id | schedule | what it does |
