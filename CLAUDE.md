@@ -43,7 +43,7 @@ scripts/free_checks.sh                              # every free check, as CI ru
 - **After a migration or a `hasura/metadata` change, restart Hasura** (`docker compose restart hasura`).
   It caches the columns and applies the metadata only on start: after V5 it still offered `cluster`,
   and `history` (#59) was missing until a restart ([datahub-emulation](docs/datahub-emulation.md)).
-- Profiles: `debug`, `datahub` (Keycloak, Hasura, S3).
+- Profiles: `debug`, `datahub` (Keycloak, Hasura), `local-s3` (RustFS; off on a server with its own S3).
 - **Three DB roles, as on the hub:** `app` owns the schema (Flyway, host scripts), DAGs run as
   `writer` (rows only, no DDL), Hasura as `reader`. A DAG that needs DDL is wrong, not the grant.
 - `cp .env.example .env`; `dev-up.sh` fills in a Fernet key. Every DAG starts **paused** (Airflow's

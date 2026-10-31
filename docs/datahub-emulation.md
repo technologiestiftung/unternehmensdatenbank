@@ -23,7 +23,8 @@ on them: datahub@ts.berlin.
 
 ```bash
 ./scripts/dev-up.sh                        # Postgres, both migrations, Airflow
-docker compose --profile datahub up -d     # Keycloak, Hasura, S3
+docker compose --profile datahub up -d     # Keycloak, Hasura
+docker compose --profile local-s3 up -d    # S3 (RustFS); leave it off where another S3 is set
 ```
 
 | | URL | login |
