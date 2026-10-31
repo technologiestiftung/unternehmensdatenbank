@@ -94,6 +94,11 @@ Impressum pages carry managing-director names.
   bar. Measured on a copy of the Berlin database on 2026-10-30: 531 companies matched (31 by register
   number and name), 229 websites proven (209 by the register number on the page), 139 of them for
   companies discovery had found nothing for; 57 agreed with discovery's URL, 34 named another one.
+  Shown websites went from 6,015 to 6,229. No result was hand-checked. The page, not the match,
+  proves a website: an item that stops matching keeps its record, inactive, and is still checked
+  every 90 days. A URL drops to 0 only when no Wikidata record of that company still proves it
+  (`proven_urls` in the record): its page stopped naming the company, or its item now matches
+  another company.
 - **Common Crawl** (DAG `common_crawl`, #56) reads Impressum pages from the public web archive and
   proposes a host to the company whose register number its Impressum names. A register number proves
   the page is about the company, so each host is checked again like a guessed domain (method
@@ -103,12 +108,10 @@ Impressum pages carry managing-director names.
   missed. Refused: institute subdomains, a film distributor's film sites, a newspaper's subscription shop.
   End to end on a copy of the Berlin database (CC-MAIN-2026-43, 2026-10-30): 640 of 38,118 `.de`
   index blocks, 6,706 Impressum pages, 154 proposals, 50 companies proven (42 had no website); all
-  by the own register number. Roughly 3,000 per crawl if the rest of `.de` is alike.
-  Shown websites went from 6,015 to 6,229. No result was hand-checked. The page, not the match,
-  proves a website: an item that stops matching keeps its record, inactive, and is still checked
-  every 90 days. A URL drops to 0 only when no Wikidata record of that company still proves it
-  (`proven_urls` in the record): its page stopped naming the company, or its item now matches
-  another company.
+  by the own register number. Roughly 3,000 per crawl if the rest of `.de` is alike. A page naming
+  more than 2 of our companies is a group page and proposes nothing: in that run, pages naming 1
+  company gave 106 proposals (47 proven), 2 gave 12 (3 proven: a GmbH & Co. KG and its
+  Verwaltungs-GmbH, e.g. abion-hotel.de), and one page naming 26 gave 26 (0 proven).
 - **OpenStreetMap** was removed on 2026-10-30 (#57): the public overpass-api.de refused our
   requests, and it found 3 websites in 1,000 active Berlin companies. Its scoring stays in
   `confidence.py` (Wikidata starts from the same base, and stored rows keep their evidence).

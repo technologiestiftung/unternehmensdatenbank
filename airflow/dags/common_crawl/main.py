@@ -7,8 +7,9 @@ Two tasks per run:
    last stopped and every task can run in a fresh pod. Each Impressum page that names a Berlin court
    is read for register numbers; a number that is one of our companies' register identifiers becomes
    a source record of that company, `external_id` = "host register", proposing `https://host`. A page
-   listing several of our companies proposes its host to each of them. When the crawl is done, the
-   harvest waits for the next one.
+   listing up to `MAX_COMPANIES_PER_PAGE` of our companies proposes its host to each of them; a page
+   listing more is a group page and proposes nothing. When the crawl is done, the harvest waits for
+   the next one.
 2. **verify**, in batches: every proposal goes through `enrichment.proposals`, the check Wikidata's
    proposals get. A register number proves the page is ABOUT the company; only the page read again
    can prove the host is the company's own. Pilot (#56): 21 of 57 proposals for companies without a
@@ -43,6 +44,10 @@ WORKERS = int(os.getenv("COMMON_CRAWL_WORKERS", "8"))
 BATCH_SIZE = int(os.getenv("COMMON_CRAWL_VERIFY_BATCH_SIZE", "100"))
 RECHECK_AFTER_DAYS = int(os.getenv("COMMON_CRAWL_RECHECK_DAYS", "90"))
 _STATE = ("common_crawl", "harvest")
+#: More of our companies on one page is a group page. End to end on a database copy: pages naming 1
+#: company gave 106 proposals, 47 proven; 2 gave 12, 3 proven (a GmbH & Co. KG and its Verwaltungs-GmbH,
+#: e.g. abion-hotel.de); one page naming 26 gave 26, 0 proven (the domain-name check refused them).
+MAX_COMPANIES_PER_PAGE = 2
 
 
 def _source_id(cur: Any) -> str:
@@ -116,6 +121,14 @@ def _registers(record: cc.Record) -> list[tuple[str, str]]:
         return []
 
 
+def own_pages(matches: list[tuple[str, str]]) -> set[str]:
+    """The hosts of (host, company_id) matches whose page names at most `MAX_COMPANIES_PER_PAGE` companies."""
+    companies: dict[str, set[str]] = {}
+    for host, company_id in matches:
+        companies.setdefault(host, set()).add(company_id)
+    return {host for host, named in companies.items() if len(named) <= MAX_COMPANIES_PER_PAGE}
+
+
 def propose(cur: Any, found: list[tuple[cc.Record, list[tuple[str, str]]]], *, source_id: str, crawl: str) -> int:
     """A source record per (host, register identifier of one of our companies). Returns how many."""
     wanted: dict[str, list[cc.Record]] = {}
@@ -128,13 +141,17 @@ def propose(cur: Any, found: list[tuple[cc.Record, list[tuple[str, str]]]], *, s
     cur.execute("SELECT value, company_id FROM public.company_identifiers WHERE scheme = 'register' AND value = ANY(%s)",
                 (list(wanted),))
     # Keyed by external_id: a host can turn up in two blocks, and one INSERT may not hit a row twice.
+    matches = [(record, value, company_id) for value, company_id in cur.fetchall() for record in wanted[value]]
+    hosts = own_pages([(record.host, company_id) for record, _, company_id in matches])
     rows = {}
-    for value, company_id in cur.fetchall():
-        for record in wanted[value]:
+    for record, value, company_id in matches:
+        if record.host in hosts:
             rows[f"{record.host} {value}"] = (
                 company_id, source_id, f"{record.host} {value}", record.url, record.host,
                 Json({"crawl": crawl, "register": value, "imprint_url": record.url,
                       "websites": [f"https://{record.host}"]}))
+    if not rows:
+        return 0
     execute_values(cur, """
         INSERT INTO public.company_source_records
           (company_id, source_id, external_id, external_url, source_company_name, source_payload,
