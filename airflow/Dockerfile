@@ -1,4 +1,4 @@
-ARG AIRFLOW_BASE_IMAGE=apache/airflow:3.2.0
+ARG AIRFLOW_BASE_IMAGE=apache/airflow:3.3.2
 FROM ${AIRFLOW_BASE_IMAGE}
 
 COPY airflow/requirements.txt /tmp/requirements.txt
