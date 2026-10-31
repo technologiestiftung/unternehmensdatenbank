@@ -175,8 +175,9 @@ def companies_to_look_up(cur: Any, source_id: str, limit: int) -> list[tuple[str
           WHERE company_id = w.company_id AND scheme = 'register' AND value ~ %s
           ORDER BY created_at DESC LIMIT 1
         ) i
-        LEFT JOIN public.company_source_records r ON r.company_id = w.company_id AND r.source_id = %s
-        ORDER BY r.last_synced_at NULLS FIRST, w.company_id
+        LEFT JOIN (SELECT company_id, max(last_synced_at) AS looked_up_at FROM public.company_source_records
+                   WHERE source_id = %s GROUP BY company_id) r ON r.company_id = w.company_id
+        ORDER BY r.looked_up_at NULLS FIRST, w.company_id
         LIMIT %s
         """,
         (_IDENTIFIER.pattern, source_id, limit),
