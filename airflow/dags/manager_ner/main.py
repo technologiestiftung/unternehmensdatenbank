@@ -6,7 +6,10 @@ manager_ner_extract  The current model reads the Impressum of companies that hav
 manager_ner_train    Votes and corrections from the app (`extraction_feedback`) become
                      training examples. The current model is trained further, scored on a held-out
                      fifth of the companies against itself and the regex extractor, and promoted
-                     only if it beats the current model.
+                     only if it beats the current model. More examples come from the register
+                     (#58): on an Impressum this source read, a register officer's name is a
+                     positive label. Only companies nobody voted on and never a held-out one;
+                     judging stays with people, so without votes nothing is trained.
 
 Models live in the model store (`enrichment.model_store`, S3) and under MANAGER_NER_MODEL_DIR as a
 working copy: one folder per trained version with its `metrics.json`, the model files only for a
@@ -39,7 +42,7 @@ from typing import Any
 
 from psycopg2.extras import Json
 
-from enrichment.officers import load_officers
+from enrichment.officers import load_officers, officer_names
 from manager_ner.ner import (
     Labels,
     Score,
@@ -48,6 +51,7 @@ from manager_ner.ner import (
     is_holdout,
     labels_from_votes,
     normalize,
+    officer_labels,
     train,
     window_text,
 )
@@ -70,6 +74,8 @@ BASE_MODEL = os.getenv("MANAGER_NER_BASE_MODEL", "de_core_news_md")
 BATCH_SIZE = int(os.getenv("MANAGER_NER_BATCH_SIZE", "50"))
 MIN_COMPANIES = int(os.getenv("MANAGER_NER_MIN_COMPANIES", "30"))
 EPOCHS = int(os.getenv("MANAGER_NER_EPOCHS", "10"))
+#: At most this many companies labelled by their register officers per training run (#58).
+MAX_OFFICER_EXAMPLES = int(os.getenv("MANAGER_NER_MAX_OFFICER_EXAMPLES", "2000"))
 #: spaCy gives no calibrated score per entity. 0.6 clears the resolver's 0.5 floor and stays below
 #: names with register or Impressum evidence from other sources.
 CONFIDENCE = float(os.getenv("MANAGER_NER_CONFIDENCE", "0.6"))
@@ -231,6 +237,39 @@ def _votes(cur: Any) -> dict[tuple[str, str], list[dict[str, Any]]]:
     return grouped
 
 
+def _officer_pages(cur: Any, exclude: set[str]) -> list[tuple[str, str, frozenset[str]]]:
+    """(company id, Impressum text, officer names) for companies whose Impressum this source read.
+
+    From the corpus only, nothing is downloaded. Officer names stay in memory (`enrichment.officers`).
+    """
+    from enrichment import page_cache
+    from enrichment.imprint_extractor import page_text
+
+    cur.execute(
+        """
+        SELECT DISTINCT ON (d.company_id) d.company_id::text, d.url
+        FROM public.company_documents d
+        JOIN public.sources s ON s.id = d.source_id AND s.key = %s
+        ORDER BY d.company_id, d.read_at DESC
+        """,
+        (SOURCE_KEY,),
+    )
+    # Never a held-out company: the fifth people judge must stay unseen by every model version.
+    urls = {company_id: url for company_id, url in cur.fetchall()
+            if company_id not in exclude and not is_holdout(company_id)}
+    officers = load_officers(cur, list(urls), convert=officer_names)
+    pages = []
+    for company_id, url in sorted(urls.items()):
+        if not officers.get(company_id):
+            continue
+        html = (page_cache.get("page", url) or {}).get("html") or ""
+        if html:
+            pages.append((company_id, page_text(html), officers[company_id]))
+        if len(pages) >= MAX_OFFICER_EXAMPLES:
+            break
+    return pages
+
+
 def _score(nlp: Any, held_out: list[tuple[str, Labels]]) -> Score:
     score = Score()
     for page, labels in held_out:
@@ -246,6 +285,8 @@ def run_train() -> None:
     try:
         with connection, connection.cursor() as cur:
             votes = _votes(cur)
+            # People's labels win, and a held-out company must never be seen in training.
+            officer_pages = _officer_pages(cur, exclude={company_id for company_id, _ in votes})
     finally:
         connection.close()
 
@@ -277,6 +318,15 @@ def run_train() -> None:
                  usable, len(held_out), MIN_COMPANIES)
         return
 
+    # The register's officers, where they are on the page, teach the names people have not voted on.
+    officer_labelled = 0
+    for _, page, officers in officer_pages:
+        doc = nlp.make_doc(window_text(page))
+        tags = entity_tags(doc, officer_labels(doc.text, officers))
+        if tags is not None:
+            training.append(Example.from_dict(doc, {"entities": tags}))
+            officer_labelled += 1
+
     regex = Score()
     for page, labels in held_out:
         regex.add(extract_ceo_names(page), labels)
@@ -292,7 +342,8 @@ def run_train() -> None:
         nlp.to_disk(out)
     metrics = {
         "version": new_version, "trained_from": version or BASE_MODEL,
-        "companies_train": len(training), "companies_held_out": len(held_out), "losses": losses,
+        "companies_train": len(training), "companies_officer_labelled": officer_labelled,
+        "companies_held_out": len(held_out), "losses": losses,
         "held_out": {"regex": regex.as_dict(), "current_model": before.as_dict(), "new_model": after.as_dict()},
         "promoted": promoted,
     }

@@ -88,6 +88,12 @@ def labels_from_votes(rows: Iterable[dict[str, Any]]) -> Labels:
     return labels
 
 
+def officer_labels(text: str, officers: Iterable[str]) -> Labels:
+    """The register officers that appear in `text`, as positives (#58). Every other name stays
+    unlabelled: an Impressum may name a manager the 2017-2019 register does not know yet."""
+    return Labels(positives={name for name in officers if find_spans(text, name)})
+
+
 def find_spans(text: str, value: str) -> list[tuple[int, int]]:
     """Every case-insensitive occurrence of `value` in `text`, as character offsets."""
     if not value.strip():
