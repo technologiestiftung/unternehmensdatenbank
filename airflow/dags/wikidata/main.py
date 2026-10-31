@@ -12,7 +12,7 @@ Three tasks:
    Measured on 2026-10-30 on the local Berlin database: 531 of 4,174 items matched, 31 of them by
    register number and name.
 2. **verify**, in batches, chaining itself while proposals wait. Every listed website goes through
-   `pipeline.verify_proposed`, the same page reading and `confidence.score` as an OSM website tag.
+   `pipeline.verify_proposed`, the same page reading and `confidence.score` as a guessed domain.
    Nothing on the page ties it to the company -> below the bar, never shown. On 2026-10-30, 229 of
    the 531 were proven, 139 of them new to website_discovery; no result was hand-checked.
 3. **store_texts**, between the two (`run_texts`): each matched item's German Wikipedia article and
