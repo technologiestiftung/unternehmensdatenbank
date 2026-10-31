@@ -215,11 +215,18 @@ flowchart LR
 | a correction was entered | the corrected text is a person name |
 | most voters say wrong | this text is not a person name |
 | nobody voted, or a tie | unknown; ignored in training |
+| nobody voted, a register officer's name is on the Impressum | this text is a person name (#58) |
 
 - Training continues from the model in use (at first `de_core_news_md`).
 - A fifth of the companies is always held out (the same ones every run); only a better F1 score
   there promotes a new model.
 - Training starts only with at least 30 companies with usable votes (`MANAGER_NER_MIN_COMPANIES`).
+- **Register officers as labels (#58, decided 2026-10-31).** On an Impressum `manager_ner_extract`
+  read (from the corpus, nothing downloaded), an officer's name is a positive label; other names
+  stay unlabelled, since the register is from 2017-2019. Only companies nobody voted on, never a
+  held-out one, at most `MANAGER_NER_MAX_OFFICER_EXAMPLES` (2,000) per run. They add training
+  examples; judging stays with people. Measured on 40 local companies: 16 gave an example; of the
+  19 officer names on those pages the base model found 13, so 6 are names it misses today.
 - Corrections do not change the shown value. Whether they become a source of their own is open.
 
 ## 10. The app

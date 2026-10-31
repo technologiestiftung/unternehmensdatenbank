@@ -17,7 +17,7 @@ Eleven DAG packages and one library. Every DAG starts paused (Airflow's default,
 | `foerderkatalog/` | `foerderkatalog` | `@monthly` | every Berlin grant from the Förderkatalog des Bundes into `company_fundings` |
 | `feedback_observations/` | `feedback_observations` | `@hourly` | people's corrections from the app as observations of `user_feedback` (priority 50); shown once two people agree, never who. Triggers the coordinator only when something changed |
 | `manager_ner/` | `manager_ner_extract` | triggered | spaCy reads the Impressum and writes Geschäftsführer names (source `spacy_ner`) |
-| | `manager_ner_train` | `@weekly` | turns the app's votes into training data; promotes a model only if it beats the current one on a held-out fifth |
+| | `manager_ner_train` | `@weekly` | turns the app's votes into training data, plus register officers found on the Impressum as extra labels (#58); promotes a model only if it beats the current one on a held-out fifth people voted on |
 | `enrichment/` | — | — | the library: URL patterns, Impressum regex, confidence, classification. `__init__.py` is the map |
 
 Grants are linked to companies by `refresh_company_funding_links()` after a load.

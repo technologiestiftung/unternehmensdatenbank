@@ -16,6 +16,7 @@ from manager_ner.ner import (
     is_holdout,
     labels_from_votes,
     normalize,
+    officer_labels,
     train,
     window_text,
 )
@@ -98,3 +99,24 @@ def test_training_continues_a_pretrained_model_instead_of_resetting_it() -> None
     doc = nlp.make_doc("Erika Muster\nUSt-ID DE123")
     train(nlp, [Example.from_dict(doc, {"entities": entity_tags(doc, Labels(positives={"Erika Muster"}))})], epochs=1)
     assert {"PER", "LOC", "ORG", "MISC"} <= set(nlp.get_pipe("ner").labels)
+
+
+def test_officers_on_the_page_become_positives_and_other_names_stay_unlabelled() -> None:
+    from enrichment.officers import officer_names
+
+    officers = officer_names([
+        {"type": "person", "firstname": "Erika", "lastname": "Muster"},
+        {"type": "person", "firstname": "Max", "lastname": "Beispiel"},  # left before the page was written
+        {"type": "company", "name": "Muster Holding GmbH"},  # a company is never a person's label
+    ])
+    assert officers == {"Erika Muster", "Max Beispiel"}
+    doc = spacy.blank("de").make_doc("Erika Muster und Otto Normal")
+    labels = officer_labels(doc.text, officers)
+    assert labels.positives == {"Erika Muster"} and labels.negatives == set()
+    # Otto Normal may be a manager the 2017-2019 register does not know: missing, never "not a name".
+    assert entity_tags(doc, labels) == ["B-PER", "L-PER", "-", "-", "-"]
+
+
+def test_no_officer_on_the_page_gives_no_example() -> None:
+    doc = spacy.blank("de").make_doc("Otto Normal")
+    assert entity_tags(doc, officer_labels(doc.text, {"Erika Muster"})) is None
