@@ -59,8 +59,8 @@ TIMEOUT_S = 60
 MAX_FAILURES_IN_A_ROW = 3
 #: Berlin (Charlottenburg) in the portal's court list.
 BERLIN_COURT_CODE = "F1103"
-#: As `company_identifiers` holds it: "Berlin (Charlottenburg) HRB 136057".
-_IDENTIFIER = re.compile(r"^Berlin \(Charlottenburg\) (HRA|HRB|GnR|VR|PR|GsR) (\d+)$")
+#: As `company_identifiers` holds it: "Berlin (Charlottenburg) HRB 136057", or with the portal's " B".
+_IDENTIFIER = re.compile(r"^Berlin \(Charlottenburg\) (HRA|HRB|GnR|VR|PR|GsR) (\d+)( B)?$")
 #: Only words that say the status. "Geschlossenes Registerblatt" does not (see the docstring).
 _STATUSES = {"aktuell": ACTIVE, "gelöscht": DISSOLVED}
 _NUMBERED = re.compile(r"^\d+\.\)\s*")
@@ -122,7 +122,7 @@ def parse_results(html: str) -> list[Entry]:
 
 def entry_for(register: str, entries: list[Entry]) -> Entry | None:
     """The one entry with exactly this register number; None when there is none or more than one."""
-    same = [e for e in entries if e.register == register]
+    same = [e for e in entries if e.register.removesuffix(" B") == register.removesuffix(" B")]
     return same[0] if len(same) == 1 else None
 
 
@@ -172,16 +172,16 @@ def companies_to_look_up(cur: Any, source_id: str, limit: int) -> list[tuple[str
         JOIN public.companies c ON c.id = w.company_id AND c.merged_into IS NULL
         CROSS JOIN LATERAL (
           SELECT value FROM public.company_identifiers
-          WHERE company_id = w.company_id AND scheme = 'register' AND value LIKE 'Berlin (Charlottenburg) %%'
+          WHERE company_id = w.company_id AND scheme = 'register' AND value ~ %s
           ORDER BY created_at DESC LIMIT 1
         ) i
         LEFT JOIN public.company_source_records r ON r.company_id = w.company_id AND r.source_id = %s
         ORDER BY r.last_synced_at NULLS FIRST, w.company_id
         LIMIT %s
         """,
-        (source_id, limit),
+        (_IDENTIFIER.pattern, source_id, limit),
     )
-    return [(company_id, register) for company_id, register in cur.fetchall() if search_fields(register)]
+    return cur.fetchall()
 
 
 def planned_fields(entry: Entry) -> dict[str, str]:

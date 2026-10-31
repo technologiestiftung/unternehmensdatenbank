@@ -51,6 +51,8 @@ def test_only_the_exact_register_number_counts() -> None:
     entries = parse_results(PAGE)
     assert entry_for("Berlin (Charlottenburg) HRB 100001", entries).name == "Beispiel Technologies GmbH"
     assert entry_for("Berlin (Charlottenburg) HRB 1000", entries) is None
+    # register_announcements writes the portal's " B"; the result list may show the number without it.
+    assert entry_for("Berlin (Charlottenburg) HRB 100001 B", entries).name == "Beispiel Technologies GmbH"
     # Two entries with the same number: nobody can tell which, so neither is used.
     assert entry_for("Berlin (Charlottenburg) HRB 100001", entries + entries[:1]) is None
 
@@ -74,4 +76,4 @@ def test_status_words_map_to_ours_and_unknown_ones_write_nothing() -> None:
 def test_only_berlin_register_numbers_are_searched() -> None:
     assert search_fields("Berlin (Charlottenburg) VR 36945") == ("VR", "36945")
     assert search_fields("Hamburg HRB 192874") is None
-    assert search_fields("Berlin (Charlottenburg) HRB 136057 B") is None
+    assert search_fields("Berlin (Charlottenburg) HRB 136057 B") == ("HRB", "136057")
