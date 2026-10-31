@@ -77,3 +77,74 @@ def test_only_berlin_register_numbers_are_searched() -> None:
     assert search_fields("Berlin (Charlottenburg) VR 36945") == ("VR", "36945")
     assert search_fields("Hamburg HRB 192874") is None
     assert search_fields("Berlin (Charlottenburg) HRB 136057 B") == ("HRB", "136057")
+
+
+class FakeConnection:
+    """Enough of a psycopg2 connection for `run_lookups`: each `with` is one transaction."""
+
+    def __enter__(self):  # noqa: ANN204
+        return self
+
+    def __exit__(self, *_exc) -> None:  # noqa: ANN002
+        pass
+
+    def cursor(self):  # noqa: ANN201
+        return self
+
+    def close(self) -> None:
+        pass
+
+
+def run_with(monkeypatch, outcomes: list) -> tuple[list, list, dict]:  # noqa: ANN001
+    """`run_lookups` on ten companies, each search answering with the next outcome (a page or an error)."""
+    import handelsregister_lookup.main as lookup
+
+    events: list = []
+    finished: dict = {}
+    companies = [(f"c{i}", f"Berlin (Charlottenburg) HRB {100001 + i}") for i in range(10)]
+    answers = iter(outcomes)
+
+    def search(register: str) -> list:
+        events.append(("search", register))
+        answer = next(answers)
+        if isinstance(answer, Exception):
+            raise answer
+        return parse_results(answer)
+
+    monkeypatch.setattr(lookup, "get_connection", FakeConnection)
+    monkeypatch.setattr(lookup, "ensure_source", lambda *_a, **_k: "source")
+    monkeypatch.setattr(lookup, "start_sync_run", lambda *_a, **_k: "run")
+    monkeypatch.setattr(lookup, "companies_to_look_up", lambda _cur, _source, limit: companies[:limit])
+    monkeypatch.setattr(lookup, "look_up", search)
+    monkeypatch.setattr(lookup.time, "sleep", lambda s: events.append(("sleep", s)))
+    monkeypatch.setattr(lookup, "write_lookup", lambda _cur, **kw: len(planned_fields(kw["entry"])) if kw["entry"] else 0)
+    monkeypatch.setattr(lookup, "finish_sync_run", lambda _cur, **kw: finished.update(kw))
+    return events, companies, finished
+
+
+def test_every_search_waits_72_seconds_first(monkeypatch) -> None:  # noqa: ANN001
+    import handelsregister_lookup.main as lookup
+
+    events, _, finished = run_with(monkeypatch, [PAGE] + [page()] * 9)
+    written = lookup.run_lookups()
+    searches = [i for i, e in enumerate(events) if e[0] == "search"]
+    assert len(searches) == 10
+    assert all(events[i - 1] == ("sleep", 72.0) for i in searches)
+    assert lookup.MAX_LOOKUPS == 50
+    # Only HRB 100001 is in its result list (name, city, status); the other nine write no field.
+    assert written == 3
+    assert finished["records_created"] == 1 and finished["records_failed"] == 0
+
+
+def test_three_failures_in_a_row_end_the_run(monkeypatch) -> None:  # noqa: ANN001
+    import handelsregister_lookup.main as lookup
+
+    events, _, finished = run_with(
+        monkeypatch, [ConnectionError(), ConnectionError(), page(), ConnectionError(), ConnectionError(),
+                      ConnectionError(), page()],
+    )
+    lookup.run_lookups()
+    # Two failures, a success resets the count, then three in a row stop the run: 6 searches of 10.
+    assert sum(e[0] == "search" for e in events) == 6
+    assert finished["records_failed"] == 5
+    assert finished["records_seen"] == 10

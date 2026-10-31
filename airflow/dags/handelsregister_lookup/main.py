@@ -13,7 +13,8 @@ runs back to back stay at 50 an hour; a run takes about an hour. Which companies
 published website (about 6,200), never looked up first, then the longest ago. Three failed lookups in
 a row end the run: the portal may be blocking us, and asking again would make it worse.
 
-**What it writes.** One source record per company (`hr:<register number>`): name, seat, status and the
+**What it writes.** One source record per company (`hr:<register number>`, without Berlin's trailing " B",
+so both spellings update one record): name, seat, status and the
 former names the result list shows. `company_source_records` is not exposed through Hasura. From it,
 three register fields as observations, dated today (#49), so they beat the 2017–2019 OffeneRegister
 values by age: `name`, `city` (the seat) and `register_status`: `aktuell` is `active`, `gelöscht` is
