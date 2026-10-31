@@ -166,6 +166,7 @@ configured to override them. Columns 5 and 13 are vendor AI output and are check
 | OffeneRegister import | Handelsregister snapshot 2017–2019 | scripts, once | 296,486 Berlin companies |
 | `website_discovery` | URL patterns, Impressum and register check | DAG, priority 100 | 4,929 websites |
 | `wikidata` | official websites (P856) Wikidata lists for Berlin organisations, verified like a guessed domain | DAG, daily | 229 websites proven for 531 matched companies (local copy, 2026-10-30) |
+| `common_crawl` | Impressum pages in the Common Crawl that name a Berlin register number, verified like a guessed domain | DAG, weekly | pilot: 21 websites proven from 5,000 Impressum pages (#56) |
 | `website_contacts` | Impressum of the proven website | DAG | 27 emails, 25 phones from 37 websites; not shown |
 | `website_keywords` | services/products pages of the proven website | DAG | 22 of 37 websites gave candidates |
 | `manager_ner_extract` / `_train` | Impressum pages, app votes | DAGs, spaCy | measured on 222 Impressum pages |

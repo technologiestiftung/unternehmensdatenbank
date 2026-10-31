@@ -1,11 +1,13 @@
 """The building blocks that fill a company's fields from the open web. No API, no key, no bill.
 
-This package is a library, not a DAG. `website_discovery`, `wikidata`, `website_contacts`,
+This package is a library, not a DAG. `website_discovery`, `wikidata`, `common_crawl`, `website_contacts`,
 `website_keywords`, `technology_field`, `register_announcements` and `manager_ner` run it.
 
 Website discovery
   url_patterns.py     guess domains from the company name, check DNS, download the live ones
   wikidata.py         one SPARQL query: official websites (P856) of Berlin organisations
+  common_crawl.py     Impressum pages in the Common Crawl that name a Berlin register number
+  proposals.py        verify the websites such a source proposes, shared by both DAGs
   pipeline.py         runs the URL guesses for one company and merges what they say;
                       `verify_proposed` checks a URL another source proposes (Wikidata)
   confidence.py       the ONLY place that turns evidence into a number between 0 and 1

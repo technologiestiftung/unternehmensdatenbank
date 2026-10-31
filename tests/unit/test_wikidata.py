@@ -4,7 +4,8 @@ from __future__ import annotations
 
 from enrichment.confidence import METHOD_WIKIDATA, UNVERIFIED_CAP, WEBSITE_MIN_CONFIDENCE, score
 from enrichment.wikidata import parse, register_digits
-from wikidata.main import moved_from, unproven
+from enrichment.proposals import unproven
+from wikidata.main import moved_from
 
 
 def row(qid: str, website: str, label: str | None = None, register: str | None = None) -> dict:

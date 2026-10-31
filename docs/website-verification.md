@@ -94,6 +94,16 @@ Impressum pages carry managing-director names.
   bar. Measured on a copy of the Berlin database on 2026-10-30: 531 companies matched (31 by register
   number and name), 229 websites proven (209 by the register number on the page), 139 of them for
   companies discovery had found nothing for; 57 agreed with discovery's URL, 34 named another one.
+- **Common Crawl** (DAG `common_crawl`, #56) reads Impressum pages from the public web archive and
+  proposes a host to the company whose register number its Impressum names. A register number proves
+  the page is about the company, so each host is checked again like a guessed domain (method
+  `common_crawl`, the URL-pattern base, not the OSM one: no curated record proposed it). Pilot on
+  2026-10-30, 5,000 of 33,465 Impressum hosts of one index file: 57 hosts for companies without a
+  website, 21 companies proven, all by the own register number; 7 of them discovery had checked and
+  missed. Refused: institute subdomains, a film distributor's film sites, a newspaper's subscription shop.
+  End to end on a copy of the Berlin database (CC-MAIN-2026-43, 2026-10-30): 640 of 38,118 `.de`
+  index blocks, 6,706 Impressum pages, 154 proposals, 50 companies proven (42 had no website); all
+  by the own register number. Roughly 3,000 per crawl if the rest of `.de` is alike.
   Shown websites went from 6,015 to 6,229. No result was hand-checked. The page, not the match,
   proves a website: an item that stops matching keeps its record, inactive, and is still checked
   every 90 days. A URL drops to 0 only when no Wikidata record of that company still proves it
