@@ -14,7 +14,7 @@ Which source fills which column: [docs/target-columns.md](docs/target-columns.md
 | | version | role |
 |---|---|---|
 | Postgres | 15 + PostGIS + pgvector | the data |
-| Airflow | 3.2.0 | pipelines |
+| Airflow | 3.3.2 | pipelines |
 | Flyway | 12 | migrations, shipped as an image ([release](docs/release.md)) |
 | Python | 3.12 | DAG code |
 | Keycloak · Hasura · RustFS (S3) | 26.8 · 2.51 · 1.0 | the hub's services, profile `datahub` ([emulation](docs/datahub-emulation.md)) |

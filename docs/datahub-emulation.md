@@ -9,7 +9,7 @@ them. This repo runs the same pieces locally, so "works here" means "works on th
 | Postgres **15** with PostGIS and pgvector | the same, from `postgres:15` | `postgres/Dockerfile` |
 | one database per environment | `unternehmensdatenbank` (one environment locally) | `postgres/init/01-create-databases.sh` |
 | owner, writer, reader login per database | `app`, `writer`, `reader` | same file; grants in the baseline |
-| Airflow (add-on, default 3.3.2) | Airflow 3.2.0 | `docker-compose.yml` |
+| Airflow (add-on, default 3.3.2) | Airflow 3.3.2 | `docker-compose.yml` |
 | Keycloak 26 (realm `tsb-prd`) | Keycloak 26.8.1, realm `datahub` | `keycloak/datahub-realm.json` |
 | Hasura v2 | Hasura v2.51.3 | `hasura/metadata/` |
 | MinIO (S3) | RustFS, same S3 API | `s3` service |

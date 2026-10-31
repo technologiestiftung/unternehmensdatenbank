@@ -24,7 +24,7 @@ orchestrates, Flyway owns all schema, Python writes with psycopg2. It runs on th
 142,571 active then). The final source is Fusionbase (not delivered yet). The numbers in the rule
 docs were measured on the removed Osnabrück data; the rules still apply.
 
-Postgres 15 + PostGIS (port **5433**) · Airflow 3.2.0 (Airflow 3 API: `airflow.providers.standard`,
+Postgres 15 + PostGIS (port **5433**) · Airflow 3.3.2 (Airflow 3 API: `airflow.providers.standard`,
 not `airflow.operators`) · Flyway 12.
 
 ## Commands and access
