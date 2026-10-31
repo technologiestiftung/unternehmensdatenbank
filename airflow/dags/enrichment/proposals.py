@@ -2,7 +2,7 @@
 
 Shared by `wikidata` and `common_crawl`. Each match is a source record whose payload lists the
 proposed `websites`. `verify_batch` checks them with `pipeline.verify_proposed`, the same page
-reading and `confidence.score` as an OSM website tag, and files every answer as an observation of
+reading and `confidence.score` as a guessed domain, and files every answer as an observation of
 that source. The page, not the match, proves a website.
 
 A website drops to confidence 0 only when no record of the source for that company still proves it

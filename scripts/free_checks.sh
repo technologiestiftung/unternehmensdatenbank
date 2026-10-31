@@ -1,5 +1,5 @@
 #!/bin/sh
-# The free checks: ruff, the unit tests and the seven rule guards. No database, no network, no
+# The free checks: ruff, the unit tests and the six rule guards. No database, no network, no
 # model. The one list for every caller, so they cannot drift: `.no-mistakes.yaml` runs it in a
 # python:3.12-slim container, `.github/workflows/checks.yml` on the CI runner, and the two Claude
 # hooks read the guard lines below (the edit hook) or run the whole script (the commit hook).
