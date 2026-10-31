@@ -115,7 +115,7 @@ Read [website-verification](docs/website-verification.md) before touching `confi
 - **`enrichment/observations.py` is the write path for discovery.** `sorted()` the `evidence` set
   before `Json()`.
 - Search-engine discovery was measured and removed; a new search source must feed the same
-  verification and `confidence.py`, as `wikidata` does (`pipeline.verify_proposed`). The OpenStreetMap step is off (`WEBSITE_DISCOVERY_OSM=false`).
+  verification and `confidence.py`, as `wikidata` does (`pipeline.verify_proposed`). The OpenStreetMap step was removed (#57).
 
 ## Industry classification: THREE columns, never mixed
 
@@ -164,7 +164,7 @@ hub as the app's initContainer ([release](docs/release.md)).
 
 ## Checks
 
-`scripts/free_checks.sh`: ruff, unit tests, seven guards. No database, network or model. CI,
+`scripts/free_checks.sh`: ruff, unit tests, six guards. No database, network or model. CI,
 no-mistakes and both Claude hooks run it ([guards-and-tests](docs/guards-and-tests.md)).
 
 1. **Import the rule a guard checks, never restate it.**

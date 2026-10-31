@@ -69,8 +69,7 @@ extra suspicion.
   company it lists.
 - **A lifted refusal must not stop the page being read.** Otherwise the company's own register number
   further down the page is never seen.
-- **Phone** is scored against the number OpenStreetMap holds for the business. **Email** and **VAT ID**
-  only say "a real business site" and cannot lift the cap.
+- **Email** and **VAT ID** only say "a real business site" and cannot lift the cap.
 
 ## Pages are cached, so extraction changes are cheap to try
 
@@ -100,8 +99,9 @@ Impressum pages carry managing-director names.
   every 90 days. A URL drops to 0 only when no Wikidata record of that company still proves it
   (`proven_urls` in the record): its page stopped naming the company, or its item now matches
   another company.
-- **OpenStreetMap** stays in code but is off (`WEBSITE_DISCOVERY_OSM=false`): the public
-  overpass-api.de refused our requests, and it found 3 websites in 1,000 active Berlin companies.
+- **OpenStreetMap** was removed on 2026-10-30 (#57): the public overpass-api.de refused our
+  requests, and it found 3 websites in 1,000 active Berlin companies. Its scoring stays in
+  `confidence.py` (Wikidata starts from the same base, and stored rows keep their evidence).
 
 ## Not known yet
 

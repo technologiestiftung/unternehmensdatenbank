@@ -1,18 +1,10 @@
-"""Run the two methods for one company and merge what they say into one answer.
+"""Guess a company's website and check what each guess says about the company.
 
-The merge is the point of this file. Both methods propose URLs; the same URL proposed
-twice is worth more than two URLs proposed once. So results are grouped by **origin** — the
-`https://host` part of a URL, with the page path thrown away — and a URL's evidence is the
-union of everything both methods learned about it.
-
-Order of work, and why:
-
-1. **URL patterns first.** It costs one DNS lookup per guess and a handful of page fetches.
-   It is the only method that downloads the company's own page, so it is the only one that
-   can produce hard proof.
-2. **OSM second.** One query to a shared public service that rate-limits, so it is the slow
-   one. It runs for every company anyway, not only the ones step 1 missed, because an OSM
-   entry agreeing with a guessed domain is what turns a guess into a strong answer.
+URL patterns, from the current name and then the former ones, cost one DNS lookup per guess and a
+handful of page fetches. Results are grouped by **origin** — the `https://host` part of a URL, with
+the page path thrown away — and a URL's evidence is the union of everything learned about it.
+`verify_proposed` checks a URL another source proposed (Wikidata, Common Crawl) the same way.
+The OpenStreetMap step was removed on 2026-10-30 (#57): it found 3 websites in 1,000 companies.
 
 Every URL that any method proposed is kept, not only the winner. A rejected URL with its
 reason is worth more than a blank cell when you are trying to work out why coverage is what
@@ -35,7 +27,6 @@ from enrichment.url_scorer import name_uniqueness
 from enrichment import confidence as conf
 from enrichment import (
     name_frequency,
-    osm_lookup,
     page_cache,
     structured_data,
     url_patterns,
@@ -69,11 +60,6 @@ class UrlAnswer:
     pattern: str | None = None
     imprint_url: str | None = None
     register_number_seen: str | None = None
-    #: The phone number printed on this page's Impressum, as written. Carried rather than turned
-    #: into evidence on the spot, because what it has to be compared against — the number
-    #: OpenStreetMap holds for this business — is not known until stage 2 has run, and stage 1
-    #: reads pages before that.
-    imprint_phone: str | None = None
     verdict: conf.Verdict | None = None
 
 
@@ -101,15 +87,6 @@ class CompanyResult:
     candidates_resolved: int = 0
     candidates_probed: int = 0
     parked_rejected: int = 0
-    osm_objects_seen: int = 0
-    osm_id: str | None = None
-    osm_match_score: float | None = None
-    osm_website: str | None = None
-    osm_phone: str | None = None
-    #: The part of the map object's email AFTER the @, e.g. `stallkamp.de` — never the address
-    #: itself. A business email domain is usually the business's website, so it is worth keeping;
-    #: the local part can be a person's name, and this file gets emailed around.
-    osm_email_domain: str | None = None
     answers: list[dict[str, Any]] = field(default_factory=list)
     elapsed_s: float = 0.0
     errors: list[str] = field(default_factory=list)
@@ -119,30 +96,6 @@ def _digits(text: str | None) -> str:
     """The number out of a register string. "Amtsgericht Osnabrück HRB 213220" -> "213220"."""
     match = re.search(r"\d+", text or "")
     return match.group(0) if match else ""
-
-
-#: How many trailing digits of two phone numbers have to agree. German subscriber numbers are
-#: usually six to eight digits after the area code, so seven is enough to identify a line while
-#: still allowing every way the same number gets written.
-_PHONE_TAIL_DIGITS = 7
-
-
-def _same_phone(left: str | None, right: str | None) -> bool:
-    """Do these two strings name the same telephone line?
-
-    Compared on their last seven digits, because the same number is written every possible way:
-    `+49 541 7607780`, `0541/760 77 80`, `(0541) 7607780`. Country code and trunk prefix are exactly
-    the parts that differ — `+49 541` and `0541` are the same city — so a comparison anchored at the
-    front would call two spellings of one number a mismatch.
-
-    Both sides need at least seven digits. A page printing `Tel. 12345` is not evidence of anything,
-    and a short number would match far too much.
-    """
-    left_digits = re.sub(r"\D", "", left or "")
-    right_digits = re.sub(r"\D", "", right or "")
-    if len(left_digits) < _PHONE_TAIL_DIGITS or len(right_digits) < _PHONE_TAIL_DIGITS:
-        return False
-    return left_digits[-_PHONE_TAIL_DIGITS:] == right_digits[-_PHONE_TAIL_DIGITS:]
 
 
 def _host_is_exact_name(url: str, company_name: str) -> bool:
@@ -414,9 +367,8 @@ def _fetch_and_read(url: str) -> tuple[str, dict[str, Any] | None, str | None]:
 
     Returns (page html, extracted fields, imprint url).
 
-    Used for URLs that a method proposed without downloading them — an OSM `website` tag or a
-    mapped business's email domain. Downloading is what lets those be verified rather than
-    merely believed.
+    Used for URLs another source proposed without downloading them (`verify_proposed`).
+    Downloading is what lets those be verified rather than merely believed.
     """
     probe = url_patterns.probe(url)
     if not probe or probe.status_code == 0 or probe.status_code >= 400 or probe.parked:
@@ -428,14 +380,6 @@ def _fetch_and_read(url: str) -> tuple[str, dict[str, Any] | None, str | None]:
     return probe.html, extracted, imprint_url
 
 
-def _remember_phone(entry: UrlAnswer, extracted: dict[str, Any] | None) -> None:
-    """Keep the Impressum's phone number for the merge step.
-
-    It cannot become evidence here because the thing it is compared against comes from
-    OpenStreetMap, which has not been consulted yet when stage 1 reads its pages.
-    """
-    if extracted and not entry.imprint_phone:
-        entry.imprint_phone = extracted.get("phone")
 
 
 def _answer_dict(a: UrlAnswer) -> dict[str, Any]:
@@ -457,7 +401,7 @@ def _answer_dict(a: UrlAnswer) -> dict[str, Any]:
 def verify_proposed(
     company: Any, urls: list[str], *, method: str, common: set[str] | frozenset[str] = frozenset()
 ) -> list[dict[str, Any]]:
-    """Check URLs another source proposed for this company, exactly as an OSM `website` tag is checked.
+    """Check URLs another source proposed for this company (Wikidata, Common Crawl).
 
     Download the page and its Impressum, read what the page says about the company, and score it with
     `confidence.score`: never a scorer of its own (CLAUDE.md). A proposal nothing on the page ties to
@@ -484,11 +428,7 @@ def discover(
     company: Any,
     *,
     use_url_patterns: bool = True,
-    use_osm: bool = True,
-    osm_cache: osm_lookup.OsmCache | None = None,
-    osm_snapshot: Any | None = None,
     common_words: set[str] | frozenset[str] = frozenset(),
-    mail_hosts: set[str] | frozenset[str] = frozenset(),
 ) -> CompanyResult:
     """Run the enabled methods for one company and return one merged answer.
 
@@ -496,12 +436,6 @@ def discover(
     identify one of them — `name_frequency.common_words` over the whole table. It decides whether
     a domain names an industry or a business. Passing nothing still works and falls back to the
     short hand-written list in `url_patterns.GENERIC_WORDS`.
-
-    `mail_hosts` is the same idea for email addresses — `name_frequency.common_email_domains` over
-    the city snapshot. It decides whether a mapped business's email domain is that business's own
-    or its internet provider's. Passing nothing means no email domain is ever refused, so pass it
-    whenever a snapshot exists: the top domain in Osnabrück is a local provider used by 23 mapped
-    businesses, and taking it as a website would give 23 companies the same wrong answer.
     """
     common = common_words
     started = time.monotonic()
@@ -558,97 +492,15 @@ def discover(
                     entry.evidence |= evidence
                     entry.imprint_url = entry.imprint_url or imprint_url
                     entry.register_number_seen = entry.register_number_seen or register_seen
-                    _remember_phone(entry, extracted)
                     host = (urlparse(probe.url).hostname or "").lower()
                     pattern = found.pattern_by_host.get(host)
                     entry.pattern = entry.pattern or (label + pattern if pattern else None)
             except Exception as exc:  # noqa: BLE001
                 result.errors.append(f"url_patterns: {type(exc).__name__}: {exc}")
 
-    # ---- 2. OpenStreetMap ----------------------------------------------------------------
-    if use_osm:
-        try:
-            # A city-wide snapshot answers offline and is preferred whenever one was loaded. The
-            # per-company Overpass query stays as the fallback so this module still works with no
-            # snapshot at all.
-            if osm_snapshot is not None:
-                match, seen = osm_lookup.lookup_in_snapshot(company, osm_snapshot)
-            else:
-                match, seen = osm_lookup.lookup(company, osm_cache)
-            result.osm_objects_seen = seen
-            if match:
-                result.osm_id = match.osm_id
-                result.osm_match_score = match.match_score
-                result.osm_website = match.website
-                result.osm_phone = match.phone
-                result.osm_email_domain = name_frequency.email_domain(match.email)
-            if match and match.website:
-                origin = origin_url(match.website)
-                known = origin in answers
-                if not known:
-                    # Not seen by the guesser, so nothing has downloaded it yet.
-                    html, extracted, imprint_url = _fetch_and_read(match.website)
-                    evidence, register_seen = _page_evidence(
-                        match.website, company, html=html, extracted=extracted, common=common
-                    )
-                    entry = answer_for(match.website)
-                    entry.evidence |= evidence
-                    entry.imprint_url = entry.imprint_url or imprint_url
-                    entry.register_number_seen = entry.register_number_seen or register_seen
-                    _remember_phone(entry, extracted)
-                else:
-                    entry = answer_for(match.website)
-                entry.methods.append(conf.METHOD_OSM)
-                if match.strong:
-                    entry.evidence.add(conf.OSM_STRONG_MATCH)
-
-            # The mapped business's email domain, checked as a website in its own right. A business
-            # that writes `info@stallkamp.de` is telling you stallkamp.de is theirs, and it says so
-            # without anybody having guessed at the name — which is the whole value of it, since
-            # every other route into this pipeline starts from the name.
-            #
-            # Only for a STRONG match. A weak one agreed on the name alone, and acting on the
-            # contact details of a business we are not sure is this one is how you publish somebody
-            # else's address.
-            if match and match.strong and result.osm_email_domain:
-                if result.osm_email_domain in mail_hosts:
-                    log.debug(
-                        "email domain %s is shared by several businesses — not a website",
-                        result.osm_email_domain,
-                    )
-                else:
-                    email_site = f"https://{result.osm_email_domain}"
-                    if origin_url(email_site) not in answers:
-                        html, extracted, imprint_url = _fetch_and_read(email_site)
-                        evidence, register_seen = _page_evidence(
-                            email_site, company, html=html, extracted=extracted, common=common
-                        )
-                        entry = answer_for(email_site)
-                        entry.evidence |= evidence
-                        entry.imprint_url = entry.imprint_url or imprint_url
-                        entry.register_number_seen = entry.register_number_seen or register_seen
-                        _remember_phone(entry, extracted)
-                        entry.methods.append(conf.METHOD_OSM)
-                        entry.evidence.add(conf.OSM_EMAIL_DOMAIN)
-                        entry.evidence.add(conf.OSM_STRONG_MATCH)
-        except Exception as exc:  # noqa: BLE001
-            result.errors.append(f"osm: {type(exc).__name__}: {exc}")
-
-    # ---- 3. Merge and score --------------------------------------------------------------
+    # ---- 2. Score --------------------------------------------------------------
     uniqueness = name_uniqueness(company.company_name)
     for entry in answers.values():
-        # Two independent records of this company agreeing on a phone number. Decided here rather
-        # than while reading the page, because the map entry is not known until stage 2 has run and
-        # stage 1 reads its pages before that. Only for a strong map match: a weak one agreed on the
-        # name alone, and the phone number of a business we are not sure is this one proves nothing.
-        if (
-            result.osm_phone
-            and result.osm_match_score
-            and result.osm_match_score >= osm_lookup.STRONG_MATCH_SCORE
-            and _same_phone(entry.imprint_phone, result.osm_phone)
-        ):
-            entry.evidence.add(conf.PHONE_MATCHES_OSM)
-
         distinct = set(entry.methods)
         if len(distinct) >= 3:
             entry.evidence.add(conf.AGREE_THREE)

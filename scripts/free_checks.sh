@@ -14,4 +14,3 @@ python scripts/check_branch_observations.py
 python scripts/check_website_discovery.py
 python scripts/check_own_site_filter.py
 python scripts/check_imprint_owner_extraction.py
-python scripts/check_osm_match.py

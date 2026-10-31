@@ -10,7 +10,7 @@ hand-labelled.
 
 ## One list, four callers
 
-`scripts/free_checks.sh` runs ruff, the unit tests and the seven guards. **Add a check there, never
+`scripts/free_checks.sh` runs ruff, the unit tests and the six guards. **Add a check there, never
 to a caller**, or the callers drift apart.
 
 | caller | how |
@@ -20,7 +20,7 @@ to a caller**, or the callers drift apart.
 | commit hook (`run_checks_before_commit.py`) | the whole script, before Claude commits |
 | edit hook (`guard_after_edit.py`) | ruff on the edited file, then the guard lines |
 
-## The seven guards
+## The six guards
 
 | guard | defends |
 |---|---|
@@ -30,7 +30,6 @@ to a caller**, or the callers drift apart.
 | `check_website_discovery.py` | URL guessing, the confidence ladder, `_page_evidence`, JSON-LD, postcodes, register numbers |
 | `check_own_site_filter.py` | real URLs: directories, registers and portals are never a company's own site |
 | `check_imprint_owner_extraction.py` | real Impressum layouts guarding the Geschäftsführer regex |
-| `check_osm_match.py` | hand-checked OpenStreetMap matches guarding `osm_snapshot` |
 
 **Two rules for a guard**, both learned the hard way:
 

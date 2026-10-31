@@ -7,7 +7,7 @@ Each run does two things, then lets `pipeline_coordinator` publish the result:
    longer qualifies drops to `UNVERIFIED_CAP`, below the bar, and the coordinator un-publishes it.
    This is how the rule of 2026-10-28 reaches the websites found before it. Cheap and idempotent.
 2. **discover.** One batch of companies this source has not looked at yet: guess domains from the
-   name and up to 3 former names (`url_patterns`), optionally match OpenStreetMap, download the
+   name and up to 3 former names (`url_patterns`), download the
    page and its Impressum, and check whose they are, including whether a Geschäftsführer on the
    Impressum is one of the company's register officers. Every candidate URL is stored; only a proven one can become the
    company's website.
@@ -50,9 +50,6 @@ log = logging.getLogger(__name__)
 
 DAG_ID = "website_discovery"
 BATCH_SIZE = int(os.getenv("WEBSITE_DISCOVERY_BATCH_SIZE", "50"))
-#: OpenStreetMap found 3 websites in 1,000 active Berlin companies and needs a city snapshot on
-#: disk, which a hub pod does not keep. Off unless asked for.
-USE_OSM = os.getenv("WEBSITE_DISCOVERY_OSM", "false").strip().lower() in {"1", "true", "yes"}
 #: Companies checked at once. One company is ~11 s, almost all of it waiting on other servers, so
 #: threads help; each company's domains are different hosts, so no one server sees more traffic.
 WORKERS = int(os.getenv("WEBSITE_DISCOVERY_WORKERS", "8"))
@@ -145,14 +142,13 @@ def run_discover() -> int:
             former_names = load_former_names(cur, [c.id for c in companies])
             common = _common_words(cur)
 
-        stages = {"url"} | ({"osm"} if USE_OSM else set())
-        skip = {} if USE_OSM else {"osm": "WEBSITE_DISCOVERY_OSM is off"}
+        stages = {"url"}
         found = errors = 0
         prepared = [dataclasses.replace(c, officers=officers.get(c.id, frozenset()), former_names=former_names.get(c.id, ()))
                     for c in companies]
         # Pages are fetched in threads; every write stays on this thread and its one connection.
         with ThreadPoolExecutor(max_workers=WORKERS) as pool:
-            jobs = {pool.submit(pipeline.discover, c, use_osm=USE_OSM, common_words=common): c
+            jobs = {pool.submit(pipeline.discover, c, common_words=common): c
                     for c in prepared}
             for job in as_completed(jobs):
                 company = jobs[job]
@@ -169,7 +165,7 @@ def run_discover() -> int:
                 with connection, connection.cursor() as cur:
                     write_company_result(cur, company=company, result=dataclasses.asdict(result),
                                          source_id=source_id, sync_run_id=sync_run_id,
-                                         stages_run=stages, skip_reasons=skip)
+                                         stages_run=stages)
 
         with connection, connection.cursor() as cur:
             finish_sync_run(cur, sync_run_id=sync_run_id, records_seen=len(companies),
