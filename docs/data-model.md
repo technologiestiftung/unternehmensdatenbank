@@ -97,16 +97,16 @@ python scripts/import_register_managers.py
 `V1__baseline.sql` is the whole schema as of 2026-10-28; everything before it was squashed while
 nothing was deployed. `V2__source_overview.sql`, `V3__register_fields_as_observations.sql`,
 `V4__user_feedback_source.sql`, `V5__profile_cleanup_tags_english.sql`, `V6__source_dates.sql`,
-`V7__register_number_from_identifiers.sql`, `V8__company_history.sql` and
-`V9__company_documents.sql` came after. Forward-only from here: never edit a migration that has
+`V7__register_number_from_identifiers.sql`, `V8__company_history.sql`, `V9__company_documents.sql`
+and `V10__review_sample.sql` came after. Forward-only from here: never edit a migration that has
 run anywhere shared, add new ones as `V{N}__description.sql`, and run Flyway before Airflow
 touches the changed schema.
 The headings below keep the pre-squash migration numbers (V3–V10) so git history finds the reasoning.
 
 **A local database migrated before the squash** still has the old files in its Flyway history, and
-Flyway refuses to run until that is reset. Only for a database with every migration up to V10
-applied (`flyway info`); one without V10 lacks the two `register_announcement` columns, so build it
-fresh:
+Flyway refuses to run until that is reset. Only for a database with every pre-squash migration up to
+the old V10 applied (`flyway info`); one without it lacks the two `register_announcement` columns, so
+build it fresh:
 
 ```bash
 docker compose exec -T postgres psql -U app -d unternehmensdatenbank -c "DROP TABLE flyway_schema_history"
@@ -151,6 +151,21 @@ re-read); a correction is dated by the newest vote behind it.
 Tested on a copy of the Berlin database on 2026-10-29: a new address read that day at 0.8 replaced
 the register's 2018 address at 1.0 (worth about 0.3 after decay); a source name read a day before
 two people's correction did not replace it, one read after it did.
+
+## Review sample (`V10__review_sample.sql`)
+
+Nothing had been checked by a person: every confidence and threshold here is a starting value.
+`review_sample` is a **fixed** set of active companies people check in the app (list filter
+"Stichprobe", then the usual ✓/✗), stratified so every kind of value is judged: 25 with a technology field,
+40 with a website (and no technology field), 20 with managers, 15 with register data only. The
+technology field is checked first: it needs a website, so a website-first order would leave it only
+companies whose website was later dropped. Drawn in a stable random
+order, not by low confidence, which would make every source look worse than it is.
+`draw_review_sample()` only tops a stratum up, never replaces anyone; `pipeline_coordinator` calls it
+on every run, before the profile refresh, so the technology-field stratum fills once companies are classified.
+`v_review_results` gives the precision per field and stratum of the values shown **now**: a vote on a
+value that was since replaced no longer counts, and each value gets one verdict by majority of its
+votes (a tie is left out), so two voters do not count twice.
 
 ## Company corpus (V9, #61)
 
@@ -281,7 +296,7 @@ Two DAGs read more from a website `website_discovery` has proven to be the compa
 Both read each company once. A failed read is stored with `failed: true` and an `attempts` count and
 retried on later runs, 3 times at most; it counts for nothing, including the 500.
 
-## Register announcements (V10)
+## Register announcements (pre-squash V10)
 
 `register_announcements` reads Berlin's register announcements from handelsregister.de weekly. The
 court keeps each up for 8 weeks, so a weekly run misses none. It reads only the result list

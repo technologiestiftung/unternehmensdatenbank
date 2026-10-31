@@ -1,0 +1,17 @@
+table:
+  name: v_review_results
+  schema: public
+configuration:
+  custom_name: review_results
+select_permissions:
+  # Read-only: hand-checked precision per field and stratum, from votes on the sample.
+  - role: user
+    permission:
+      columns:
+        - stratum
+        - field_name
+        - companies_judged
+        - correct
+        - wrong
+        - precision
+      filter: {}
