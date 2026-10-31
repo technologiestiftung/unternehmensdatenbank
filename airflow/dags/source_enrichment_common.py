@@ -399,7 +399,7 @@ def insert_text_observation(
     four days on 2026-09-03.
 
     The predicate below must stay identical to the index predicate of `uq_obs_company_field_source_value`
-    in the newest migration that creates it (V3). Widen one and you widen
+    in `V1__baseline.sql` (added in V3 before the squash). Widen one and you widen
     the other, in the same commit — Postgres infers the partial index from this predicate, so a
     field name present in one and absent from the other cannot be upserted at all.
 
