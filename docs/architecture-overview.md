@@ -173,6 +173,7 @@ configured to override them. Columns 5 and 13 are vendor AI output and are check
 | `foerderkatalog` | Förderkatalog des Bundes | DAG, monthly | grants table |
 | `berlin_zuwendungen` | Zuwendungsdatenbank Berlin | DAG, monthly | 18,436 grants to 3,868 companies |
 | `register_announcements` | handelsregister.de | DAG, weekly | 900 announcements in 8 weeks; 411 companies created |
+| `handelsregister_lookup` | handelsregister.de search, one company per query (#66) | DAG, started by hand only, ≤50 an hour | name, seat, status of 2 test companies (2026-10-31) |
 | `feedback_observations` | corrections typed in the app | DAG, hourly, priority 50 | shown once two people agree |
 | `pipeline_coordinator` | all of the above | DAG | picks the winning values |
 | Technologiefeld | website text | DAG `technology_field` (#62) | none |
