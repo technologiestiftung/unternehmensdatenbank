@@ -118,8 +118,9 @@ GENERIC_HOST = "host_is_an_industry_not_a_company"
 #: Methods, strongest first. The base is set by the strongest method that proposed the URL.
 METHOD_URL_PATTERN = "url_pattern"
 METHOD_OSM = "osm"
-#: A website Wikidata lists for the company (property P856, issue #26). Trusted like an OSM website
-#: tag: a curated record proposed it, but it may be dead or hijacked, so only the page can prove it.
+#: A website Wikidata lists for the company (property P856, issue #26). Trusted as a curated record
+#: (base BASE_OSM, named after the removed OSM step): a curated record proposed it, but it may be dead
+#: or hijacked, so only the page can prove it.
 METHOD_WIKIDATA = "wikidata"
 #: A domain whose Impressum in the Common Crawl names the company's register number (issue #56). Not a
 #: curated record, so it starts like a guessed domain: a register number proves a page is ABOUT the
