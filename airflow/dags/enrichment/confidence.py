@@ -121,6 +121,10 @@ METHOD_OSM = "osm"
 #: A website Wikidata lists for the company (property P856, issue #26). Trusted like an OSM website
 #: tag: a curated record proposed it, but it may be dead or hijacked, so only the page can prove it.
 METHOD_WIKIDATA = "wikidata"
+#: A domain whose Impressum in the Common Crawl names the company's register number (issue #56). Not a
+#: curated record, so it starts like a guessed domain: a register number proves a page is ABOUT the
+#: company, and only the page read again can prove it is the company's own.
+METHOD_COMMON_CRAWL = "common_crawl"
 
 # ---------------------------------------------------------------------------------------
 # The weights. Every one of these is a judgement call, not a measurement. They are grouped so
@@ -415,7 +419,7 @@ def score(
     """
     evidence_set = set(evidence)
     ordered_methods = [
-        m for m in (METHOD_URL_PATTERN, METHOD_OSM, METHOD_WIKIDATA) if m in methods
+        m for m in (METHOD_URL_PATTERN, METHOD_OSM, METHOD_WIKIDATA, METHOD_COMMON_CRAWL) if m in methods
     ]
 
     for name, reason in _DISQUALIFIERS.items():

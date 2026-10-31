@@ -1,6 +1,6 @@
 # DAGs
 
-Eleven DAG packages and one library. Every DAG starts paused (Airflow's default,
+Twelve DAG packages and one library. Every DAG starts paused (Airflow's default,
 `dags_are_paused_at_creation`); unpausing it in Airflow is the only switch.
 
 | package | DAG id | schedule | what it does |
@@ -8,6 +8,7 @@ Eleven DAG packages and one library. Every DAG starts paused (Airflow's default,
 | `pipeline_coordinator/` | `pipeline_coordinator` | triggered | the ONLY thing that decides which observation wins a field |
 | `website_discovery/` | `website_discovery` | `@hourly`, a full batch starts the next | guesses domains, reads the Impressum, keeps only websites the page proves are the company's (`confidence.identifies_company`). Rechecks after `WEBSITE_DISCOVERY_RECHECK_DAYS` (90). |
 | `wikidata/` | `wikidata` | `@daily`, a full batch starts the next | websites Wikidata lists for Berlin organisations (one SPARQL query a day, CC0), matched by register number and name or a unique name of a company that is not dissolved, each verified like a guessed domain (`pipeline.verify_proposed`); only a page that identifies the company is shown |
+| `common_crawl/` | `common_crawl` | `@weekly`, a full batch starts the next | Impressum pages of the newest Common Crawl that name a Berlin register number: 300 `.de` index blocks a run, position in `pipeline_state`; each host proposed to the company whose register identifier it names and verified like a guessed domain (`enrichment.proposals`) |
 | `website_contacts/` | `website_contacts` | triggered | the company's own `info@`-style email and phone from the Impressum of its proven website (source `impressum_contacts`). Stored, never resolved, so never shown. A failed read is retried, 3 times at most |
 | `website_keywords/` | `website_keywords` | triggered | keywords from meta tags and services/products headings; generic ones measured out over all companies read; publishes `activity_keywords` once 500 companies are read; retried 3 times at most |
 | `technology_field/` | `technology_field` | triggered | Berlin's Technologiefeld from the keywords on the homepage and services pages (`branch_classifier`); keywords weighed over all companies read, so every run classifies them all again; writes once 500 companies are read; a value a company loses drops to confidence 0; retried 3 times at most. Where no keyword fired, a promoted text classifier may fill the field (`decided_by = textcat`) |
