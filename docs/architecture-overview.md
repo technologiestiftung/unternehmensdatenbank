@@ -63,7 +63,7 @@ comments. Dashed lines are planned.
 
 | Piece | Lives in | Runs on |
 |---|---|---|
-| Database schema (`db/migrations/`, V1 baseline + V2) | this repo | hub Postgres, via the migration image |
+| Database schema (`db/migrations/`, one V1 baseline) | this repo | hub Postgres, via the migration image |
 | Pipelines (`airflow/dags/`, `scripts/`) | this repo | hub Airflow; every task a pod from our pipelines image |
 | GraphQL API and permissions (`hasura/metadata/`) | this repo | hub Hasura |
 | Login realm, local reference (`keycloak/`) | this repo | hub Keycloak |

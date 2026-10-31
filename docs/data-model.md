@@ -94,19 +94,17 @@ python scripts/import_register_managers.py
 
 ## Migration strategy
 
-`V1__baseline.sql` is the whole schema as of 2026-10-28; everything before it was squashed while
-nothing was deployed. `V2__source_overview.sql`, `V3__register_fields_as_observations.sql`,
-`V4__user_feedback_source.sql`, `V5__profile_cleanup_tags_english.sql`, `V6__source_dates.sql`,
-`V7__register_number_from_identifiers.sql`, `V8__company_history.sql`, `V9__company_documents.sql`
-and `V10__review_sample.sql` came after. Forward-only from here: never edit a migration that has
-run anywhere shared, add new ones as `V{N}__description.sql`, and run Flyway before Airflow
-touches the changed schema.
-The headings below keep the pre-squash migration numbers (V3–V10) so git history finds the reasoning.
+`V1__baseline.sql` is the whole schema as of 2026-10-31, squashed four times: the Osnabrück era,
+V1-V9 and V10 on 2026-10-28, V1-V10 on 2026-10-31 (#68). Forward-only from here: never edit a
+migration that has run anywhere shared, add new ones as `V{N}__description.sql` (the next is V2), and
+run Flyway before Airflow touches the changed schema.
+The headings below and comments in the code keep the pre-squash migration numbers ("V3", "V10") so
+git history finds the reasoning.
 
-**A local database migrated before the squash** still has the old files in its Flyway history, and
-Flyway refuses to run until that is reset. Only for a database with every pre-squash migration up to
-the old V10 applied (`flyway info`); one without it lacks the two `register_announcement` columns, so
-build it fresh:
+**A database migrated before the squash** (local, play) still has the old files in its Flyway
+history, and Flyway refuses to run until that is reset. No data moves. Only for a database with
+every pre-squash migration up to V10 applied (`flyway info`, the last one `review sample`); migrate
+an older one to V10 with the pre-squash files first (git history), or build it fresh:
 
 ```bash
 docker compose exec -T postgres psql -U app -d unternehmensdatenbank -c "DROP TABLE flyway_schema_history"
@@ -152,7 +150,7 @@ Tested on a copy of the Berlin database on 2026-10-29: a new address read that d
 the register's 2018 address at 1.0 (worth about 0.3 after decay); a source name read a day before
 two people's correction did not replace it, one read after it did.
 
-## Review sample (`V10__review_sample.sql`)
+## Review sample (V10 before the squash)
 
 Nothing had been checked by a person: every confidence and threshold here is a starting value.
 `review_sample` is a **fixed** set of active companies people check in the app (list filter

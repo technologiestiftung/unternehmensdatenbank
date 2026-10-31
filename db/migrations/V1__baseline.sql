@@ -1,34 +1,79 @@
--- Baseline: the whole schema as of 2026-10-28, in one file.
+-- Baseline: the whole schema as of 2026-10-31, in one file.
 --
--- Nothing has been deployed, so the migrations before it were squashed into this one three times: the
--- 24 of the Osnabrück era, then V1-V9 of the Berlin rebuild, then V10, all on 2026-10-28. They live on
--- in git history; their reasoning is in the comments of the objects they created. In short, V2-V10
--- added:
+-- Squashed four times: the 24 migrations of the Osnabrück era, then V1-V9 and V10 of the Berlin
+-- rebuild (2026-10-28), then V1-V10 (2026-10-31, #68). They live on in git history; their reasoning
+-- is in the comments of the objects they created. In short:
 --
 --   identifiers and matching   company_identifiers, match columns on source records, merged_into,
 --                              match_candidates, pipeline_state (issue #18)
 --   feedback and provenance    a vote on every shown field, v_field_provenance for the ⓘ
 --   grant links                company_funding_links: the list went from 71 s to 0.65 s a page
 --   stored company profile     company_profile_mv + source_keys: every list filter under 10 ms
---   Berlin grants              company_fundings.source / recipient_register / policy_area, linked
---                              by register number
+--   Berlin grants              company_fundings.source / recipient_register / policy_area
 --   manager evidence           whether the register confirms a manager name
 --   activity keywords          products and services from the company's own website
---   own votes                  the app's reader may delete a user's own vote
 --   register announcements     the latest court announcement per company, a hint next to its status
+--   source overview            stored counts per source for the app's sources page, never a value
+--   register fields            name, address, status ... are observations; `companies` keeps
+--                              identity only, and the register number is only an identifier
+--   corrections                the app's votes are the source `user_feedback`, priority 50
+--   profile                    English values, user tags, the register number in the profile
+--   source dates               `source_updated_at`: when the source read a value; older weighs less
+--   company history            append-only history of every shown value, every claim on demand (#54)
+--   company documents          the index of the S3 corpus of every text read about a company (#61)
+--   review sample              a fixed sample people check by hand, precision per field (#71)
 --
 -- Generated from a database migrated to V10 with `pg_dump --schema-only --no-owner`, privileges
 -- included, so every grant is exactly what V1-V10 left. Role names are Flyway placeholders
 -- (`${writer_role}`, `${reader_role}`) so the hub can use its own, and default privileges apply to
--- whoever runs this file. PostGIS and pgvector are created by the database setup, not here.
--- Checked: a database built from this file and one built from V1 + V10 dump to the same schema,
--- grants and seed rows.
+-- whoever runs this file. The materialized views are created WITH DATA: refresh_company_profile()
+-- refreshes them CONCURRENTLY, which an unpopulated view refuses. PostGIS and pgvector are created
+-- by the database setup, not here. Checked: a database built from this file and one built from
+-- V1-V10 dump to the same schema, grants and seed rows.
 
 -- pg_dump writes functions before the tables they read; their bodies are checked when called.
 SET check_function_bodies = false;
 
 --
+-- Name: draw_review_sample(integer, integer, integer, integer); Type: FUNCTION; Schema: public; Owner: -
 --
+
+CREATE FUNCTION public.draw_review_sample(websites integer DEFAULT 40, technology_fields integer DEFAULT 25, managers integer DEFAULT 20, registers integer DEFAULT 15) RETURNS integer
+    LANGUAGE plpgsql
+    AS $$
+DECLARE
+  added integer;
+BEGIN
+  WITH candidates AS (
+    SELECT p.id,
+           CASE WHEN p.technology_field IS NOT NULL THEN 'technology_field'
+                WHEN p.website IS NOT NULL THEN 'website'
+                WHEN p.management IS NOT NULL THEN 'management'
+                ELSE 'register' END AS stratum
+    FROM public.company_profile_mv p
+    WHERE p.register_status = 'active'
+      AND NOT EXISTS (SELECT 1 FROM public.review_sample s WHERE s.company_id = p.id)
+  ),
+  ranked AS (
+    SELECT id, stratum,
+           row_number() OVER (PARTITION BY stratum ORDER BY md5(id::text || 'review-sample')) AS rn
+    FROM candidates
+  ),
+  missing AS (
+    SELECT t.stratum, t.target - COALESCE(have.n, 0) AS n
+    FROM (VALUES ('website', websites), ('technology_field', technology_fields),
+                 ('management', managers), ('register', registers)) t(stratum, target)
+    LEFT JOIN (SELECT stratum, count(*) AS n FROM public.review_sample GROUP BY stratum) have
+      ON have.stratum = t.stratum
+  )
+  INSERT INTO public.review_sample (company_id, stratum)
+  SELECT r.id, r.stratum
+  FROM ranked r JOIN missing m ON m.stratum = r.stratum
+  WHERE r.rn <= m.n;
+  GET DIAGNOSTICS added = ROW_COUNT;
+  RETURN added;
+END
+$$;
 
 
 --
@@ -71,6 +116,98 @@ COMMENT ON FUNCTION public.normalize_company_name(input_name text) IS 'Normalize
 
 
 --
+-- Name: record_company_history(); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.record_company_history() RETURNS integer
+    LANGUAGE plpgsql
+    AS $$
+DECLARE
+  written integer;
+  managers integer;
+BEGIN
+  -- Overlapping coordinator runs would both compare with the same latest row and write it twice.
+  PERFORM pg_advisory_xact_lock(hashtext('record_company_history'));
+  -- A change is what the app shows: value, source or confidence. A new observation id alone is not
+  -- (scripts/import_register_managers.py re-inserts the same names), so nothing is recorded for it.
+  -- One value per field: the canonical observation.
+  WITH current AS (
+    SELECT cfs.company_id, cfs.field_name,
+           COALESCE(o.value_text, (o.value_number)::text, (o.value_date)::text) AS value,
+           cfs.source_id, o.id AS observation_id, o.confidence
+    FROM public.company_canonical_field_sources cfs
+    JOIN public.company_field_observations o ON o.id = cfs.company_field_observation_id
+  ),
+  last AS (
+    SELECT DISTINCT ON (h.company_id, h.field_name)
+           h.company_id, h.field_name, h.event, h.value, h.source_id, h.observation_id, h.confidence
+    FROM public.company_field_history h
+    WHERE h.field_name <> 'management'
+    ORDER BY h.company_id, h.field_name, h.changed_at DESC, h.id DESC
+  )
+  INSERT INTO public.company_field_history
+    (company_id, field_name, event, value, previous_value, source_id, observation_id, confidence,
+     previous_confidence)
+  SELECT COALESCE(c.company_id, l.company_id), COALESCE(c.field_name, l.field_name),
+         CASE WHEN c.company_id IS NULL THEN 'removed'
+              WHEN l.company_id IS NULL OR l.event = 'removed' THEN 'shown'
+              WHEN c.value IS DISTINCT FROM l.value THEN 'replaced'
+              ELSE 'confidence_changed' END,
+         c.value,
+         CASE WHEN l.event = 'removed' THEN NULL ELSE l.value END,
+         COALESCE(c.source_id, l.source_id), COALESCE(c.observation_id, l.observation_id),
+         c.confidence,
+         CASE WHEN l.event = 'removed' THEN NULL ELSE l.confidence END
+  FROM current c
+  FULL JOIN last l ON l.company_id = c.company_id AND l.field_name = c.field_name
+  WHERE (c.company_id IS NULL AND l.event <> 'removed')
+     OR (c.company_id IS NOT NULL AND (
+           l.company_id IS NULL OR l.event = 'removed'
+           OR c.value IS DISTINCT FROM l.value
+           OR c.source_id IS DISTINCT FROM l.source_id
+           OR c.confidence IS DISTINCT FROM l.confidence));
+  GET DIAGNOSTICS written = ROW_COUNT;
+
+  -- Several values per field: every current manager name, one history line per name.
+  WITH current AS (
+    SELECT m.company_id, m.full_name AS value, m.source_id, o.id AS observation_id, o.confidence
+    FROM public.company_managers m
+    LEFT JOIN public.company_field_observations o ON o.id = m.company_field_observation_id
+    WHERE m.is_current
+  ),
+  last AS (
+    SELECT DISTINCT ON (h.company_id, h.value)
+           h.company_id, h.value, h.event, h.source_id, h.observation_id, h.confidence
+    FROM public.company_field_history h
+    WHERE h.field_name = 'management'
+    ORDER BY h.company_id, h.value, h.changed_at DESC, h.id DESC
+  )
+  INSERT INTO public.company_field_history
+    (company_id, field_name, event, value, previous_value, source_id, observation_id, confidence,
+     previous_confidence)
+  SELECT COALESCE(c.company_id, l.company_id), 'management',
+         CASE WHEN c.company_id IS NULL THEN 'removed'
+              WHEN l.company_id IS NULL OR l.event = 'removed' THEN 'shown'
+              ELSE 'confidence_changed' END,
+         COALESCE(c.value, l.value),
+         NULL,
+         COALESCE(c.source_id, l.source_id), COALESCE(c.observation_id, l.observation_id),
+         c.confidence,
+         CASE WHEN l.event = 'removed' THEN NULL ELSE l.confidence END
+  FROM current c
+  FULL JOIN last l ON l.company_id = c.company_id AND l.value = c.value
+  WHERE (c.company_id IS NULL AND l.event <> 'removed')
+     OR (c.company_id IS NOT NULL AND (
+           l.company_id IS NULL OR l.event = 'removed'
+           OR c.source_id IS DISTINCT FROM l.source_id
+           OR c.confidence IS DISTINCT FROM l.confidence));
+  GET DIAGNOSTICS managers = ROW_COUNT;
+  RETURN written + managers;
+END
+$$;
+
+
+--
 -- Name: refresh_company_funding_links(); Type: FUNCTION; Schema: public; Owner: -
 --
 
@@ -91,7 +228,7 @@ BEGIN
   INSERT INTO public.company_funding_links (fkz, company_id)
   WITH unique_names AS (
     SELECT c.normalized_name, lower(c.city) AS city, (array_agg(c.id))[1] AS company_id
-    FROM public.companies c
+    FROM public.v_companies_enriched c
     WHERE c.city IS NOT NULL
     GROUP BY c.normalized_name, lower(c.city)
     HAVING count(*) = 1
@@ -118,6 +255,8 @@ CREATE FUNCTION public.refresh_company_profile() RETURNS void
 BEGIN
   REFRESH MATERIALIZED VIEW CONCURRENTLY public.company_profile_mv;
   ANALYZE public.company_profile_mv;
+  REFRESH MATERIALIZED VIEW CONCURRENTLY public.source_stats_mv;
+  REFRESH MATERIALIZED VIEW CONCURRENTLY public.source_field_stats_mv;
 END
 $$;
 
@@ -143,33 +282,21 @@ $$;
 COMMENT ON FUNCTION public.touch_updated_at() IS 'Generic trigger function that refreshes updated_at on row updates.';
 
 
+SET default_tablespace = '';
+
+SET default_table_access_method = heap;
+
 --
 -- Name: companies; Type: TABLE; Schema: public; Owner: -
 --
 
 CREATE TABLE public.companies (
     id uuid DEFAULT gen_random_uuid() NOT NULL,
-    company_name text NOT NULL,
-    normalized_name text NOT NULL,
-    legal_form text,
-    business_purpose text,
-    address text,
-    established_at date,
-    registration_number text,
-    wz_code text,
     metadata jsonb DEFAULT '{}'::jsonb NOT NULL,
-    canonical_updated_at timestamp with time zone,
     data_last_updated_at timestamp with time zone,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
     updated_at timestamp with time zone DEFAULT now() NOT NULL,
-    postcode text,
-    city text,
-    district text,
-    locality text,
-    data_quality_score numeric(4,3),
-    register_status text,
     merged_into uuid,
-    CONSTRAINT companies_data_quality_score_check CHECK (((data_quality_score IS NULL) OR ((data_quality_score >= (0)::numeric) AND (data_quality_score <= (1)::numeric)))),
     CONSTRAINT companies_not_merged_into_self CHECK ((merged_into IS DISTINCT FROM id))
 );
 
@@ -178,14 +305,7 @@ CREATE TABLE public.companies (
 -- Name: TABLE companies; Type: COMMENT; Schema: public; Owner: -
 --
 
-COMMENT ON TABLE public.companies IS 'Canonical company records consumed by the application.';
-
-
---
--- Name: COLUMN companies.register_status; Type: COMMENT; Schema: public; Owner: -
---
-
-COMMENT ON COLUMN public.companies.register_status IS 'Register status as the source states it. Osnabrück: aktiv 6298, erloschen 7673, in Liquidation 472. NULL means the source did not say — note that the discovery filter is = ''aktiv'', which EXCLUDES NULL, so an import that fails to map this column yields no work at all rather than too much. Backfilled from metadata->>''status'', which is kept as the raw record.';
+COMMENT ON TABLE public.companies IS 'Company identity: a random UUID and merged_into. The register number is in company_identifiers (scheme register). Every shown value (name, address, status, ...) is an observation; read the published one through v_companies_enriched.';
 
 
 --
@@ -238,6 +358,78 @@ CREATE TABLE public.company_comments (
 --
 
 COMMENT ON COLUMN public.company_comments.author_id IS 'Keycloak `sub` of the writer, set by Hasura from the JWT, never by the client.';
+
+
+--
+-- Name: company_documents; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.company_documents (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    company_id uuid NOT NULL,
+    source_id uuid NOT NULL,
+    kind text NOT NULL,
+    url text NOT NULL,
+    language text,
+    read_at timestamp with time zone DEFAULT now() NOT NULL,
+    s3_key text NOT NULL,
+    sha256 text NOT NULL,
+    bytes integer NOT NULL,
+    CONSTRAINT company_documents_kind_check CHECK ((kind = ANY (ARRAY['webpage'::text, 'wikipedia'::text, 'wikidata_description'::text])))
+);
+
+
+--
+-- Name: TABLE company_documents; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON TABLE public.company_documents IS 'Index of the company corpus: every text read about a company (web pages, Wikipedia, Wikidata descriptions), stored in S3 under s3_key, latest version only (#61). Contains references to personal data; pipelines only, not in Hasura.';
+
+
+--
+-- Name: company_field_history; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.company_field_history (
+    id bigint NOT NULL,
+    company_id uuid NOT NULL,
+    field_name text NOT NULL,
+    event text NOT NULL,
+    value text,
+    previous_value text,
+    source_id uuid,
+    observation_id uuid,
+    confidence numeric(5,4),
+    previous_confidence numeric(5,4),
+    changed_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT company_field_history_event_check CHECK ((event = ANY (ARRAY['shown'::text, 'replaced'::text, 'confidence_changed'::text, 'removed'::text])))
+);
+
+
+--
+-- Name: TABLE company_field_history; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON TABLE public.company_field_history IS 'Append-only history of every shown value per company: shown, replaced, confidence_changed, removed. Written by record_company_history() at the end of each pipeline_coordinator run. Never updated or deleted.';
+
+
+--
+-- Name: company_field_history_id_seq; Type: SEQUENCE; Schema: public; Owner: -
+--
+
+CREATE SEQUENCE public.company_field_history_id_seq
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+
+--
+-- Name: company_field_history_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: -
+--
+
+ALTER SEQUENCE public.company_field_history_id_seq OWNED BY public.company_field_history.id;
 
 
 --
@@ -455,61 +647,68 @@ COMMENT ON TABLE public.sources IS 'Registry of upstream sources with sync sched
 
 CREATE VIEW public.v_companies_enriched AS
  SELECT c.id,
-    c.company_name,
-    c.normalized_name,
-    c.legal_form,
-    c.business_purpose,
-    c.address,
-    c.established_at,
-    c.registration_number,
-    c.wz_code,
-    c.data_quality_score,
-    c.canonical_updated_at,
+    reg.company_name,
+    public.normalize_company_name(reg.company_name) AS normalized_name,
+    reg.legal_form,
+    reg.business_purpose,
+    reg.address,
+    reg.established_at,
+    ( SELECT ('Amtsgericht '::text || i.value)
+           FROM public.company_identifiers i
+          WHERE ((i.company_id = c.id) AND (i.scheme = 'register'::text))
+          ORDER BY i.created_at DESC, ("substring"(i.value, '(\d+)\D*$'::text))::bigint DESC NULLS LAST, i.id DESC
+         LIMIT 1) AS registration_number,
+    reg.wz_code,
     c.data_last_updated_at,
     c.metadata,
     c.created_at,
     c.updated_at,
     obs_website.value_text AS website_url,
-    obs_cluster.value_text AS cluster,
-    obs_tech.value_text AS tech_field,
     obs_revenue.value_number AS revenue,
     (obs_emp.value_number)::integer AS employee_count,
     obs_website.confidence AS website_confidence,
-    obs_cluster.confidence AS cluster_confidence,
-    obs_tech.confidence AS tech_field_confidence,
     obs_revenue.confidence AS revenue_confidence,
     obs_emp.confidence AS employee_count_confidence,
     src_website.key AS website_source,
-    src_cluster.key AS cluster_source,
-    src_tech.key AS tech_field_source,
     src_revenue.key AS revenue_source,
     src_emp.key AS employee_count_source,
-    c.register_status,
-    obs_tfeld.value_text AS technologiefeld,
-    obs_tfeld.confidence AS technologiefeld_confidence,
-    src_tfeld.key AS technologiefeld_source,
+    reg.register_status,
+    obs_tfield.value_text AS technology_field,
+    obs_tfield.confidence AS technology_field_confidence,
+    src_tfield.key AS technology_field_source,
     obs_purpose.value_text AS purpose_field,
     obs_purpose.confidence AS purpose_field_confidence,
-    src_purpose.key AS purpose_field_source
-   FROM (((((((((((((((((((((public.companies c
+    src_purpose.key AS purpose_field_source,
+    reg.postcode,
+    reg.city,
+    c.merged_into
+   FROM ((((((((((((((((public.companies c
+     LEFT JOIN ( SELECT cfs.company_id,
+            max(o.value_text) FILTER (WHERE (cfs.field_name = 'name'::text)) AS company_name,
+            max(o.value_text) FILTER (WHERE (cfs.field_name = 'legal_form'::text)) AS legal_form,
+            max(o.value_text) FILTER (WHERE (cfs.field_name = 'business_purpose'::text)) AS business_purpose,
+            max(o.value_text) FILTER (WHERE (cfs.field_name = 'address'::text)) AS address,
+            (max(o.value_text) FILTER (WHERE (cfs.field_name = 'established_at'::text)))::date AS established_at,
+            max(o.value_text) FILTER (WHERE (cfs.field_name = 'wz_code'::text)) AS wz_code,
+            max(o.value_text) FILTER (WHERE (cfs.field_name = 'register_status'::text)) AS register_status,
+            max(o.value_text) FILTER (WHERE (cfs.field_name = 'postcode'::text)) AS postcode,
+            max(o.value_text) FILTER (WHERE (cfs.field_name = 'city'::text)) AS city
+           FROM (public.company_canonical_field_sources cfs
+             JOIN public.company_field_observations o ON ((o.id = cfs.company_field_observation_id)))
+          WHERE (cfs.field_name = ANY (ARRAY['name'::text, 'legal_form'::text, 'address'::text, 'postcode'::text, 'city'::text, 'register_status'::text, 'established_at'::text, 'business_purpose'::text, 'wz_code'::text]))
+          GROUP BY cfs.company_id) reg ON ((reg.company_id = c.id)))
      LEFT JOIN public.company_canonical_field_sources cfs_website ON (((cfs_website.company_id = c.id) AND (cfs_website.field_name = 'website'::text))))
      LEFT JOIN public.company_field_observations obs_website ON ((obs_website.id = cfs_website.company_field_observation_id)))
      LEFT JOIN public.sources src_website ON ((src_website.id = cfs_website.source_id)))
-     LEFT JOIN public.company_canonical_field_sources cfs_cluster ON (((cfs_cluster.company_id = c.id) AND (cfs_cluster.field_name = 'cluster'::text))))
-     LEFT JOIN public.company_field_observations obs_cluster ON ((obs_cluster.id = cfs_cluster.company_field_observation_id)))
-     LEFT JOIN public.sources src_cluster ON ((src_cluster.id = cfs_cluster.source_id)))
-     LEFT JOIN public.company_canonical_field_sources cfs_tech ON (((cfs_tech.company_id = c.id) AND (cfs_tech.field_name = 'tech_field'::text))))
-     LEFT JOIN public.company_field_observations obs_tech ON ((obs_tech.id = cfs_tech.company_field_observation_id)))
-     LEFT JOIN public.sources src_tech ON ((src_tech.id = cfs_tech.source_id)))
      LEFT JOIN public.company_canonical_field_sources cfs_revenue ON (((cfs_revenue.company_id = c.id) AND (cfs_revenue.field_name = 'revenue'::text))))
      LEFT JOIN public.company_field_observations obs_revenue ON ((obs_revenue.id = cfs_revenue.company_field_observation_id)))
      LEFT JOIN public.sources src_revenue ON ((src_revenue.id = cfs_revenue.source_id)))
      LEFT JOIN public.company_canonical_field_sources cfs_emp ON (((cfs_emp.company_id = c.id) AND (cfs_emp.field_name = 'employee_count'::text))))
      LEFT JOIN public.company_field_observations obs_emp ON ((obs_emp.id = cfs_emp.company_field_observation_id)))
      LEFT JOIN public.sources src_emp ON ((src_emp.id = cfs_emp.source_id)))
-     LEFT JOIN public.company_canonical_field_sources cfs_tfeld ON (((cfs_tfeld.company_id = c.id) AND (cfs_tfeld.field_name = 'technologiefeld'::text))))
-     LEFT JOIN public.company_field_observations obs_tfeld ON ((obs_tfeld.id = cfs_tfeld.company_field_observation_id)))
-     LEFT JOIN public.sources src_tfeld ON ((src_tfeld.id = cfs_tfeld.source_id)))
+     LEFT JOIN public.company_canonical_field_sources cfs_tfield ON (((cfs_tfield.company_id = c.id) AND (cfs_tfield.field_name = 'technology_field'::text))))
+     LEFT JOIN public.company_field_observations obs_tfield ON ((obs_tfield.id = cfs_tfield.company_field_observation_id)))
+     LEFT JOIN public.sources src_tfield ON ((src_tfield.id = cfs_tfield.source_id)))
      LEFT JOIN public.company_canonical_field_sources cfs_purpose ON (((cfs_purpose.company_id = c.id) AND (cfs_purpose.field_name = 'purpose_field'::text))))
      LEFT JOIN public.company_field_observations obs_purpose ON ((obs_purpose.id = cfs_purpose.company_field_observation_id)))
      LEFT JOIN public.sources src_purpose ON ((src_purpose.id = cfs_purpose.source_id)));
@@ -519,7 +718,7 @@ CREATE VIEW public.v_companies_enriched AS
 -- Name: VIEW v_companies_enriched; Type: COMMENT; Schema: public; Owner: -
 --
 
-COMMENT ON VIEW public.v_companies_enriched IS 'The view applications should query. THREE industry-ish columns live here and they are three different questions -- getting that wrong was the expensive mistake in this project. tech_field: free-text LLM output from the search providers, 508 rows, no controlled vocabulary, whatever the model felt like typing. technologiefeld: one of Berlin''s 77 taxonomy fields, requires a website somebody actually fetched, written by branch_classifier. cluster: the same kind of free text as tech_field. They must never be merged or coalesced, and a WZ code may never fill technologiefeld. purpose_field is a fourth question again: what the register says the company was set up to do, with no website requirement at all. See docs/branch-classification.md and docs/purpose-classification.md.';
+COMMENT ON VIEW public.v_companies_enriched IS 'The company as applications should read it: the published value of every field, register facts included (V3). technology_field and purpose_field are two different questions (one of Berlin''s 77 fields in English, from published words vs. from the register purpose) and must never be merged; a WZ code may never fill technology_field.';
 
 
 --
@@ -551,6 +750,7 @@ CREATE VIEW public.v_company_fundings AS
 CREATE VIEW public.v_company_profile_live AS
  SELECT e.id,
     e.company_name AS name,
+    e.registration_number,
     e.employee_count,
     e.revenue,
     COALESCE(fund.funding_count, (0)::bigint) AS funding_count,
@@ -558,25 +758,22 @@ CREATE VIEW public.v_company_profile_live AS
     e.wz_code,
     e.established_at,
     e.address,
-    c.postcode,
-    c.city,
+    e.postcode,
+    e.city,
     e.legal_form,
-    e.cluster,
-    e.technologiefeld,
+    e.technology_field,
     e.website_url AS website,
     mgr.managers AS management,
     e.business_purpose,
     obs_deeptech.value_text AS deeptech_class,
     obs_deeptech.confidence AS deeptech_confidence,
     (obs_ai.value_text)::boolean AS is_ai,
-    obs_amazon.value_text AS amazon_effect,
     e.register_status,
-    GREATEST(e.data_last_updated_at, e.canonical_updated_at) AS updated_at,
+    GREATEST(e.data_last_updated_at, chosen.selected_at) AS updated_at,
     obs_keywords.value_text AS activity_keywords,
     obs_announce.value_text AS register_announcement,
     ((obs_announce.metadata ->> 'published_on'::text))::date AS register_announcement_date
-   FROM (((((((((((((public.v_companies_enriched e
-     JOIN public.companies c ON ((c.id = e.id)))
+   FROM (((((((((((public.v_companies_enriched e
      LEFT JOIN LATERAL ( SELECT count(*) AS funding_count,
             sum(f.amount_eur) AS funding_total_eur
            FROM public.v_company_fundings f
@@ -584,12 +781,13 @@ CREATE VIEW public.v_company_profile_live AS
      LEFT JOIN LATERAL ( SELECT string_agg(DISTINCT cm.full_name, '; '::text ORDER BY cm.full_name) AS managers
            FROM public.company_managers cm
           WHERE ((cm.company_id = e.id) AND cm.is_current)) mgr ON (true))
+     LEFT JOIN LATERAL ( SELECT max(cfs.selected_at) AS selected_at
+           FROM public.company_canonical_field_sources cfs
+          WHERE (cfs.company_id = e.id)) chosen ON (true))
      LEFT JOIN public.company_canonical_field_sources cfs_deeptech ON (((cfs_deeptech.company_id = e.id) AND (cfs_deeptech.field_name = 'deeptech_class'::text))))
      LEFT JOIN public.company_field_observations obs_deeptech ON ((obs_deeptech.id = cfs_deeptech.company_field_observation_id)))
      LEFT JOIN public.company_canonical_field_sources cfs_ai ON (((cfs_ai.company_id = e.id) AND (cfs_ai.field_name = 'is_ai'::text))))
      LEFT JOIN public.company_field_observations obs_ai ON ((obs_ai.id = cfs_ai.company_field_observation_id)))
-     LEFT JOIN public.company_canonical_field_sources cfs_amazon ON (((cfs_amazon.company_id = e.id) AND (cfs_amazon.field_name = 'amazon_effect'::text))))
-     LEFT JOIN public.company_field_observations obs_amazon ON ((obs_amazon.id = cfs_amazon.company_field_observation_id)))
      LEFT JOIN public.company_canonical_field_sources cfs_keywords ON (((cfs_keywords.company_id = e.id) AND (cfs_keywords.field_name = 'activity_keywords'::text))))
      LEFT JOIN public.company_field_observations obs_keywords ON ((obs_keywords.id = cfs_keywords.company_field_observation_id)))
      LEFT JOIN public.company_canonical_field_sources cfs_announce ON (((cfs_announce.company_id = e.id) AND (cfs_announce.field_name = 'register_announcement'::text))))
@@ -600,7 +798,7 @@ CREATE VIEW public.v_company_profile_live AS
 -- Name: VIEW v_company_profile_live; Type: COMMENT; Schema: public; Owner: -
 --
 
-COMMENT ON VIEW public.v_company_profile_live IS 'The target record per company, read by the app through Hasura. Comments are a separate table (company_comments). deeptech_class, is_ai and amazon_effect are NULL until something writes them.';
+COMMENT ON VIEW public.v_company_profile_live IS 'The target record per company, read by the app through Hasura (via company_profile_mv). Tags and comments are separate tables. deeptech_class and is_ai are filled only by corrections from the app so far.';
 
 
 --
@@ -648,6 +846,7 @@ COMMENT ON VIEW public.v_company_sources IS 'Which source each shown value of a 
 CREATE MATERIALIZED VIEW public.company_profile_mv AS
  SELECT p.id,
     p.name,
+    p.registration_number,
     p.employee_count,
     p.revenue,
     p.funding_count,
@@ -658,15 +857,13 @@ CREATE MATERIALIZED VIEW public.company_profile_mv AS
     p.postcode,
     p.city,
     p.legal_form,
-    p.cluster,
-    p.technologiefeld,
+    p.technology_field,
     p.website,
     p.management,
     p.business_purpose,
     p.deeptech_class,
     p.deeptech_confidence,
     p.is_ai,
-    p.amazon_effect,
     p.register_status,
     p.updated_at,
     p.activity_keywords,
@@ -678,7 +875,26 @@ CREATE MATERIALIZED VIEW public.company_profile_mv AS
             array_agg(DISTINCT v_company_sources.source_key ORDER BY v_company_sources.source_key) AS source_keys
            FROM public.v_company_sources
           GROUP BY v_company_sources.company_id) src ON ((src.company_id = p.id)))
-  WITH DATA; -- pg_dump writes NO DATA; unpopulated, refresh_company_profile() (CONCURRENTLY) fails
+  WITH DATA;
+
+
+--
+-- Name: company_tags; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.company_tags (
+    company_id uuid NOT NULL,
+    tag_id uuid NOT NULL,
+    added_by text NOT NULL,
+    added_at timestamp with time zone DEFAULT now() NOT NULL
+);
+
+
+--
+-- Name: TABLE company_tags; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON TABLE public.company_tags IS 'Which company has which tag, who added it and when. A person removes only tags they added (Hasura); an admin role for the rest comes later.';
 
 
 --
@@ -698,7 +914,7 @@ CREATE TABLE public.extraction_feedback (
     CONSTRAINT extraction_feedback_correction_check CHECK (((correction IS NULL) OR ((length(correction) >= 1) AND (length(correction) <= 500)))),
     CONSTRAINT extraction_feedback_correction_only_when_wrong CHECK (((correction IS NULL) OR (verdict = 'wrong'::text))),
     CONSTRAINT extraction_feedback_empty_needs_correction CHECK (((value <> ''::text) OR ((verdict = 'wrong'::text) AND (correction IS NOT NULL)))),
-    CONSTRAINT extraction_feedback_field_name_check CHECK ((field_name = ANY (ARRAY['name'::text, 'address'::text, 'legal_form'::text, 'register_status'::text, 'wz_code'::text, 'established_at'::text, 'employee_count'::text, 'revenue'::text, 'fundings'::text, 'cluster'::text, 'technologiefeld'::text, 'website'::text, 'management'::text, 'business_purpose'::text, 'deeptech'::text, 'is_ai'::text, 'amazon_effect'::text, 'activity_keywords'::text, 'register_announcement'::text]))),
+    CONSTRAINT extraction_feedback_field_name_check CHECK ((field_name = ANY (ARRAY['name'::text, 'address'::text, 'legal_form'::text, 'register_status'::text, 'wz_code'::text, 'established_at'::text, 'employee_count'::text, 'revenue'::text, 'fundings'::text, 'technology_field'::text, 'website'::text, 'management'::text, 'business_purpose'::text, 'deeptech'::text, 'is_ai'::text, 'activity_keywords'::text, 'register_announcement'::text, 'registration_number'::text]))),
     CONSTRAINT extraction_feedback_value_check CHECK ((length(value) <= 500)),
     CONSTRAINT extraction_feedback_verdict_check CHECK ((verdict = ANY (ARRAY['correct'::text, 'wrong'::text])))
 );
@@ -751,6 +967,92 @@ CREATE TABLE public.pipeline_state (
 
 
 --
+-- Name: review_sample; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.review_sample (
+    company_id uuid NOT NULL,
+    stratum text NOT NULL,
+    drawn_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT review_sample_stratum_check CHECK ((stratum = ANY (ARRAY['website'::text, 'technology_field'::text, 'management'::text, 'register'::text])))
+);
+
+
+--
+-- Name: TABLE review_sample; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON TABLE public.review_sample IS 'Companies people check by hand, drawn by draw_review_sample() (stratified, stable random order). Never redrawn, only topped up, so measurements stay comparable.';
+
+
+--
+-- Name: source_field_stats_mv; Type: MATERIALIZED VIEW; Schema: public; Owner: -
+--
+
+CREATE MATERIALIZED VIEW public.source_field_stats_mv AS
+ SELECT s.key AS source_key,
+    o.field_name,
+    count(*) AS observations,
+    count(DISTINCT o.company_id) AS companies,
+    count(DISTINCT o.company_id) FILTER (WHERE (o.is_canonical OR (m.id IS NOT NULL))) AS companies_shown,
+    round(avg(o.confidence), 3) AS avg_confidence,
+    max(o.observed_at) AS last_observed_at
+   FROM ((public.company_field_observations o
+     JOIN public.sources s ON ((s.id = o.source_id)))
+     LEFT JOIN public.company_managers m ON (((m.company_field_observation_id = o.id) AND m.is_current)))
+  GROUP BY s.key, o.field_name
+UNION ALL
+ SELECT f.source AS source_key,
+    'fundings'::text AS field_name,
+    count(DISTINCT f.fkz) AS observations,
+    count(DISTINCT l.company_id) AS companies,
+    count(DISTINCT l.company_id) AS companies_shown,
+    NULL::numeric AS avg_confidence,
+    max(f.last_seen_at) AS last_observed_at
+   FROM (public.company_fundings f
+     LEFT JOIN public.company_funding_links l ON ((l.fkz = f.fkz)))
+  GROUP BY f.source
+  WITH DATA;
+
+
+--
+-- Name: source_stats_mv; Type: MATERIALIZED VIEW; Schema: public; Owner: -
+--
+
+CREATE MATERIALIZED VIEW public.source_stats_mv AS
+ WITH covered AS (
+         SELECT r.source_id,
+            r.company_id,
+            true AS is_record,
+            (r.match_method = 'created'::text) AS created
+           FROM public.company_source_records r
+        UNION ALL
+         SELECT s_1.id,
+            l.company_id,
+            false,
+            false
+           FROM ((public.company_funding_links l
+             JOIN public.company_fundings f ON ((f.fkz = l.fkz)))
+             JOIN public.sources s_1 ON ((s_1.key = f.source)))
+        ), per_source AS (
+         SELECT covered.source_id,
+            count(*) FILTER (WHERE covered.is_record) AS records,
+            count(*) FILTER (WHERE covered.created) AS companies_created,
+            count(DISTINCT covered.company_id) AS companies
+           FROM covered
+          GROUP BY covered.source_id
+        )
+ SELECT s.key AS source_key,
+    COALESCE(p.records, (0)::bigint) AS records,
+    COALESCE(p.companies_created, (0)::bigint) AS companies_created,
+    COALESCE(p.companies, (0)::bigint) AS companies,
+    now() AS computed_at
+   FROM (public.sources s
+     LEFT JOIN per_source p ON ((p.source_id = s.id)))
+  WITH DATA;
+
+
+--
 -- Name: source_sync_runs; Type: TABLE; Schema: public; Owner: -
 --
 
@@ -786,12 +1088,97 @@ COMMENT ON TABLE public.source_sync_runs IS 'Execution log for source synchroniz
 
 
 --
+-- Name: tags; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.tags (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    name text NOT NULL,
+    created_by text NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT tags_name_check CHECK (((btrim(name) <> ''::text) AND (length(name) <= 60)))
+);
+
+
+--
+-- Name: TABLE tags; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON TABLE public.tags IS 'Tags people give companies in the app. Free text, unique ignoring case and surrounding spaces. created_by is a Keycloak user id.';
+
+
+--
+-- Name: v_company_claims; Type: VIEW; Schema: public; Owner: -
+--
+
+CREATE VIEW public.v_company_claims AS
+ SELECT o.id,
+    o.company_id,
+        CASE o.field_name
+            WHEN 'ceo_name_or_contact'::text THEN 'management'::text
+            WHEN 'candidate_url'::text THEN 'website'::text
+            WHEN 'deeptech_class'::text THEN 'deeptech'::text
+            ELSE o.field_name
+        END AS field_key,
+    COALESCE(o.value_text, (o.value_number)::text, (o.value_date)::text) AS value,
+    o.confidence,
+    (o.is_canonical OR (EXISTS ( SELECT 1
+           FROM public.company_managers m
+          WHERE ((m.company_field_observation_id = o.id) AND m.is_current)))) AS is_shown,
+    COALESCE((o.metadata ->> 'verified_by'::text), (o.metadata ->> 'decided_by'::text)) AS method,
+    s.key AS source_key,
+    s.name AS source_name,
+    COALESCE(o.source_updated_at, o.observed_at) AS read_at
+   FROM (public.company_field_observations o
+     JOIN public.sources s ON ((s.id = o.source_id)))
+  WHERE (o.field_name = ANY (ARRAY['name'::text, 'legal_form'::text, 'address'::text, 'postcode'::text, 'city'::text, 'register_status'::text, 'established_at'::text, 'business_purpose'::text, 'wz_code'::text, 'website'::text, 'candidate_url'::text, 'technology_field'::text, 'purpose_field'::text, 'activity_keywords'::text, 'register_announcement'::text, 'ceo_name_or_contact'::text, 'employee_count'::text, 'revenue'::text, 'deeptech_class'::text, 'is_ai'::text]));
+
+
+--
+-- Name: VIEW v_company_claims; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON VIEW public.v_company_claims IS 'Every claim any source made about a company, shown or not, for the app''s "all claims" toggle (#54). Excludes email, phone, _withheld fields and bookkeeping by a field allow-list. Deliberately includes manager names never shown and corrections below the bar (one person''s, or withdrawn), visible to every logged-in user: flagged for the privacy review (#54).';
+
+
+--
+-- Name: v_company_history; Type: VIEW; Schema: public; Owner: -
+--
+
+CREATE VIEW public.v_company_history AS
+ SELECT h.id,
+    h.company_id,
+        CASE h.field_name
+            WHEN 'deeptech_class'::text THEN 'deeptech'::text
+            ELSE h.field_name
+        END AS field_key,
+    h.event,
+    h.value,
+    h.previous_value,
+    h.confidence,
+    h.previous_confidence,
+    s.key AS source_key,
+    s.name AS source_name,
+    h.changed_at
+   FROM (public.company_field_history h
+     LEFT JOIN public.sources s ON ((s.id = h.source_id)));
+
+
+--
+-- Name: VIEW v_company_history; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON VIEW public.v_company_history IS 'The shown-value history per company, for the app''s company page (#54). Newest first by changed_at.';
+
+
+--
 -- Name: v_company_profile; Type: VIEW; Schema: public; Owner: -
 --
 
 CREATE VIEW public.v_company_profile AS
  SELECT company_profile_mv.id,
     company_profile_mv.name,
+    company_profile_mv.registration_number,
     company_profile_mv.employee_count,
     company_profile_mv.revenue,
     company_profile_mv.funding_count,
@@ -802,15 +1189,13 @@ CREATE VIEW public.v_company_profile AS
     company_profile_mv.postcode,
     company_profile_mv.city,
     company_profile_mv.legal_form,
-    company_profile_mv.cluster,
-    company_profile_mv.technologiefeld,
+    company_profile_mv.technology_field,
     company_profile_mv.website,
     company_profile_mv.management,
     company_profile_mv.business_purpose,
     company_profile_mv.deeptech_class,
     company_profile_mv.deeptech_confidence,
     company_profile_mv.is_ai,
-    company_profile_mv.amazon_effect,
     company_profile_mv.register_status,
     company_profile_mv.updated_at,
     company_profile_mv.activity_keywords,
@@ -841,7 +1226,7 @@ CREATE VIEW public.v_field_provenance AS
     o.confidence,
     COALESCE((o.metadata -> 'evidence'::text), (o.metadata -> 'keywords'::text)) AS evidence,
     COALESCE((o.metadata ->> 'imprint_url'::text), (o.metadata ->> 'matched_url'::text)) AS link,
-    o.observed_at,
+    COALESCE(o.source_updated_at, o.observed_at) AS observed_at,
     cfs.selected_at
    FROM ((public.company_canonical_field_sources cfs
      JOIN public.company_field_observations o ON ((o.id = cfs.company_field_observation_id)))
@@ -856,29 +1241,12 @@ UNION ALL
     o.confidence,
     (o.metadata -> 'evidence'::text) AS evidence,
     (o.metadata ->> 'imprint_url'::text) AS link,
-    o.observed_at,
+    COALESCE(o.source_updated_at, o.observed_at) AS observed_at,
     m.updated_at AS selected_at
    FROM ((public.company_managers m
      LEFT JOIN public.company_field_observations o ON ((o.id = m.company_field_observation_id)))
      LEFT JOIN public.sources s ON ((s.id = m.source_id)))
   WHERE m.is_current
-UNION ALL
- SELECT c.id AS company_id,
-    f.field_name,
-    f.value,
-    s.key AS source_key,
-    s.name AS source_name,
-    f.method,
-    NULL::numeric AS confidence,
-    NULL::jsonb AS evidence,
-    NULL::text AS link,
-    ((r.source_payload #>> '{register,retrieved_at}'::text[]))::timestamp with time zone AS observed_at,
-    r.last_synced_at AS selected_at
-   FROM (((public.companies c
-     JOIN public.company_source_records r ON ((r.company_id = c.id)))
-     JOIN public.sources s ON (((s.id = r.source_id) AND (s.source_type = 'register'::text))))
-     CROSS JOIN LATERAL ( VALUES ('name'::text,c.company_name,'register'::text), ('address'::text,c.address,'register'::text), ('legal_form'::text,c.legal_form,'read from the end of the registered name'::text), ('register_status'::text,c.register_status,'register'::text), ('wz_code'::text,c.wz_code,'register'::text), ('business_purpose'::text,c.business_purpose,'register'::text), ('established_at'::text,(c.established_at)::text,'register'::text)) f(field_name, value, method))
-  WHERE (f.value IS NOT NULL)
 UNION ALL
  SELECT l.company_id,
     'fundings'::text AS field_name,
@@ -896,7 +1264,27 @@ UNION ALL
     f.last_seen_at AS selected_at
    FROM ((public.company_funding_links l
      JOIN public.company_fundings f ON ((f.fkz = l.fkz)))
-     LEFT JOIN public.sources s ON ((s.key = f.source)));
+     LEFT JOIN public.sources s ON ((s.key = f.source)))
+UNION ALL
+ SELECT r.company_id,
+    'registration_number'::text AS field_name,
+    ('Amtsgericht '::text || r.value) AS value,
+    s.key AS source_key,
+    s.name AS source_name,
+    'register'::text AS method,
+    NULL::numeric AS confidence,
+    NULL::jsonb AS evidence,
+    NULL::text AS link,
+    r.created_at AS observed_at,
+    r.created_at AS selected_at
+   FROM (( SELECT DISTINCT ON (i.company_id) i.company_id,
+            i.value,
+            i.source_id,
+            i.created_at
+           FROM public.company_identifiers i
+          WHERE (i.scheme = 'register'::text)
+          ORDER BY i.company_id, i.created_at DESC, ("substring"(i.value, '(\d+)\D*$'::text))::bigint DESC NULLS LAST, i.id DESC) r
+     LEFT JOIN public.sources s ON ((s.id = r.source_id)));
 
 
 --
@@ -907,19 +1295,159 @@ COMMENT ON VIEW public.v_field_provenance IS 'Where every value the app shows ca
 
 
 --
+-- Name: v_review_results; Type: VIEW; Schema: public; Owner: -
+--
+
+CREATE VIEW public.v_review_results AS
+ WITH verdicts AS (
+         SELECT s.stratum,
+            f.company_id,
+            f.field_name,
+            f.value,
+                CASE sign(((count(*) FILTER (WHERE (f.verdict = 'correct'::text)) - count(*) FILTER (WHERE (f.verdict = 'wrong'::text))))::double precision)
+                    WHEN 1 THEN 'correct'::text
+                    WHEN '-1'::integer THEN 'wrong'::text
+                    ELSE NULL::text
+                END AS verdict
+           FROM ((public.review_sample s
+             JOIN public.extraction_feedback f ON (((f.company_id = s.company_id) AND (f.value <> ''::text))))
+             JOIN public.company_profile_mv p ON ((p.id = f.company_id)))
+          WHERE
+                CASE f.field_name
+                    WHEN 'name'::text THEN (f.value = p.name)
+                    WHEN 'address'::text THEN (f.value = p.address)
+                    WHEN 'legal_form'::text THEN (f.value = p.legal_form)
+                    WHEN 'register_status'::text THEN (f.value = p.register_status)
+                    WHEN 'wz_code'::text THEN (f.value = p.wz_code)
+                    WHEN 'established_at'::text THEN (f.value = (p.established_at)::text)
+                    WHEN 'employee_count'::text THEN
+                    CASE
+                        WHEN (f.value ~ '^-?[0-9]+(\.[0-9]+)?$'::text) THEN ((f.value)::numeric = (p.employee_count)::numeric)
+                        ELSE NULL::boolean
+                    END
+                    WHEN 'revenue'::text THEN
+                    CASE
+                        WHEN (f.value ~ '^-?[0-9]+(\.[0-9]+)?$'::text) THEN ((f.value)::numeric = p.revenue)
+                        ELSE NULL::boolean
+                    END
+                    WHEN 'fundings'::text THEN (EXISTS ( SELECT 1
+                       FROM public.company_funding_links l
+                      WHERE ((l.company_id = f.company_id) AND (l.fkz = f.value))))
+                    WHEN 'technology_field'::text THEN (f.value = p.technology_field)
+                    WHEN 'website'::text THEN (f.value = p.website)
+                    WHEN 'management'::text THEN (f.value = ANY (string_to_array(p.management, '; '::text)))
+                    WHEN 'business_purpose'::text THEN (f.value = p.business_purpose)
+                    WHEN 'deeptech'::text THEN (f.value = p.deeptech_class)
+                    WHEN 'is_ai'::text THEN (f.value = (p.is_ai)::text)
+                    WHEN 'activity_keywords'::text THEN (f.value = ANY (string_to_array(p.activity_keywords, '; '::text)))
+                    WHEN 'register_announcement'::text THEN (f.value = p.register_announcement)
+                    WHEN 'registration_number'::text THEN (f.value = p.registration_number)
+                    ELSE NULL::boolean
+                END
+          GROUP BY s.stratum, f.company_id, f.field_name, f.value
+        )
+ SELECT verdicts.stratum,
+    verdicts.field_name,
+    count(DISTINCT verdicts.company_id) AS companies_judged,
+    count(*) FILTER (WHERE (verdicts.verdict = 'correct'::text)) AS correct,
+    count(*) FILTER (WHERE (verdicts.verdict = 'wrong'::text)) AS wrong,
+    round(((count(*) FILTER (WHERE (verdicts.verdict = 'correct'::text)))::numeric / (NULLIF(count(*) FILTER (WHERE (verdicts.verdict IS NOT NULL)), 0))::numeric), 3) AS "precision"
+   FROM verdicts
+  GROUP BY verdicts.stratum, verdicts.field_name;
+
+
+--
+-- Name: VIEW v_review_results; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON VIEW public.v_review_results IS 'Hand-checked precision per field and stratum of the values shown now, from the app''s votes on the review sample: a vote counts only while its value is what company_profile_mv shows; one verdict per value by majority (ties left out). Missing values (a vote on an empty field) are not counted here.';
+
+
+--
+-- Name: v_source_fields; Type: VIEW; Schema: public; Owner: -
+--
+
+CREATE VIEW public.v_source_fields AS
+ SELECT source_field_stats_mv.source_key,
+    source_field_stats_mv.field_name,
+    source_field_stats_mv.observations,
+    source_field_stats_mv.companies,
+    source_field_stats_mv.companies_shown,
+    source_field_stats_mv.avg_confidence,
+    source_field_stats_mv.last_observed_at
+   FROM public.source_field_stats_mv;
+
+
+--
+-- Name: VIEW v_source_fields; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON VIEW public.v_source_fields IS 'Per source and field: values stored, companies, and companies whose shown value came from this source. Counts only; no value is exposed.';
+
+
+--
+-- Name: v_source_overview; Type: VIEW; Schema: public; Owner: -
+--
+
+CREATE VIEW public.v_source_overview AS
+ SELECT s.key AS source_key,
+    s.name,
+    s.source_type,
+    s.base_url,
+    COALESCE(st.records, (0)::bigint) AS records,
+    COALESCE(st.companies, (0)::bigint) AS companies,
+    COALESCE(st.companies_created, (0)::bigint) AS companies_created,
+    run.started_at AS last_run_started_at,
+    run.finished_at AS last_run_finished_at,
+    run.status AS last_run_status,
+    run.records_seen AS last_run_seen,
+    run.records_created AS last_run_created,
+    run.records_updated AS last_run_updated,
+    run.records_failed AS last_run_failed,
+    ( SELECT count(*) AS count
+           FROM public.source_sync_runs r
+          WHERE (r.source_id = s.id)) AS runs,
+    ( SELECT count(*) AS count
+           FROM public.source_sync_runs r
+          WHERE ((r.source_id = s.id) AND (r.status = 'running'::text) AND (EXISTS ( SELECT 1
+                   FROM public.source_sync_runs n
+                  WHERE ((n.source_id = r.source_id) AND (n.started_at > r.started_at)))))) AS runs_interrupted,
+    st.computed_at AS counts_as_of
+   FROM ((public.sources s
+     LEFT JOIN public.source_stats_mv st ON ((st.source_key = s.key)))
+     LEFT JOIN LATERAL ( SELECT r.started_at,
+            r.finished_at,
+            r.records_seen,
+            r.records_created,
+            r.records_updated,
+            r.records_failed,
+            r.status
+           FROM public.source_sync_runs r
+          WHERE (r.source_id = s.id)
+          ORDER BY r.started_at DESC
+         LIMIT 1) run ON (true));
+
+
+--
+-- Name: VIEW v_source_overview; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON VIEW public.v_source_overview IS 'One row per source for the app''s sources page: records, companies, companies created, and its latest run. Counts as of counts_as_of (refresh_company_profile()); the run is live.';
+
+
+--
+-- Name: company_field_history id; Type: DEFAULT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.company_field_history ALTER COLUMN id SET DEFAULT nextval('public.company_field_history_id_seq'::regclass);
+
+
+--
 -- Name: companies companies_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
 ALTER TABLE ONLY public.companies
     ADD CONSTRAINT companies_pkey PRIMARY KEY (id);
-
-
---
--- Name: companies companies_registration_number_key; Type: CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.companies
-    ADD CONSTRAINT companies_registration_number_key UNIQUE (registration_number);
 
 
 --
@@ -944,6 +1472,30 @@ ALTER TABLE ONLY public.company_canonical_field_sources
 
 ALTER TABLE ONLY public.company_comments
     ADD CONSTRAINT company_comments_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: company_documents company_documents_company_id_source_id_kind_url_key; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.company_documents
+    ADD CONSTRAINT company_documents_company_id_source_id_kind_url_key UNIQUE (company_id, source_id, kind, url);
+
+
+--
+-- Name: company_documents company_documents_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.company_documents
+    ADD CONSTRAINT company_documents_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: company_field_history company_field_history_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.company_field_history
+    ADD CONSTRAINT company_field_history_pkey PRIMARY KEY (id);
 
 
 --
@@ -1003,6 +1555,14 @@ ALTER TABLE ONLY public.company_source_records
 
 
 --
+-- Name: company_tags company_tags_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.company_tags
+    ADD CONSTRAINT company_tags_pkey PRIMARY KEY (company_id, tag_id);
+
+
+--
 -- Name: extraction_feedback extraction_feedback_one_vote; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -1035,6 +1595,14 @@ ALTER TABLE ONLY public.pipeline_state
 
 
 --
+-- Name: review_sample review_sample_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.review_sample
+    ADD CONSTRAINT review_sample_pkey PRIMARY KEY (company_id);
+
+
+--
 -- Name: source_sync_runs source_sync_runs_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -1056,6 +1624,14 @@ ALTER TABLE ONLY public.sources
 
 ALTER TABLE ONLY public.sources
     ADD CONSTRAINT sources_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: tags tags_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.tags
+    ADD CONSTRAINT tags_pkey PRIMARY KEY (id);
 
 
 --
@@ -1097,13 +1673,6 @@ CREATE INDEX companies_data_last_updated_at_idx ON public.companies USING btree 
 
 
 --
--- Name: companies_data_quality_score_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX companies_data_quality_score_idx ON public.companies USING btree (data_quality_score NULLS FIRST);
-
-
---
 -- Name: companies_merged_into_idx; Type: INDEX; Schema: public; Owner: -
 --
 
@@ -1118,38 +1687,17 @@ CREATE INDEX companies_metadata_gin_idx ON public.companies USING gin (metadata)
 
 
 --
--- Name: companies_normalized_name_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX companies_normalized_name_idx ON public.companies USING btree (normalized_name);
-
-
---
--- Name: companies_normalized_name_postcode_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX companies_normalized_name_postcode_idx ON public.companies USING btree (normalized_name, postcode);
-
-
---
--- Name: companies_postcode_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX companies_postcode_idx ON public.companies USING btree (postcode);
-
-
---
--- Name: companies_register_status_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX companies_register_status_idx ON public.companies USING btree (register_status);
-
-
---
 -- Name: company_canonical_field_sources_company_field_idx; Type: INDEX; Schema: public; Owner: -
 --
 
 CREATE INDEX company_canonical_field_sources_company_field_idx ON public.company_canonical_field_sources USING btree (company_id, field_name);
+
+
+--
+-- Name: company_canonical_field_sources_observation_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX company_canonical_field_sources_observation_idx ON public.company_canonical_field_sources USING btree (company_field_observation_id);
 
 
 --
@@ -1167,10 +1715,38 @@ CREATE INDEX company_comments_company_idx ON public.company_comments USING btree
 
 
 --
+-- Name: company_documents_company_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX company_documents_company_idx ON public.company_documents USING btree (company_id, kind);
+
+
+--
+-- Name: company_field_history_latest_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX company_field_history_latest_idx ON public.company_field_history USING btree (company_id, field_name, changed_at DESC, id DESC);
+
+
+--
+-- Name: company_field_history_management_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX company_field_history_management_idx ON public.company_field_history USING btree (company_id, value, changed_at DESC, id DESC) WHERE (field_name = 'management'::text);
+
+
+--
 -- Name: company_field_observations_company_field_idx; Type: INDEX; Schema: public; Owner: -
 --
 
 CREATE INDEX company_field_observations_company_field_idx ON public.company_field_observations USING btree (company_id, field_name, observed_at DESC);
+
+
+--
+-- Name: company_field_observations_name_key_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX company_field_observations_name_key_idx ON public.company_field_observations USING btree (public.normalize_company_name(value_text)) WHERE ((field_name = 'name'::text) AND is_canonical);
 
 
 --
@@ -1230,6 +1806,13 @@ CREATE INDEX company_managers_company_id_idx ON public.company_managers USING bt
 
 
 --
+-- Name: company_managers_observation_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX company_managers_observation_idx ON public.company_managers USING btree (company_field_observation_id);
+
+
+--
 -- Name: company_profile_mv_fundings; Type: INDEX; Schema: public; Owner: -
 --
 
@@ -1272,10 +1855,10 @@ CREATE INDEX company_profile_mv_source_keys ON public.company_profile_mv USING g
 
 
 --
--- Name: company_profile_mv_technologiefeld; Type: INDEX; Schema: public; Owner: -
+-- Name: company_profile_mv_technology_field; Type: INDEX; Schema: public; Owner: -
 --
 
-CREATE INDEX company_profile_mv_technologiefeld ON public.company_profile_mv USING btree (technologiefeld);
+CREATE INDEX company_profile_mv_technology_field ON public.company_profile_mv USING btree (technology_field);
 
 
 --
@@ -1314,6 +1897,13 @@ CREATE INDEX company_source_records_last_synced_at_idx ON public.company_source_
 
 
 --
+-- Name: company_tags_tag_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX company_tags_tag_idx ON public.company_tags USING btree (tag_id);
+
+
+--
 -- Name: extraction_feedback_field_idx; Type: INDEX; Schema: public; Owner: -
 --
 
@@ -1325,6 +1915,20 @@ CREATE INDEX extraction_feedback_field_idx ON public.extraction_feedback USING b
 --
 
 CREATE INDEX match_candidates_open_idx ON public.match_candidates USING btree (score DESC) WHERE (status = 'open'::text);
+
+
+--
+-- Name: source_field_stats_mv_key; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX source_field_stats_mv_key ON public.source_field_stats_mv USING btree (source_key, field_name);
+
+
+--
+-- Name: source_stats_mv_key; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX source_stats_mv_key ON public.source_stats_mv USING btree (source_key);
 
 
 --
@@ -1349,17 +1953,17 @@ CREATE INDEX sources_next_sync_at_idx ON public.sources USING btree (next_sync_a
 
 
 --
+-- Name: tags_name_key; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX tags_name_key ON public.tags USING btree (lower(btrim(name)));
+
+
+--
 -- Name: uq_obs_company_field_source_value; Type: INDEX; Schema: public; Owner: -
 --
 
-CREATE UNIQUE INDEX uq_obs_company_field_source_value ON public.company_field_observations USING btree (company_id, field_name, source_id, value_text) WHERE (field_name = ANY (ARRAY['website'::text, 'candidate_url'::text, 'directory_url'::text, 'discovery_tier'::text, 'search_query'::text, 'osm_id'::text, 'technologiefeld'::text, 'purpose_field'::text, 'technologiefeld_withheld'::text, 'purpose_field_withheld'::text]));
-
-
---
--- Name: INDEX uq_obs_company_field_source_value; Type: COMMENT; Schema: public; Owner: -
---
-
-COMMENT ON INDEX public.uq_obs_company_field_source_value IS 'Upsert key for the ten field names combined_discovery/observations.py and the branch classifier write, so a re-run updates instead of appending. Partial: 71 duplicate groups remain in ceo_name_or_contact, email, phone, website_search_query and cluster, and each needs its own review first. insert_text_observation repeats this predicate and must match it exactly.';
+CREATE UNIQUE INDEX uq_obs_company_field_source_value ON public.company_field_observations USING btree (company_id, field_name, source_id, value_text) WHERE (field_name = ANY (ARRAY['website'::text, 'candidate_url'::text, 'directory_url'::text, 'discovery_tier'::text, 'osm_id'::text, 'technology_field'::text, 'purpose_field'::text, 'technology_field_withheld'::text, 'purpose_field_withheld'::text, 'name'::text, 'legal_form'::text, 'address'::text, 'postcode'::text, 'city'::text, 'register_status'::text, 'established_at'::text, 'business_purpose'::text, 'wz_code'::text]));
 
 
 --
@@ -1463,6 +2067,38 @@ ALTER TABLE ONLY public.company_canonical_field_sources
 
 ALTER TABLE ONLY public.company_comments
     ADD CONSTRAINT company_comments_company_id_fkey FOREIGN KEY (company_id) REFERENCES public.companies(id) ON DELETE CASCADE;
+
+
+--
+-- Name: company_documents company_documents_company_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.company_documents
+    ADD CONSTRAINT company_documents_company_id_fkey FOREIGN KEY (company_id) REFERENCES public.companies(id) ON DELETE CASCADE;
+
+
+--
+-- Name: company_documents company_documents_source_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.company_documents
+    ADD CONSTRAINT company_documents_source_id_fkey FOREIGN KEY (source_id) REFERENCES public.sources(id) ON DELETE CASCADE;
+
+
+--
+-- Name: company_field_history company_field_history_company_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.company_field_history
+    ADD CONSTRAINT company_field_history_company_id_fkey FOREIGN KEY (company_id) REFERENCES public.companies(id) ON DELETE CASCADE;
+
+
+--
+-- Name: company_field_history company_field_history_source_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.company_field_history
+    ADD CONSTRAINT company_field_history_source_id_fkey FOREIGN KEY (source_id) REFERENCES public.sources(id) ON DELETE SET NULL;
 
 
 --
@@ -1570,6 +2206,22 @@ ALTER TABLE ONLY public.company_source_records
 
 
 --
+-- Name: company_tags company_tags_company_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.company_tags
+    ADD CONSTRAINT company_tags_company_id_fkey FOREIGN KEY (company_id) REFERENCES public.companies(id) ON DELETE CASCADE;
+
+
+--
+-- Name: company_tags company_tags_tag_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.company_tags
+    ADD CONSTRAINT company_tags_tag_id_fkey FOREIGN KEY (tag_id) REFERENCES public.tags(id) ON DELETE CASCADE;
+
+
+--
 -- Name: extraction_feedback extraction_feedback_company_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -1594,11 +2246,20 @@ ALTER TABLE ONLY public.match_candidates
 
 
 --
+-- Name: review_sample review_sample_company_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.review_sample
+    ADD CONSTRAINT review_sample_company_id_fkey FOREIGN KEY (company_id) REFERENCES public.companies(id) ON DELETE CASCADE;
+
+
+--
 -- Name: source_sync_runs source_sync_runs_source_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
 --
 
 ALTER TABLE ONLY public.source_sync_runs
     ADD CONSTRAINT source_sync_runs_source_id_fkey FOREIGN KEY (source_id) REFERENCES public.sources(id) ON DELETE CASCADE;
+
 
 -- ================================================================================================
 -- Seed rows: the sources the DAGs and the app expect to exist.
@@ -1610,7 +2271,7 @@ VALUES (
   'Branch Classifier (Berlin 77-field taxonomy)',
   'classifier',
   100,
-  '{"writes": ["technologiefeld", "purpose_field", "technologiefeld_withheld", "purpose_field_withheld"],
+  '{"writes": ["technology_field", "purpose_field", "technology_field_withheld", "purpose_field_withheld"],
     "confidence_basis": "fixed_by_decided_by",
     "confidence_by_decided_by": {"keywords": 0.60, "model_direct": 0.50, "model_tiebreak": 0.55}}'
 );
@@ -1620,6 +2281,18 @@ INSERT INTO public.sources (key, name, source_type, base_url) VALUES
     ('berlin_zuwendungen', 'Zuwendungsdatenbank des Landes Berlin', 'fundings',
      'https://www.berlin.de/sen/finanzen/service/zuwendungsdatenbank/')
 ON CONFLICT (key) DO NOTHING;
+
+-- People's corrections from the app: a source at priority 50, ahead of every other (100).
+INSERT INTO public.sources (key, name, source_type, priority, metadata)
+VALUES (
+  'user_feedback',
+  'Corrections from the app',
+  'user_feedback',
+  50,
+  '{"dag_id": "feedback_observations",
+    "confidence_by_net_agreement": {"1": 0.30, "1 on an empty field": 0.60, "2": 0.60, "3+": 0.75}}'
+)
+ON CONFLICT (key) DO UPDATE SET priority = EXCLUDED.priority;
 
 --
 -- Name: SCHEMA public; Type: ACL; Schema: -; Owner: -
@@ -1682,6 +2355,29 @@ GRANT SELECT ON TABLE public.company_canonical_field_sources TO ${reader_role};
 
 GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.company_comments TO ${writer_role};
 GRANT SELECT,INSERT ON TABLE public.company_comments TO ${reader_role};
+
+
+--
+-- Name: TABLE company_documents; Type: ACL; Schema: public; Owner: -
+--
+
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.company_documents TO ${writer_role};
+GRANT SELECT ON TABLE public.company_documents TO ${reader_role};
+
+
+--
+-- Name: TABLE company_field_history; Type: ACL; Schema: public; Owner: -
+--
+
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.company_field_history TO ${writer_role};
+GRANT SELECT ON TABLE public.company_field_history TO ${reader_role};
+
+
+--
+-- Name: SEQUENCE company_field_history_id_seq; Type: ACL; Schema: public; Owner: -
+--
+
+GRANT SELECT,USAGE ON SEQUENCE public.company_field_history_id_seq TO ${writer_role};
 
 
 --
@@ -1781,6 +2477,14 @@ GRANT SELECT ON TABLE public.company_profile_mv TO ${reader_role};
 
 
 --
+-- Name: TABLE company_tags; Type: ACL; Schema: public; Owner: -
+--
+
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.company_tags TO ${writer_role};
+GRANT SELECT,INSERT,DELETE ON TABLE public.company_tags TO ${reader_role};
+
+
+--
 -- Name: TABLE extraction_feedback; Type: ACL; Schema: public; Owner: -
 --
 
@@ -1805,11 +2509,59 @@ GRANT SELECT ON TABLE public.pipeline_state TO ${reader_role};
 
 
 --
+-- Name: TABLE review_sample; Type: ACL; Schema: public; Owner: -
+--
+
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.review_sample TO ${writer_role};
+GRANT SELECT ON TABLE public.review_sample TO ${reader_role};
+
+
+--
+-- Name: TABLE source_field_stats_mv; Type: ACL; Schema: public; Owner: -
+--
+
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.source_field_stats_mv TO ${writer_role};
+GRANT SELECT ON TABLE public.source_field_stats_mv TO ${reader_role};
+
+
+--
+-- Name: TABLE source_stats_mv; Type: ACL; Schema: public; Owner: -
+--
+
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.source_stats_mv TO ${writer_role};
+GRANT SELECT ON TABLE public.source_stats_mv TO ${reader_role};
+
+
+--
 -- Name: TABLE source_sync_runs; Type: ACL; Schema: public; Owner: -
 --
 
 GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.source_sync_runs TO ${writer_role};
 GRANT SELECT ON TABLE public.source_sync_runs TO ${reader_role};
+
+
+--
+-- Name: TABLE tags; Type: ACL; Schema: public; Owner: -
+--
+
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.tags TO ${writer_role};
+GRANT SELECT,INSERT ON TABLE public.tags TO ${reader_role};
+
+
+--
+-- Name: TABLE v_company_claims; Type: ACL; Schema: public; Owner: -
+--
+
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.v_company_claims TO ${writer_role};
+GRANT SELECT ON TABLE public.v_company_claims TO ${reader_role};
+
+
+--
+-- Name: TABLE v_company_history; Type: ACL; Schema: public; Owner: -
+--
+
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.v_company_history TO ${writer_role};
+GRANT SELECT ON TABLE public.v_company_history TO ${reader_role};
 
 
 --
@@ -1826,6 +2578,30 @@ GRANT SELECT ON TABLE public.v_company_profile TO ${reader_role};
 
 GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.v_field_provenance TO ${writer_role};
 GRANT SELECT ON TABLE public.v_field_provenance TO ${reader_role};
+
+
+--
+-- Name: TABLE v_review_results; Type: ACL; Schema: public; Owner: -
+--
+
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.v_review_results TO ${writer_role};
+GRANT SELECT ON TABLE public.v_review_results TO ${reader_role};
+
+
+--
+-- Name: TABLE v_source_fields; Type: ACL; Schema: public; Owner: -
+--
+
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.v_source_fields TO ${writer_role};
+GRANT SELECT ON TABLE public.v_source_fields TO ${reader_role};
+
+
+--
+-- Name: TABLE v_source_overview; Type: ACL; Schema: public; Owner: -
+--
+
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.v_source_overview TO ${writer_role};
+GRANT SELECT ON TABLE public.v_source_overview TO ${reader_role};
 
 
 --

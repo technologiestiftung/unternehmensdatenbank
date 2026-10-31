@@ -142,8 +142,9 @@ purpose, so for Berlin only the Technologiefeld can be filled today.
 
 ## Migrations
 
-`V1__baseline.sql` is the whole schema as of 2026-10-28 (squashed while nothing was deployed), plus
-`V2__source_overview.sql`, `V3__register_fields_as_observations.sql`, `V4__user_feedback_source.sql`, `V5__profile_cleanup_tags_english.sql`, `V6__source_dates.sql`, `V7__register_number_from_identifiers.sql`, `V8__company_history.sql`, `V9__company_documents.sql` and `V10__review_sample.sql`. A database migrated before the squash needs its Flyway history reset once
+`V1__baseline.sql` is the whole schema as of 2026-10-31, squashed four times (last: V1-V10, #68); the
+next migration is V2. Numbers like "(V3)" in comments and docs name the pre-squash migration, to find
+its reasoning in git history. A database migrated before the squash needs its Flyway history reset once
 ([data-model](docs/data-model.md), "Migration strategy"). **Forward-only:** never edit a migration
 that ran anywhere shared. Flyway runs under `--profile tools`, not with `docker compose up`; on the
 hub as the app's initContainer ([release](docs/release.md)).
@@ -155,7 +156,7 @@ hub as the app's initContainer ([release](docs/release.md)).
   `CREATE OR REPLACE` on `v_company_profile_live` alone never reaches the app.
 - **Grant links are a table**, refreshed by `refresh_company_funding_links()`. Linking on read made
   the company list take 71 s.
-- **The sources page reads stored counts** (`V2`), refreshed by `refresh_company_profile()`. Counts
+- **The sources page reads stored counts** (`source_stats_mv`, `source_field_stats_mv`), refreshed by `refresh_company_profile()`. Counts
   only, never a value.
 - **A new shown field needs its key in feedback and `v_field_provenance`.**
 - **The observation upsert key is a partial unique index (`uq_obs_company_field_source_value`), and
