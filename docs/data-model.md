@@ -94,7 +94,7 @@ python scripts/import_register_managers.py
 
 ## Migration strategy
 
-`V1__baseline.sql` is the whole schema as of 2026-10-31, squashed four times: the Osnabrück era,
+`V1__baseline.sql` is the whole schema as of 2026-10-31, squashed four times: the first example data set,
 V1-V9 and V10 on 2026-10-28, V1-V10 on 2026-10-31 (#68). Forward-only from here: never edit a
 migration that has run anywhere shared, add new ones as `V{N}__description.sql` (the next is V2), and
 run Flyway before Airflow touches the changed schema.
@@ -156,8 +156,8 @@ re-read); a correction is dated by the newest vote behind it.
 - **Decay only ranks.** Within one priority the coordinator compares `confidence × 0.5 ^ (age /
   half-life)`. The bar still filters on the stored confidence, so an old value with nothing newer
   stays shown, and the ⓘ (`v_field_provenance.observed_at`) says when the source read it.
-- **Half-lives** (`resolver.HALF_LIVES`, decided 2026-10-29, starting values to be measured once
-  Fusionbase overlaps with OffeneRegister): website 3 years; address, postcode and city 5;
+- **Half-lives** (`resolver.HALF_LIVES`, decided 2026-10-29, starting values to be measured once a
+  second register source overlaps with OffeneRegister): website 3 years; address, postcode and city 5;
   register_status 2; name and legal_form 10. Fields not listed do not decay; the founding date never.
   Manager names are a list, every name above the bar is shown, so age does not drop one.
 - **Corrections give way to newer sources.** A correction from the app (priority 50) stands until

@@ -3,7 +3,7 @@
 -- WHY THIS FILE CARRIES NO EXPECTED OUTPUT. Every number in this repo's documentation has gone
 -- stale at least once, and a comment saying "should return 3,529" is a number nobody re-measures.
 -- The "Pinned by ..." notes below name constants of the integration tests that pinned these counts
--- on the Osnabrück example data. Those tests were removed with that data on 2026-10-28; the queries
+-- on an earlier example data set. Those tests were removed with that data on 2026-10-28; the queries
 -- still work, the constants no longer exist.
 --
 -- HOW TO RUN THESE. From the repo root, on the host:

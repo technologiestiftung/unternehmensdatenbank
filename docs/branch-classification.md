@@ -3,9 +3,9 @@
 A company gets two industry columns. A third, `purpose_field`, comes from the register text and has
 [its own document](purpose-classification.md).
 
-> The numbers below were measured on the Osnabrück example data (14,443 companies, August–September
-> 2026), which has been removed. The rules still hold. OffeneRegister has no WZ code, so for Berlin
-> only the Technologiefeld can be filled today.
+> Unless a number says Berlin, it was measured on an earlier example data set (14,443 companies,
+> August–September 2026), since replaced by the Berlin data. The rules still hold. OffeneRegister has
+> no WZ code, so for Berlin only the Technologiefeld can be filled today.
 
 **They are two columns because they answer two different questions.** Answering one with the other
 was the most expensive mistake made here.
@@ -75,7 +75,7 @@ release fields from the register text alone, which is `purpose_field`'s job.
 
 - **Never match inside a German compound.** A keyword needs a word boundary on both sides. Allowing
   compounds made `sicherheit` fire inside *Arbeitssicherheit* and made Defence Tech the most common
-  industry in Osnabrück, while clear winners *fell* from 338 to 316.
+  industry in that data set, while clear winners *fell* from 338 to 316.
 - **Hyphenated compounds still match** (`Kfz-Zulassung` fires `zulassung`). Treating `-` as a boundary
   would also stop *E-Commerce-Lösungen* matching `e-commerce`. It is behind
   `BRANCH_HYPHEN_IS_BOUNDARY`, **off**, until measured both ways.

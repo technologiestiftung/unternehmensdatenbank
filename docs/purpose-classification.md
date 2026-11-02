@@ -8,8 +8,8 @@ arrives as the `business_purpose` register field (an observation since V3).
 fields, or a recorded non-answer. Read [branch-classification](branch-classification.md) first; this
 file assumes you know what a Technologiefeld is.
 
-> The numbers below were measured on the Osnabrück example data (14,443 companies, 2026-08/09), which
-> has been removed. OffeneRegister has no business purpose, so for Berlin this column cannot be filled
+> The numbers below were measured on an earlier example data set (14,443 companies, 2026-08/09),
+> since replaced by the Berlin data. OffeneRegister has no business purpose, so for Berlin this column cannot be filled
 > today.
 
 ## Why a third column
@@ -26,7 +26,7 @@ has two true answers. On 48 companies with both, 31 agreed and 17 did not: the r
 
 Eight outcomes. Every company has exactly one, **and no two are ever added together.**
 
-| outcome | meaning | Osnabrück count |
+| outcome | meaning | count (earlier data) |
 |---|---|---|
 | `assigned_keywords` | one field won on keywords alone | 596 |
 | `assigned_model_3way` | was `torn`; a model chose among the 3 the keywords nominated | 14 |

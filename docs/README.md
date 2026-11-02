@@ -4,10 +4,11 @@ The target design and the order of the next pull requests: issue #18.
 
 **The data**
 - [data-model.md](data-model.md): the tables, how a value reaches the app, loading OffeneRegister
-- [target-columns.md](target-columns.md): the 20 target columns and where each comes from
+- [sources.md](sources.md): every source, how we get it, and which of the 20 columns it fills
+- [dags.md](dags.md): every pipeline and its schedule
 - [core-queries-current.sql](core-queries-current.sql): queries against the current schema
 
-**Rules** (their numbers were measured on the earlier Osnabrück data; the rules still hold)
+**Rules** (most numbers were measured on an earlier example data set; the rules still hold)
 - [website-verification.md](website-verification.md): when a page belongs to a company
 - [branch-classification.md](branch-classification.md): the Technologiefeld, from a company's own words
 - [purpose-classification.md](purpose-classification.md): the same 77 fields, from the register purpose
