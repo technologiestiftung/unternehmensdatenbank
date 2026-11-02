@@ -6,8 +6,8 @@ and a local copy of the hub's services. The app that reads it:
 [unternehmensdaten-app](https://github.com/technologiestiftung/unternehmensdaten-app).
 
 **The data is example data:** 296,486 Berlin companies from OffeneRegister, a Handelsregister
-snapshot from 2017–2019 (142,571 active then). The final source is Fusionbase, not delivered yet.
-Which source fills which column: [docs/target-columns.md](docs/target-columns.md). The plan: issue #18.
+snapshot from 2017–2019 (142,571 active then). Every source and which column it fills:
+[docs/sources.md](docs/sources.md). The plan: issue #18.
 
 ## Stack
 
@@ -65,7 +65,7 @@ Database: `unternehmensdatenbank` (the Berlin data).
 
 ## DAGs, migrations, checks
 
-- **DAGs:** [airflow/dags/README.md](airflow/dags/README.md). Each starts paused; unpause it
+- **DAGs:** [docs/dags.md](docs/dags.md). Each starts paused; unpause it
   in Airflow to run it.
 - **Migrations:** `db/migrations/`, one `V1__baseline.sql` (squashed 2026-10-31) plus later steps ([data-model](docs/data-model.md),
   "Migration strategy"). Forward-only.

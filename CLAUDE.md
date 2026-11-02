@@ -21,8 +21,8 @@ orchestrates, Flyway owns all schema, Python writes with psycopg2. It runs on th
 (CIVITAS/CORE); this repo emulates the hub locally ([datahub-emulation](docs/datahub-emulation.md)).
 
 **The data is example data:** 296,486 Berlin companies from OffeneRegister (a 2017–2019 snapshot;
-142,571 active then). The final source is Fusionbase (not delivered yet). The numbers in the rule
-docs were measured on the removed Osnabrück data; the rules still apply.
+142,571 active then). Sources: [sources](docs/sources.md). Most numbers in the rule docs were
+measured on an earlier example data set; the rules still apply.
 
 Postgres 15 + PostGIS (port **5433**) · Airflow 3.3.2 (Airflow 3 API: `airflow.providers.standard`,
 not `airflow.operators`) · Flyway 12.
@@ -80,7 +80,7 @@ field claim, with a confidence) → `pipeline_coordinator` → `company_canonica
 
 ## DAGs
 
-[airflow/dags/README.md](airflow/dags/README.md).
+[docs/dags.md](docs/dags.md).
 
 - **`email` and `phone` are stored, never resolved.** A resolved value reaches the app and
   `v_field_provenance`.

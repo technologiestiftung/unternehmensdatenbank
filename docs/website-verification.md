@@ -5,8 +5,8 @@ page is that company's own website. Finding is easy. **Deciding is what matters*
 about deciding. The code is in `airflow/dags/enrichment/` (`confidence.py`, `own_site.py`,
 `pipeline.py`).
 
-> The numbers below were measured on the Osnabrück example data (1,000 companies, August 2026), which
-> has been removed. The rules still hold; Berlin numbers replace them as they are measured.
+> The numbers below were measured on 1,000 companies of an earlier example data set (August 2026),
+> since replaced by the Berlin data. The rules still hold; Berlin numbers replace them as they are measured.
 
 Words used below:
 
@@ -37,7 +37,7 @@ domains or words by hand.
 
 ## Most companies are not worth asking about
 
-On the Osnabrück data, 53% of companies were `dissolved` (erloschen) and returned 4% of the websites.
+On the earlier example data, 53% of companies were `dissolved` (erloschen) and returned 4% of the websites.
 `DISCOVERY_ACTIVE_ONLY=true` skips every company whose register status is not `active`; for Berlin it is
 on. A dissolved company's domain is the classic resold-domain case, so a website found for one deserves
 extra suspicion.
