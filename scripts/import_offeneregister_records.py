@@ -3,7 +3,7 @@
 
 OffeneRegister is a snapshot of the German Handelsregister retrieved between June 2017 and January
 2019: 5.3 million companies, 296,486 of them at the Berlin court (Charlottenburg), 142,571 of
-those still registered at the time. It is example data until Fusionbase delivers the real set.
+those still registered at the time. It is example data until a current source replaces it.
 
 Per company, three things:
 

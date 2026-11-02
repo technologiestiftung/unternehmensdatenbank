@@ -1,7 +1,6 @@
 """Website contacts: the company's own email address and phone number, read off its Impressum.
 
-Target column 18 ("Kontaktdaten Unternehmen"), the field Fusionbase also reads from company
-websites. Every German business site must name an address and a way to reach it (§ 5 DDG), so the
+Target column 18 ("Kontaktdaten Unternehmen"). Every German business site must name an address and a way to reach it (§ 5 DDG), so the
 Impressum of a website we have already proven to be the company's is the place to look.
 
 Each run reads one batch of companies that have a published website and have not been read by this

@@ -45,7 +45,8 @@ _FIELD_MIN_CONF = 0.50
 _TMP_TABLE = "_cfw_winners"
 
 #: Years after which a value counts half when ranked against another value of the same field (#49,
-#: decided 2026-10-29; starting values, to be measured once Fusionbase overlaps with OffeneRegister).
+#: decided 2026-10-29; starting values, to be measured once a second register source overlaps
+#: with OffeneRegister).
 #: The age runs from when the SOURCE read the value (`source_updated_at`, else `observed_at`). Decay
 #: only ranks: the bar filters on the stored confidence, so an old value with nothing newer stays
 #: shown, and the app says when it was read. A field not listed does not decay; `established_at` never.
