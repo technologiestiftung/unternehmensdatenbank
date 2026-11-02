@@ -1,8 +1,8 @@
 """Keywords for what a company does, in the company's own words.
 
-Target column 7.1 ("Stichworte zur Tätigkeit und Produkte / Dienstleistungen"). Fusionbase has an
-AI model write them from the website; this module only collects what the website itself states, so
-every keyword can be found on a page we can link to.
+Target column 7.1 ("Stichworte zur Tätigkeit und Produkte / Dienstleistungen"). This module only
+collects what the website itself states, never what a model wrote, so every keyword can be found on
+a page we can link to.
 
 Two places on a website name the products and services, and both are cheap to read:
 
