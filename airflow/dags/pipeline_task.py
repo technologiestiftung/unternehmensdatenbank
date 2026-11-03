@@ -3,7 +3,7 @@
 The hub offers no custom Airflow image, so our packages (spaCy, psycopg2, bs4 ...) cannot be installed
 next to its Airflow. Decided in issue #18 and allowed by the hub team: every task runs as a
 KubernetesPodOperator pod from our own image `unternehmensdatenbank-pipelines`, which holds these DAG
-packages and their requirements and runs `python -m run_task <package>.main:<run_function>`.
+packages and their requirements and runs `python -m run_task <package>.<module>:<run_function>`.
 
 Chosen per Airflow installation by Airflow variables, so the DAG files are the same everywhere:
 
@@ -26,6 +26,7 @@ from __future__ import annotations
 
 import json
 import os
+from datetime import timedelta
 from pathlib import Path
 from typing import Any, Callable, Mapping
 
@@ -36,6 +37,15 @@ DAGS = Path(__file__).resolve().parent
 PIPELINE_ENV_PREFIXES = ("PG_DSN", "DISCOVERY_", "WEBSITE_", "SOURCE_ENRICHMENT_",
                          "MANAGER_NER_", "URL_DISCOVERY_", "IMPRINT_", "WIKIDATA_",
                          "CORPUS_")
+
+
+#: A task failed by an outside service (a 503, a timeout) runs again twice, 10 minutes apart (#86).
+RETRIES = 2
+RETRY_DELAY = timedelta(minutes=10)
+
+#: Tells `run_task` whether a failure is final, so only a failure no retry follows raises an alert.
+#: Templated: rendered when the task runs, from its try number.
+LAST_TRY_ENV = {"PIPELINE_LAST_TRY": "{{ 'true' if ti.try_number > task.retries else 'false' }}"}
 
 
 def _setting(key: str, default: str = "") -> str:
@@ -59,20 +69,23 @@ def pipeline_environment(environ: Mapping[str, str]) -> dict[str, str]:
     return {k: v for k, v in environ.items() if k.startswith(PIPELINE_ENV_PREFIXES)}
 
 
-def pipeline_task(task_id: str, run: Callable[[], Any], *, returns: bool = False) -> Any:
+def pipeline_task(task_id: str, run: Callable[[], Any], *, returns: bool = False, retries: int = RETRIES) -> Any:
     """A `PythonOperator` calling `run`, or a pod running the same function from the pipelines image.
 
     `returns=True` makes `run`'s return value the task's XCom on the hub too: the pod writes it to
     `/airflow/xcom/return.json` (`run_task`), and the operator reads it from there. A PythonOperator
     pushes its return value anyway.
+
+    `retries=0` for a task that must not run again by itself, such as one under a request limit.
     """
+    retry = {"retries": retries, "retry_delay": RETRY_DELAY}
     runner = _setting("pipeline_runner", "python")
     if runner == "docker":
-        return _docker_task(task_id, run, returns)
+        return _docker_task(task_id, run, returns, retry)
     if runner != "kubernetes":
         from airflow.providers.standard.operators.python import PythonOperator
 
-        return PythonOperator(task_id=task_id, python_callable=run)
+        return PythonOperator(task_id=task_id, python_callable=run, **retry)
 
     from airflow.providers.cncf.kubernetes.operators.pod import KubernetesPodOperator
     from kubernetes.client import models as k8s
@@ -85,12 +98,14 @@ def pipeline_task(task_id: str, run: Callable[[], Any], *, returns: bool = False
         namespace="{{ var.value.pipeline_namespace }}",
         arguments=[task_target(run)],
         env_from=[k8s.V1EnvFromSource(secret_ref=k8s.V1SecretEnvSource(name=_setting("pipeline_secret")))],
+        env_vars=LAST_TRY_ENV,
         get_logs=True,
         do_xcom_push=returns,
+        **retry,
     )
 
 
-def _docker_task(task_id: str, run: Callable[[], Any], returns: bool) -> Any:
+def _docker_task(task_id: str, run: Callable[[], Any], returns: bool, retry: dict[str, Any]) -> Any:
     from airflow.providers.docker.operators.docker import DockerOperator
 
     class PipelineDockerOperator(DockerOperator):
@@ -108,10 +123,12 @@ def _docker_task(task_id: str, run: Callable[[], Any], returns: bool) -> Any:
         # `:main` is re-tagged on every merge; without a pull the host keeps running the old image.
         force_pull=True,
         command=[task_target(run)],
+        environment=LAST_TRY_ENV,
         network_mode=_setting("pipeline_network") or None,
         # The worker's /tmp is not the Docker host's when Docker is reached over a proxy.
         mount_tmp_dir=False,
         auto_remove="success",
         retrieve_output=returns,
         retrieve_output_path="/airflow/xcom/return.json" if returns else None,
+        **retry,
     )
