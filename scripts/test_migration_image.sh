@@ -65,6 +65,7 @@ taxonomy=$(docker exec "$pg" psql -U postgres -d udb -tAc "
   SELECT concat_ws(',',
     (SELECT count(*) FROM public.technology_fields),
     (SELECT count(*) FILTER (WHERE name_en IS NOT NULL) FROM public.technology_fields),
+    (SELECT count(berlin_partner) FROM public.technology_fields),
     (SELECT count(*) FROM public.technology_field_keywords WHERE removed_at IS NULL),
     (SELECT count(*) FROM public.technology_field_keywords WHERE removed_at IS NOT NULL),
     (SELECT count(*) FROM public.wz_divisions),
@@ -78,6 +79,6 @@ taxonomy=$(docker exec "$pg" psql -U postgres -d udb -tAc "
     has_table_privilege('hub_writer', 'public.technology_field_keywords', 'INSERT'),
     has_table_privilege('hub_writer', 'public.technology_field_keywords', 'SELECT'),
     has_table_privilege('hub_reader', 'public.wz_divisions', 'SELECT'))")
-want="77,77,544,27,87,22,0,7,t,f,t,t"
+want="77,77,70,544,27,87,22,0,7,t,f,t,t"
 [ "$taxonomy" = "$want" ] || { echo "taxonomy tables: got $taxonomy, want $want"; exit 1; }
 echo "migration image OK"
