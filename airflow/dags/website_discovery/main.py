@@ -32,6 +32,7 @@ import os
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timezone
 from typing import Any
+from urllib.parse import urlparse
 
 from enrichment import confidence as conf
 from enrichment import name_frequency, pipeline
@@ -125,6 +126,12 @@ def _common_words(cur: Any) -> set[str]:
     return name_frequency.common_words([row[0] for row in cur.fetchall()])
 
 
+def _affixes(cur: Any) -> tuple[str, ...]:
+    """What the published websites add to their company's name, measured (#89)."""
+    cur.execute("SELECT company_name, website_url FROM public.v_companies_enriched WHERE website_url IS NOT NULL")
+    return name_frequency.common_affixes([(name, urlparse(url).hostname or "") for name, url in cur.fetchall()])
+
+
 def run_discover() -> int:
     """Check one batch. Returns how many companies it took: 0 skips the coordinator, a full batch
     starts the next run."""
@@ -141,6 +148,7 @@ def run_discover() -> int:
             officers = load_officers(cur, [c.id for c in companies])
             former_names = load_former_names(cur, [c.id for c in companies])
             common = _common_words(cur)
+            affixes = _affixes(cur)
 
         stages = {"url"}
         found = errors = 0
@@ -148,7 +156,7 @@ def run_discover() -> int:
                     for c in companies]
         # Pages are fetched in threads; every write stays on this thread and its one connection.
         with ThreadPoolExecutor(max_workers=WORKERS) as pool:
-            jobs = {pool.submit(pipeline.discover, c, common_words=common): c
+            jobs = {pool.submit(pipeline.discover, c, common_words=common, affixes=affixes): c
                     for c in prepared}
             for job in as_completed(jobs):
                 company = jobs[job]

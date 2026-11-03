@@ -29,7 +29,9 @@ from bs4 import BeautifulSoup
 #: three digits, so only real thousands separators join.
 REGISTER_RE = re.compile(
     r"\b(HRA|HRB|VR|GnR|PR)\s*(?:-?\s*Nr\.?)?\s*[.:\s]?\s*"
-    r"(\d{1,3}(?:[ .  ]\d{3})+|\d+)\b",
+    # A Berlin entry is often printed with its "B" glued on, "HRB 132889B" (#89): the B ends the
+    # number as a word boundary would, or such a page could never prove its company.
+    r"(\d{1,3}(?:[ .  ]\d{3})+|\d+)(?:B\b|\b)",
     re.IGNORECASE,
 )
 

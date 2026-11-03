@@ -85,8 +85,12 @@ check_true("the joined form is guessed too", "zweiradliebig.de" in guesses)
 
 # German companies, German domains. Shape-major ordering spent the probe budget on
 # `firma-name.com`, owned by a domain reseller, before reaching `firma.de`.
-de_positions = [i for i, h in enumerate(guesses) if h.endswith(".de")]
-com_positions = [i for i, h in enumerate(guesses) if h.endswith(".com")]
+# #89's guesses are tried after all of these, on .de only: they keep every older guess at its rank
+# and spend only the probes the older ones leave.
+older = [c.host for c in up.generate_candidates("Zweirad Liebig GmbH", "Osnabrück") if c.rank < up.MAX_CANDIDATES
+         and c.pattern not in up.EXTRA_PATTERNS]
+de_positions = [i for i, h in enumerate(older) if h.endswith(".de")]
+com_positions = [i for i, h in enumerate(older) if h.endswith(".com")]
 check_true("every .de guess comes before every .com guess", max(de_positions) < min(com_positions))
 
 # `karl.de` belongs to somebody else. The name stays in the multi-word guesses, where it is
