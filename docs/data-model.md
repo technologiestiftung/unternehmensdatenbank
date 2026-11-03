@@ -328,8 +328,8 @@ The DAGs (`writer`) and the app (`reader`, Hasura role `user`) may only read the
 migration**, reviewed in git: an `INSERT` for a new keyword, an `UPDATE` setting `removed_at` and
 `removed_reason` for a wrong one. The taxonomy's version (stored with every classified company) is a
 hash of the active rows, so a changed keyword shows up in the next run. `berlin_partner` holds the
-field's contact person from Berlin's sheet (70 of 77 fields; NULL where the sheet said "nicht
-bekannt"). It is a person's name, so Hasura does not expose it.
+field's contact person from Berlin's sheet (67 of 77 fields name one; NULL where the sheet said
+"nicht bekannt" or "?" or gave nothing). It is a person's name, so Hasura does not expose it.
 
 ## Register announcements (pre-squash V10)
 

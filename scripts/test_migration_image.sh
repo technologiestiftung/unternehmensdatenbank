@@ -60,7 +60,8 @@ grants=$(docker exec "$pg" psql -U postgres -d udb -tAc \
           has_table_privilege('hub_reader', 'public.companies', 'UPDATE')::text")
 [ "$grants" = "true,false" ] || { echo "unexpected grants (writer INSERT, reader UPDATE): $grants"; exit 1; }
 # The taxonomy tables: counts as generated from the YAML they replaced, the removed keywords still
-# removed, and nobody but a migration may change them.
+# removed, the four keywords check_branch_classifier.py's compound cases use still active, and
+# nobody but a migration may change them.
 taxonomy=$(docker exec "$pg" psql -U postgres -d udb -tAc "
   SELECT concat_ws(',',
     (SELECT count(*) FROM public.technology_fields),
@@ -74,11 +75,14 @@ taxonomy=$(docker exec "$pg" psql -U postgres -d udb -tAc "
       WHERE lower(keyword) = 'sicherheit' AND removed_at IS NULL),
     (SELECT count(*) FROM public.technology_field_keywords
       WHERE lower(keyword) = 'sensorik' AND removed_at IS NULL),
+    (SELECT count(DISTINCT lower(keyword)) FROM public.technology_field_keywords
+      WHERE lower(keyword) IN ('batterierecycling', 'schienenfahrzeuge', 'industrieanlagen', 'holzbau')
+        AND removed_at IS NULL),
     (SELECT count(*) FROM public.technology_field_keywords
       WHERE field = 'Defence Tech' AND removed_at IS NULL) >= 10,
     has_table_privilege('hub_writer', 'public.technology_field_keywords', 'INSERT'),
     has_table_privilege('hub_writer', 'public.technology_field_keywords', 'SELECT'),
     has_table_privilege('hub_reader', 'public.wz_divisions', 'SELECT'))")
-want="77,77,70,544,27,87,22,0,7,t,f,t,t"
+want="77,77,67,544,27,87,22,0,7,4,t,f,t,t"
 [ "$taxonomy" = "$want" ] || { echo "taxonomy tables: got $taxonomy, want $want"; exit 1; }
 echo "migration image OK"

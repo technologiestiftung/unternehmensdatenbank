@@ -23,7 +23,7 @@ COMMENT ON TABLE public.technology_fields IS 'Berlin''s 77 Technologie- und Anwe
 COMMENT ON COLUMN public.technology_fields.name IS 'Berlin''s official German name; the key the keywords and the classifier use.';
 COMMENT ON COLUMN public.technology_fields.name_en IS 'Our English translation (Berlin publishes none). What technology_field and purpose_field store.';
 COMMENT ON COLUMN public.technology_fields.senweb_unit IS 'The Senate department unit that owns the field, as in Berlin''s sheet.';
-COMMENT ON COLUMN public.technology_fields.berlin_partner IS 'The field''s contact person(s) as named in Berlin''s sheet, comma-separated; NULL where the sheet said "nicht bekannt". A person''s name: not exposed through Hasura.';
+COMMENT ON COLUMN public.technology_fields.berlin_partner IS 'The field''s contact person(s) as named in Berlin''s sheet, comma-separated (67 of 77 fields); NULL where the sheet said "nicht bekannt" or "?" or gave nothing. A person''s name: not exposed through Hasura.';
 COMMENT ON COLUMN public.technology_fields.related IS 'Related fields or WZ codes, as in Berlin''s sheet. Never used to classify.';
 
 CREATE TABLE public.technology_field_keywords (
@@ -88,7 +88,7 @@ INSERT INTO public.technology_fields (name, name_en, senweb_unit, berlin_partner
     ('Foodtech', 'Foodtech', 'III C 11', 'Jens Woelki', '{}'::text[]),
     ('Freiberufler', 'Freelancers', 'IIB2', NULL, '{}'::text[]),
     ('Games', 'Games', 'IIB4', 'Justina Siegmund-Born', '{}'::text[]),
-    ('Gastgewerbe', 'Hospitality', 'IIB3', '?', '{}'::text[]),
+    ('Gastgewerbe', 'Hospitality', 'IIB3', NULL, '{}'::text[]),
     ('Geothermie', 'Geothermal Energy', 'IIIA4', 'Wolfgang Korek', '{}'::text[]),
     ('Gesundheitsversorgung & Pflege', 'Healthcare & Nursing', 'IIIB2', 'Petra Schmauß', ARRAY['Digital Health', 'Medizintechnik', 'Künstliche Intelligenz']::text[]),
     ('GovTech', 'GovTech', 'IIA4', 'Juliane Haupt', '{}'::text[]),
@@ -105,7 +105,7 @@ INSERT INTO public.technology_fields (name, name_en, senweb_unit, berlin_partner
     ('Markt für darstellende Künste', 'Performing Arts Market', 'IIB4', 'Justina Siegmund-Born', '{}'::text[]),
     ('Maschinen- und Anlagenbau', 'Mechanical and Plant Engineering', 'IIIC1', 'David Hampel', '{}'::text[]),
     ('Medizintechnik', 'Medical Technology', 'IIIB2', 'Petra Schmauß', ARRAY['Digital Health', 'Optik & Photonik', 'Künstliche Intelligenz']::text[]),
-    ('Messe- und Kongresswirtschaft', 'Trade Fair and Congress Industry', 'IIB3', '?', '{}'::text[]),
+    ('Messe- und Kongresswirtschaft', 'Trade Fair and Congress Industry', 'IIB3', NULL, '{}'::text[]),
     ('Metallindustrie', 'Metal Industry', 'IIIC1', 'David Hampel', '{}'::text[]),
     ('Mikroelektronik', 'Microelectronics', 'IIIB1', 'Gerrit Rössler', ARRAY['Halbleitertechnologien']::text[]),
     ('Mobilitätssoftware', 'Mobility Software', 'IIIB3', 'Sascha Tiede', '{}'::text[]),
@@ -129,7 +129,7 @@ INSERT INTO public.technology_fields (name, name_en, senweb_unit, berlin_partner
     ('Soziale Unternehmen', 'Social Enterprises', 'IIA6', 'Diana Woelki, Anne Le Rolland, Janis Gummersbach', '{}'::text[]),
     ('Stromnetz', 'Power Grid', 'IIIA4', 'Wolfgang Korek', '{}'::text[]),
     ('Telekommunikationsanbieter', 'Telecommunications Providers', 'IIIB4', 'Juliane Haupt', ARRAY['61.10.0', '61.10.1', '61.10.2']::text[]),
-    ('Tourismus', 'Tourism', 'IIB3', '?', '{}'::text[]),
+    ('Tourismus', 'Tourism', 'IIB3', NULL, '{}'::text[]),
     ('Wasserstoff', 'Hydrogen', 'IIIA4', 'Wolfgang Korek', '{}'::text[]),
     ('Wassertechnologien', 'Water Technologies', 'IIIA4', 'Wolfgang Korek', '{}'::text[]),
     ('Web3, Blockchain, DLT', 'Web3, Blockchain, DLT', 'IIIB1', 'Juliane Haupt', ARRAY['FinTech']::text[]),

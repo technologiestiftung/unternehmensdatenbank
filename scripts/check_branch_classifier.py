@@ -105,10 +105,10 @@ def main() -> int:
     # This is THE rule of this module.
     # Each pair is (a compound the keyword hides inside, the keyword standing on its own). Both
     # halves are needed: the first says the rule works, the second says it has not become a
-    # blocklist. Every keyword used here is asserted to still BE a keyword first — without that,
-    # deleting one from the taxonomy turns its compound test into a check that passes because
-    # nothing can match at all. That happened: "speicher" was a Wasserstoff keyword until it was
-    # deleted on 2026-08-24, and its compound case would have gone on printing `ok` for ever.
+    # blocklist. The keywords come from the fixture, so these cases test the matching, not the
+    # data. Deleting a keyword from the real table would turn its case into a check that passes
+    # because nothing can match at all ("speicher" was deleted on 2026-08-24), so
+    # `scripts/test_migration_image.sh` checks that these four are still active keywords.
     pairs = [
         ("Unsere Batterierecyclinganlage in Betrieb.",
          "Batterierecycling fuer Industriekunden.", "batterierecycling"),
@@ -120,7 +120,6 @@ def main() -> int:
          "Holzbau vom Fachbetrieb.", "holzbau"),
     ]
     for inside, alone, keyword in pairs:
-        check(f"{keyword!r} is still a keyword at all", keyword in taxonomy.keyword_branches, True)
         check(f"{keyword!r} not inside {inside[:26]!r}",
               keyword in bc.matched_keywords(bc.normalize(inside), taxonomy), False)
         check(f"{keyword!r} found standing alone",
@@ -156,11 +155,10 @@ def main() -> int:
     # -------------------------------------------------------------------------------------
     section("an exclusive keyword outweighs one that seven branches claim")
     # -------------------------------------------------------------------------------------
-    # "sensorik" is claimed by 7 branches, "schienenfahrzeuge" by 1. Both appearing on the same
-    # number of company pages, the exclusive one has to be worth more — otherwise a page saying
-    # "Sensorik" once drags a company into seven industries at equal strength.
-    check("sensorik is claimed by 7 branches", len(taxonomy.keyword_branches["sensorik"]), 7)
-    check("schienenfahrzeuge is claimed by 1", len(taxonomy.keyword_branches["schienenfahrzeuge"]), 1)
+    # In the fixture, as in the real table, "sensorik" is claimed by 7 branches and
+    # "schienenfahrzeuge" by 1. Both appearing on the same number of company pages, the exclusive
+    # one has to be worth more — otherwise a page saying "Sensorik" once drags a company into seven
+    # industries at equal strength.
     df = {"sensorik": 10, "schienenfahrzeuge": 10}
     exclusive = bc.keyword_weight("schienenfahrzeuge", taxonomy, df, 860)
     shared = bc.keyword_weight("sensorik", taxonomy, df, 860)
