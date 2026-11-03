@@ -87,7 +87,7 @@ rules, added after every older guess so those keep their rank, on `.de` only (97
 | runs of 1–3 name words from anywhere in the name; a run of only common words never | `orbitalsystems.de`, `technologiestiftung-berlin.de` | +9 |
 | learned affixes (`name_frequency.common_affixes`): what at least 8 published websites add to their name, measured each run | `navitas-ggmbh.de`, `akanthusberlin.de` | +3 |
 
-Together: 38 of the 110 guessed instead of 20, and 2,746 instead of 2,729 of 3,000 sampled websites
+Together: 38 of the 110 guessed instead of 20, and 2,747 instead of 2,729 of 3,000 sampled websites
 discovery had found (none lost). The learned affixes on play are `{}-berlin`, `{}-{legal}` (the
 company's own legal form: 36 websites) and `{}berlin`.
 
