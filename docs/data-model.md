@@ -312,6 +312,24 @@ Two DAGs read more from a website `website_discovery` has proven to be the compa
 Both read each company once. A failed read is stored with `failed: true` and an `attempts` count and
 retried on later runs, 3 times at most; it counts for nothing, including the 500.
 
+## Technologiefelder and WZ divisions (V3, #84)
+
+Three read-only tables hold the lists the classifiers read. They used to be two YAML files in
+`airflow/dags/enrichment/`; git history keeps them.
+
+- **`technology_fields`**: Berlin's 77 fields. Key is Berlin's German name (what the classifier
+  answers), `name_en` is what `technology_field` and `purpose_field` store and the app shows.
+- **`technology_field_keywords`**: one row per (field, keyword): 544 active, plus 27 removed by hand
+  with `removed_at` and `removed_reason` (the measurement). The classifier skips removed rows; nobody
+  deletes one, so a removed keyword is not added back unknowingly.
+- **`wz_divisions`**: WZ 2025, 87 divisions in 22 sections.
+
+The DAGs (`writer`) and the app (`reader`, Hasura role `user`) may only read them. **A change is a
+migration**, reviewed in git: an `INSERT` for a new keyword, an `UPDATE` setting `removed_at` and
+`removed_reason` for a wrong one. The taxonomy's version (stored with every classified company) is a
+hash of the active rows, so a changed keyword shows up in the next run. Berlin's sheet also named a
+contact person per field; that name is not stored.
+
 ## Register announcements (pre-squash V10)
 
 `register_announcements` reads Berlin's register announcements from handelsregister.de weekly. The

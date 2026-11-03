@@ -13,21 +13,11 @@ from enrichment import branch_observations
 from technology_field import main, train
 from technology_field.main import classify_all, keywords_by_source
 
-YAML = """
-branches:
-  Bahnindustrie:
-    name_en: Rail industry
-    keywords: [Schienenfahrzeuge, Stellwerk]
-  Photonik:
-    name_en: Photonics
-    keywords: [Lasertechnik]
-"""
-
-
 def _taxonomy(tmp_path: Path) -> bc.Taxonomy:
-    path = tmp_path / "taxonomy.yaml"
-    path.write_text(YAML, encoding="utf-8")
-    return bc.load_taxonomy(path)
+    return bc.taxonomy_from_rows(
+        [{"name": "Bahnindustrie", "name_en": "Rail industry"}, {"name": "Photonik", "name_en": "Photonics"}],
+        [("Bahnindustrie", "Schienenfahrzeuge"), ("Bahnindustrie", "Stellwerk"), ("Photonik", "Lasertechnik")],
+    )
 
 
 def test_a_keyword_counts_for_the_first_text_it_fired_in(tmp_path: Path) -> None:

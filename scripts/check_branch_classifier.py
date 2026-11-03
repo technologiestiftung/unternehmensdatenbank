@@ -4,11 +4,11 @@
 Two classifications live side by side and must never be mixed:
 
 **Technologiefeld** — one of Berlin's 77 *Technologie- und Anwendungsfelder*
-(`branch_taxonomy.yaml`), or NONE. Only text the company published may fill it. In this file the
+(`technology_fields` in Postgres), or NONE. Only text the company published may fill it. In this file the
 word "branch" always means one of those 77 values.
 
 **WZ cluster** — the official German industry classification the company is registered under
-(`wz_titles.yaml`, read by `wz_cluster.py`). A different question by a different authority. It is
+(`wz_divisions`, read by `wz_cluster.py`). A different question by a different authority. It is
 derived, never decided, so nothing about it needs labelling.
 
 Every case below is a mistake that either happened during the measurements or would have. The
@@ -20,6 +20,10 @@ where one branch clearly won *fell*, 338 to 316. More matches, worse answers.
 Where a rule lives in the code, this file **imports and calls it** rather than restating it. A check
 that rebuilds the rule it is checking agrees with itself no matter what the real code does — which is
 exactly what a model-answer section here once did.
+
+The taxonomy here is a small fixture with the real fields of the keywords it uses: this file needs no
+database. What the real tables must hold (77 fields, `sicherheit` removed, 87 WZ divisions in 22
+sections) is checked by `scripts/test_migration_image.sh` on a freshly migrated database (#84).
 
 Run it after touching `branch_classifier.py`, `content_pages.py` or the taxonomy:
 
@@ -58,8 +62,41 @@ def section(title: str) -> None:
     print(f"\n-- {title} --")
 
 
+#: (field, keyword) as in `technology_field_keywords`, for the keywords the checks below use.
+FIXTURE_KEYWORDS = [
+    ("Batterietechnologien", "Batterierecycling"),
+    ("Handel", "Einzelhandel"),
+    ("Bahnindustrie", "European Train Control System (ETCS)"),
+    ("Bahnindustrie", "Schienenfahrzeuge"),
+    ("Bahnindustrie", "Signaltechnik"),
+    ("Bauindustrie", "Holzbau"),
+    ("Maschinen- und Anlagenbau", "Industrieanlagen"),
+    ("Advanced Materials", "Nanotechnologie"),
+    ("Defence Tech", "Verteidigung"),
+    *((field, "Leichtbau") for field in ("Additive Fertigung", "Advanced Materials", "Automobilwirtschaft")),
+    *((field, "Nachhaltigkeit") for field in ("Automobilwirtschaft", "Ernährungsindustrie", "Recycling")),
+    *((field, "Robotik") for field in ("Automobilwirtschaft", "Logistik")),
+    *((field, "Steuerung") for field in ("Fernwärme", "Stromnetz", "Windenergie")),
+    *((field, "Sensorik") for field in ("Bahnindustrie", "Defence Tech", "Drohnen", "Elektroindustrie",
+                                        "Mikroelektronik", "Photonik", "Robotik")),
+]
+
+
+def fixture_taxonomy(*, hyphen_is_boundary: bool | None = None) -> bc.Taxonomy:
+    fields = [{"name": f, "name_en": f"{f} (en)"} for f in sorted({f for f, _ in FIXTURE_KEYWORDS})]
+    return bc.taxonomy_from_rows(fields, FIXTURE_KEYWORDS, hyphen_is_boundary=hyphen_is_boundary)
+
+
+#: (division, title, section, section_title) as in `wz_divisions`, for the codes checked below.
+FIXTURE_DIVISIONS = wz_cluster.clusters_from_rows([
+    ("56", "Gastronomie", "I", "GASTGEWERBE"),
+    ("70", "Verwaltung und Führung von Unternehmen und Betrieben; Unternehmensberatung", "N",
+     "ERBRINGUNG VON WISSENSCHAFTLICHEN UND TECHNISCHEN DIENSTLEISTUNGEN"),
+])
+
+
 def main() -> int:
-    taxonomy = bc.load_taxonomy()
+    taxonomy = fixture_taxonomy()
 
     # -------------------------------------------------------------------------------------
     section("a keyword never matches inside a German compound")
@@ -101,11 +138,8 @@ def main() -> int:
     # appears on 1.8% of our texts and "einzelhandel" on 3.0%, and only one of them names an
     # industry. Document frequency cannot separate them, so a person did — in the taxonomy, with a
     # comment, and NOT with a stop-list in the code.
-    check("'sicherheit' is not a keyword", "sicherheit" in taxonomy.keyword_branches, False)
-    check("...and Defence Tech still has keywords that name the industry",
-          len(taxonomy.branches["Defence Tech"]["keywords"]) >= 10, True)
-    check("'verteidigung' still finds it",
-          "Defence Tech" in taxonomy.keyword_branches["verteidigung"], True)
+    # Whether it is still removed is a fact about the data, checked on a migrated database by
+    # `scripts/test_migration_image.sh` (#84), not here.
 
     # -------------------------------------------------------------------------------------
     section("the same text in any spelling gives the same answer")
@@ -167,10 +201,10 @@ def main() -> int:
     # no mapping, no judgement — which is why this column needs no labelling.
     for code, division in (("56", "56"), ("56.1", "56"), ("56.11", "56"), ("56.11.1", "56"),
                            ("94.99.9", "94"), ("70.10.4", "70")):
-        got = wz_cluster.cluster_for(code)
+        got = wz_cluster.cluster_for(code, clusters=FIXTURE_DIVISIONS)
         check(f"{code!r} sits in division {division}", got.division if got else None, division)
 
-    gastro = wz_cluster.cluster_for("56.11.1")
+    gastro = wz_cluster.cluster_for("56.11.1", clusters=FIXTURE_DIVISIONS)
     check("...and the division has its official name", gastro.division_title, "Gastronomie")
     check("...and rolls up to a section letter", gastro.section, "I")
     check("...with the section's name", gastro.section_title, "GASTGEWERBE")
@@ -178,15 +212,13 @@ def main() -> int:
     # A company with no code has no cluster. That is not an error and not an empty cluster: nothing
     # was classified because nothing was registered.
     for empty in (None, "", "   ", "X"):
-        check(f"no cluster for {empty!r}", wz_cluster.cluster_for(empty), None)
+        check(f"no cluster for {empty!r}", wz_cluster.cluster_for(empty, clusters=FIXTURE_DIVISIONS), None)
 
-    # A division this edition of wz_titles.yaml does not know still gets its division back, with the
-    # titles empty. "We know where it sits, we cannot name the place" must not look like missing
-    # source data — that is how a stale titles file hides.
-    check("the titles file is loadable at all", bool(wz_cluster.load_clusters().division_titles), True)
-    check("87 divisions are known", len(wz_cluster.load_clusters().division_titles), 87)
-    check("...in 22 sections",
-          len({s for s, _ in wz_cluster.load_clusters().division_sections.values()}), 22)
+    # A division the table does not know still gets its division back, with the titles empty. "We
+    # know where it sits, we cannot name the place" must not look like missing source data.
+    unknown = wz_cluster.cluster_for("94.99.9", clusters=FIXTURE_DIVISIONS)
+    check("an unknown division keeps its number", unknown.division if unknown else None, "94")
+    check("...with no title", (unknown.division_title, unknown.section) if unknown else None, ("", ""))
 
     # -------------------------------------------------------------------------------------
     section("not deciding: four different answers, never added together")
@@ -381,9 +413,11 @@ def main() -> int:
           bool(ecom_strict.search("e-commerce-lösungen")), False)
     # Flipping it has to change the version stamped into every row, or two runs look identical.
     check("the rule is part of the taxonomy version",
-          bc.load_taxonomy().version == bc.hashlib.sha256(
-              bc.TAXONOMY_PATH.read_text(encoding="utf-8").encode("utf-8")).hexdigest()[:12],
+          fixture_taxonomy(hyphen_is_boundary=True).version == fixture_taxonomy(hyphen_is_boundary=False).version,
           False)
+    check("...and so is every keyword",
+          bc.taxonomy_from_rows([{"name": "Handel", "name_en": "Trade"}], [("Handel", "Einzelhandel")]).version
+          == bc.taxonomy_from_rows([{"name": "Handel", "name_en": "Trade"}], []).version, False)
 
     print(f"\n{'FAILED' if FAILURES else 'all checks passed'}")
     for label in FAILURES:

@@ -34,8 +34,8 @@ is correctly described by both.
 
 | what | where |
 |---|---|
-| the 77 fields and their keywords | `airflow/dags/enrichment/branch_taxonomy.yaml` |
-| every WZ code and its name | `airflow/dags/enrichment/wz_titles.yaml` (2,008 codes; rebuilt by `scripts/import_wz_titles.py`) |
+| the 77 fields and their keywords | Postgres: `technology_fields`, `technology_field_keywords` (#84); the app shows them |
+| the 87 WZ divisions and their sections | Postgres: `wz_divisions` (WZ 2025) |
 | keyword matcher | `airflow/dags/enrichment/branch_classifier.py` |
 | WZ lookup | `airflow/dags/enrichment/wz_cluster.py` |
 | fetching services/about pages | `airflow/dags/enrichment/content_pages.py` |
@@ -56,7 +56,8 @@ one reappears.
 ## WZ cluster
 
 `wz_cluster.cluster_for(code)`: the division is `code[:2]`, the section is the letter that owns it in
-`wz_titles.yaml`. No mapping, no threshold, nothing to label.
+`wz_divisions`. No mapping, no threshold, nothing to label. Only the 87 divisions are stored: the
+deeper codes' titles were never read (the YAML with all 2,008 is in git history).
 
 ## Technologiefeld
 
@@ -104,15 +105,17 @@ promoted only on held-out companies people judged and the keywords left empty: a
 reason in `outcome`. Expect `NONE` to be the common case: Berlin's list describes a
 technology economy, and most companies are not in it. Never add a fifth reason.
 
-### Keywords: delete in the YAML, never a stop-list in code
+### Keywords: removed in a migration, never a stop-list in code
 
 Document frequency cannot tell `einzelhandel` (an industry) from `sicherheit` (a quality). `sicherheit`
 alone produced 27 of Defence Tech's 35 assignments: a bed shop, a lift company, an estate agent. It was
-deleted from `branch_taxonomy.yaml` with that count in a comment. 27 keywords have been deleted this
-way.
+removed with that count as its `removed_reason`. 27 keywords have been removed this way; the rows stay
+in `technology_field_keywords` with `removed_at` set, so nobody adds one back unknowingly.
 
 1. **No stop-list in code.** Commonness is already handled by the weights.
-2. **Delete a keyword that is wrong for its field**, in the YAML, with what it cost in a comment. The
+2. **Remove a keyword that is wrong for its field** in a new migration: `UPDATE technology_field_keywords
+   SET removed_at = ..., removed_reason = '...'` with what it cost. Adding one is an `INSERT`. Never
+   delete a row. The
    test is whether the word names an industry or an activity everybody does.
 
 A field carried mostly by one keyword is a warning, not a verdict: `windenergieanlagen` carries 100% of

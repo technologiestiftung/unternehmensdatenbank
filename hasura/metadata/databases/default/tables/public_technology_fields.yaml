@@ -1,0 +1,21 @@
+table:
+  name: technology_fields
+  schema: public
+# Read-only (#84): Berlin's 77 Technologiefelder, for the app's taxonomy page. Changed only by migrations.
+array_relationships:
+  - name: keywords
+    using:
+      foreign_key_constraint_on:
+        column: field
+        table:
+          name: technology_field_keywords
+          schema: public
+select_permissions:
+  - role: user
+    permission:
+      columns:
+        - name
+        - name_en
+        - senweb_unit
+        - related
+      filter: {}

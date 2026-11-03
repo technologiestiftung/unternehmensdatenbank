@@ -1,0 +1,13 @@
+table:
+  name: wz_divisions
+  schema: public
+# Read-only (#84): the 87 WZ 2025 divisions in 22 sections. Changed only by migrations.
+select_permissions:
+  - role: user
+    permission:
+      columns:
+        - division
+        - title
+        - section
+        - section_title
+      filter: {}
