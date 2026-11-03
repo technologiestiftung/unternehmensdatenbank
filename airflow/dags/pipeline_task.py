@@ -44,8 +44,9 @@ RETRIES = 2
 RETRY_DELAY = timedelta(minutes=10)
 
 #: Tells `run_task` whether a failure is final, so only a failure no retry follows raises an alert.
-#: Templated: rendered when the task runs, from its try number.
-LAST_TRY_ENV = {"PIPELINE_LAST_TRY": "{{ 'true' if ti.try_number > task.retries else 'false' }}"}
+#: Templated: rendered when the task runs. `max_tries`, not `task.retries`: a clear in the UI raises
+#: it to the try number plus the retries, while the try number keeps counting.
+LAST_TRY_ENV = {"PIPELINE_LAST_TRY": "{{ 'true' if ti.try_number > ti.max_tries else 'false' }}"}
 
 
 def _setting(key: str, default: str = "") -> str:
