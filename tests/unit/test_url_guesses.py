@@ -8,7 +8,7 @@ from enrichment import name_frequency, url_patterns
 from enrichment.imprint_extractor import extract_register_numbers
 
 COMMON = frozenset({"berlin", "foerderverein", "verlag", "medien"})
-AFFIXES = ("{}-berlin", "{}-{legal}")
+AFFIXES = ("{}-berlin", "{}-{legal}", "{}berlin")
 
 
 def _hosts(name: str, **settings) -> list[str]:
@@ -19,9 +19,16 @@ def test_legal_forms_and_the_owner_are_not_name_words() -> None:
     assert url_patterns.name_words("Aktion gegen den Hunger gGmbH") == ["aktion", "gegen", "den", "hunger"]
     assert url_patterns.name_words("Zentralkonsum eG") == ["zentralkonsum"]
     assert url_patterns.name_words("Wester Styling UG (haftungsbeschränkt)") == ["wester", "styling"]
-    assert url_patterns.name_words("Alt Marzahner Apotheke Inhaber Martin Pöhlmann e.K.") == [
-        "alt", "marzahner", "apotheke"]
+    assert url_patterns.legal_form_slug("Wester Styling UG (haftungsbeschränkt)") == "ug"
     assert url_patterns.name_words("Inhalt Media GmbH") == ["inhalt", "media"]
+
+
+def test_the_owner_is_left_out_of_guesses_but_not_out_of_verification() -> None:
+    name = "Alt Marzahner Apotheke Inhaber Martin Pöhlmann e.K."
+    hosts = _hosts(name)
+    assert "alt-marzahner-apotheke.de" in hosts
+    assert not any("poehlmann" in h or "martin" in h for h in hosts)
+    assert url_patterns.name_words(name) [-2:] == ["martin", "poehlmann"]
 
 
 def test_single_letters_and_digits_are_guessed_too() -> None:
@@ -49,6 +56,8 @@ def test_the_new_guesses_come_after_every_older_one_and_on_de_only() -> None:
     extra = [c for c in after if c.pattern in url_patterns.EXTRA_PATTERNS]
     assert extra and all(c.host.endswith(".de") for c in extra)
     assert "navitas-bildung-ggmbh.de" in [c.host for c in extra]
+    assert "navitasbildungberlin.de" in [c.host for c in extra]
+    assert "wester-styling-ug.de" in _hosts("Wester Styling UG (haftungsbeschränkt)", affixes=AFFIXES)
     assert [c.rank for c in after] == list(range(len(after)))
 
 

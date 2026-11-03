@@ -124,14 +124,12 @@ OWNER_CLAUSE_RE = re.compile(r"\bInh(?:aber(?:in)?\b|\.).*$", flags=re.IGNORECAS
 
 
 def legal_form_slug(company_name: str) -> str:
-    """The name's last legal form as a domain writes it: "Navitas gGmbH" -> "ggmbh", "" for none."""
-    forms = LEGAL_SUFFIX_RE.findall(company_name)
+    """The name's last legal form as a domain writes it: "Navitas gGmbH" -> "ggmbh", "" for none.
+
+    "haftungsbeschränkt" only qualifies the "UG" before it: "Wester UG (haftungsbeschränkt)" -> "ug".
+    """
+    forms = [f for f in LEGAL_SUFFIX_RE.findall(company_name) if not f.lower().startswith("haftungsbeschr")]
     return normalize(forms[-1]).replace(" ", "") if forms else ""
-
-
-def without_legal_form(company_name: str) -> str:
-    """The name with its legal form and an owner clause removed, as the guesses use it."""
-    return LEGAL_SUFFIX_RE.sub(" ", OWNER_CLAUSE_RE.sub(" ", company_name))
 
 #: Words that say what a company owns rather than what it does. A "Verwaltungs GmbH" is the
 #: administrative shell of an operating business; its website, if any, is the operating
@@ -254,7 +252,7 @@ def name_words(company_name: str, *, keep_single: bool = False) -> list[str]:
     part of a word. Single letters and digits are dropped unless `keep_single`: "8 Green Bottles"
     is `8greenbottles.de`, "X-Filme" is `x-filme.de` (#89).
     """
-    stripped = without_legal_form(company_name)
+    stripped = LEGAL_SUFFIX_RE.sub(" ", company_name)
     words = [w for w in normalize(stripped).split() if keep_single or len(w) > 1]
     return words
 
@@ -298,7 +296,7 @@ def name_word_spellings(company_name: str) -> list[tuple[str, list[str]]]:
     library, for a form German businesses seldom register while `ss` is available. The variant
     therefore collapses onto the first rather than costing a lookup.
     """
-    stripped = without_legal_form(company_name)
+    stripped = LEGAL_SUFFIX_RE.sub(" ", company_name)
     out = [(SPELLING_TRANSLITERATED, name_words(company_name))]
     if not _HAS_UMLAUT_RE.search(company_name):
         return out
@@ -578,7 +576,8 @@ def _extra_shapes(company_name: str, words: list[str], common: frozenset[str] | 
                 # "berlin" added to a name that says Berlin already, or to a word many names share.
                 if added in stem_words or not distinctive(stem_words):
                     continue
-                shapes += [(template.replace("{legal}", legal).format("-".join(stem_words)), "affix")]
+                sep = "-" if "{}-" in template or "-{}" in template else ""
+                shapes += [(template.replace("{legal}", legal).format(sep.join(stem_words)), "affix")]
     return shapes
 
 
@@ -588,8 +587,10 @@ def generate_candidates(company_name: str, city: str | None = None, *,
     """Guessed URLs for a company, best guess first.
 
     `city` adds `<name>-<city>.de`, which is how tradespeople and franchise branches name
-    their sites. It is tried last because it is the least likely shape.
+    their sites. It is tried last because it is the least likely shape. An owner clause is left
+    out of every guess, but not of the name words verification checks.
     """
+    company_name = OWNER_CLAUSE_RE.sub(" ", company_name)
     spellings = name_word_spellings(company_name)
     if not spellings or not spellings[0][1]:
         return []
