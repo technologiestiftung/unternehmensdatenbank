@@ -90,7 +90,7 @@ one line:
 pipeline_task_failed target=foerderkatalog.main:run_foerderkatalog last_try=true error=HTTPError: 503 Server Error …
 ```
 
-Only the error's type and the first 200 characters of its message, never a page's text.
+Only the error's type and the first 200 characters of its message's first line, never a page's text.
 `last_try=false` means Airflow will run the task again (twice, 10 minutes apart); `true` means no
 retry follows. `pipeline_task` hands it to the pod as the environment variable `PIPELINE_LAST_TRY`.
 
