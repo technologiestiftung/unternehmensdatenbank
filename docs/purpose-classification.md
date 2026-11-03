@@ -47,7 +47,8 @@ because "no field fits" and "the text is too thin" are different findings.
 
 ## How a field is decided
 
-The keyword scoring is `branch_classifier`'s, reused: same normalizing, same pattern, same
+The keyword scoring is `branch_classifier`'s, reused: the same keywords (`technology_field_keywords`,
+#84), same normalizing, same pattern, same
 `MIN_SCORE` 2.0 and `MIN_MARGIN` 1.5. Two differences:
 
 1. **Document frequency is counted over purpose texts only.** Register prose is a different vocabulary

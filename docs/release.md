@@ -39,7 +39,9 @@ initContainers:
 
 **Test locally:** `scripts/test_migration_image.sh` runs the image twice against an empty Postgres 15
 with role names that are not ours: the first run applies everything, the second nothing, and the
-writer can insert where the reader cannot update. CI runs it too.
+writer can insert where the reader cannot update. It also checks the taxonomy tables (#84): 77 fields,
+544 active and 27 removed keywords, 87 WZ divisions in 22 sections, and that the writer cannot insert
+a keyword. CI runs it too.
 
 ## The pipelines image
 

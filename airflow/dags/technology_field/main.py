@@ -142,9 +142,9 @@ def classify_all(
 ) -> dict[str, bc.Assignment]:
     """company_id -> its answer, weighed over every company in `reads` ({id: (keywords, had_text)}).
 
-    Keywords no longer in the YAML are dropped here, so deleting one (CLAUDE.md, rule 5) takes effect
-    on the next run. shortcut: a keyword ADDED to the YAML only reaches companies read after the
-    edit; re-read from the corpus (#61) once it stores the text.
+    Removed keywords are dropped here, so removing one (CLAUDE.md, rule 5) takes effect on the next
+    run. shortcut: a keyword ADDED by a migration only reaches companies read after it; re-read from
+    the corpus (#61) once it stores the text.
     """
     current = {
         company_id: ({k: s for k, s in keywords.items() if k in taxonomy.keyword_branches}, had_text)

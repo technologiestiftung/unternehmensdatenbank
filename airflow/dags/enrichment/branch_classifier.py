@@ -3,7 +3,8 @@
 A **branch** here means one thing and one thing only: a value of Berlin's column *Branche /
 Technologie- und Anwendungsfeld*. There are 77 of them — "Bahnindustrie", "Quantentechnologien",
 "Gastgewerbe" — and each comes with a handful of **keywords**, words that suggest a company belongs
-there. "Schienenfahrzeuge" suggests Bahnindustrie. Both live in `branch_taxonomy.yaml`.
+there. "Schienenfahrzeuge" suggests Bahnindustrie. Both live in Postgres: `technology_fields` and
+`technology_field_keywords` (#84).
 
 A company's answer is one of those 77 values, or **NONE**. There is no third possibility, and the
 only thing that may produce a value is **the company's own text**: its services pages, its homepage,
@@ -24,7 +25,7 @@ official classification to do it. It is the same mistake this repo already docum
 side: a register number on a page proves the page is *about* a company, never that it *is* that
 company's site.
 
-It never fetches anything, never touches a database, and never imports `confidence`. That last one
+It never fetches anything, reads the database only in `load_taxonomy`, and never imports `confidence`. That last one
 is deliberate: `confidence.py` is the only place that decides whether a page *belongs to* a company,
 and the question here — what field the company works in — must not be able to influence that.
 
@@ -113,6 +114,7 @@ correct answer rather than a failure.
 from __future__ import annotations
 
 import hashlib
+import json
 import logging
 import math
 import os
@@ -120,13 +122,9 @@ import re
 import unicodedata
 from collections import Counter
 from dataclasses import dataclass, field
-from pathlib import Path
 from typing import Any, Iterable, Mapping
 
 log = logging.getLogger(__name__)
-
-HERE = Path(__file__).resolve().parent
-TAXONOMY_PATH = Path(os.getenv("BRANCH_TAXONOMY_PATH") or HERE / "branch_taxonomy.yaml")
 
 #: How high a branch's score has to be before it is called the answer. Calibrated against homepage
 #: text; richer text moves every score up, so re-check it after changing what gets read.
@@ -199,66 +197,83 @@ def _pattern_for(keyword: str, *, hyphen_is_boundary: bool | None = None) -> re.
 class Taxonomy:
     """Berlin's branch list, plus the lookups the matcher needs."""
 
-    #: Branch name -> whatever the YAML said about it (senweb_unit, berlin_partner, related).
+    #: Branch name -> name_en, senweb_unit, related and its active keywords.
     branches: dict[str, dict[str, Any]]
     #: Normalised keyword -> the branches that claim it. A keyword can belong to several.
     keyword_branches: dict[str, frozenset[str]]
     #: Normalised keyword -> compiled pattern. Built once; matching 527 patterns over 860 pages is
     #: the whole cost of this module and it is measured in seconds.
     patterns: dict[str, re.Pattern[str]]
-    #: First 12 hex of a hash over the file **and** the matching rule in force. Model answers are
-    #: cached against it, so editing the list — or flipping `HYPHEN_IS_BOUNDARY`, which changes what
-    #: every keyword matches — invalidates exactly the answers that could have changed. It is also
-    #: written into every row of `branches.jsonl`, which is what lets two runs be told apart.
+    #: First 12 hex of a hash over the fields, the active keywords **and** the matching rule in force.
+    #: Written into every classified row, so editing the list — or flipping `HYPHEN_IS_BOUNDARY`,
+    #: which changes what every keyword matches — tells two runs apart.
     version: str
 
     def branch_names(self) -> list[str]:
         return sorted(self.branches)
 
     def english(self, branch: str) -> str:
-        """The English name the database stores for a branch (`name_en` in the YAML)."""
+        """The English name the database stores for a branch (`technology_fields.name_en`)."""
         return self.branches[branch]["name_en"]
 
     def english_names(self) -> list[str]:
         return sorted(self.english(branch) for branch in self.branches)
 
 
-def load_taxonomy(path: Path | None = None) -> Taxonomy:
-    """Read `branch_taxonomy.yaml`. Raises rather than returning an empty taxonomy.
+def taxonomy_from_rows(
+    fields: Iterable[Mapping[str, Any]],
+    keywords: Iterable[tuple[str, str]],
+    *,
+    hyphen_is_boundary: bool | None = None,
+) -> Taxonomy:
+    """The taxonomy from `technology_fields` rows and active (field, keyword) pairs.
 
-    An empty taxonomy classifies nothing, and "nothing was classified" reads exactly like a broken
-    scorer — so a missing or malformed file has to fail where it happened.
+    Raises rather than returning an empty taxonomy: an empty one classifies nothing, and "nothing was
+    classified" reads exactly like a broken scorer.
     """
-    import yaml
-
-    target = path or TAXONOMY_PATH
-    raw = target.read_text(encoding="utf-8")
-    data = yaml.safe_load(raw) or {}
-    branches = data.get("branches") or {}
+    branches = {row["name"].strip(): {**row, "keywords": []} for row in fields}
     if not branches:
-        raise ValueError(f"{target} contains no branches")
-    missing = [name for name, meta in branches.items() if not (meta or {}).get("name_en")]
+        raise ValueError("the taxonomy contains no fields")
+    missing = sorted(name for name, meta in branches.items() if not meta.get("name_en"))
     if missing:
-        raise ValueError(f"{target}: branches without name_en: {missing}")
+        raise ValueError(f"fields without name_en: {missing}")
 
+    pairs = sorted(set(keywords))
     keyword_branches: dict[str, set[str]] = {}
-    clean: dict[str, dict[str, Any]] = {}
-    for name, meta in branches.items():
-        branch = name.strip()
-        clean[branch] = dict(meta or {})
-        for keyword in (meta or {}).get("keywords") or []:
-            key = normalize(keyword)
-            if len(key) >= 2:
-                keyword_branches.setdefault(key, set()).add(branch)
+    for branch, keyword in pairs:
+        branches[branch]["keywords"].append(keyword)
+        key = normalize(keyword)
+        if len(key) >= 2:
+            keyword_branches.setdefault(key, set()).add(branch)
 
-    return Taxonomy(
-        branches=clean,
-        keyword_branches={k: frozenset(v) for k, v in keyword_branches.items()},
-        patterns={k: _pattern_for(k) for k in keyword_branches},
-        version=hashlib.sha256(
-            f"{raw}|hyphen={int(HYPHEN_IS_BOUNDARY)}".encode("utf-8")
-        ).hexdigest()[:12],
+    hyphen = HYPHEN_IS_BOUNDARY if hyphen_is_boundary is None else hyphen_is_boundary
+    content = json.dumps(
+        [sorted((n, m["name_en"]) for n, m in branches.items()), pairs], ensure_ascii=False
     )
+    return Taxonomy(
+        branches=branches,
+        keyword_branches={k: frozenset(v) for k, v in keyword_branches.items()},
+        patterns={k: _pattern_for(k, hyphen_is_boundary=hyphen) for k in keyword_branches},
+        version=hashlib.sha256(f"{content}|hyphen={int(hyphen)}".encode("utf-8")).hexdigest()[:12],
+    )
+
+
+def load_taxonomy() -> Taxonomy:
+    """Read the fields and their active keywords from Postgres (#84)."""
+    from source_enrichment_common import get_connection
+
+    connection = get_connection()
+    try:
+        with connection, connection.cursor() as cur:
+            cur.execute("SELECT name, name_en, senweb_unit, related FROM public.technology_fields")
+            fields = [dict(zip(("name", "name_en", "senweb_unit", "related"), row)) for row in cur.fetchall()]
+            cur.execute(
+                "SELECT field, keyword FROM public.technology_field_keywords WHERE removed_at IS NULL"
+            )
+            keywords = [tuple(row) for row in cur.fetchall()]
+    finally:
+        connection.close()
+    return taxonomy_from_rows(fields, keywords)
 
 
 # ---------------------------------------------------------------------------------------

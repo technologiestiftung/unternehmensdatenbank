@@ -5,7 +5,7 @@ import json
 
 import pytest
 
-from enrichment.branch_classifier import load_taxonomy
+from enrichment.branch_classifier import taxonomy_from_rows
 from enrichment.branch_observations import confidence_for, planned_writes
 from enrichment.branch_textcat import (
     DECIDED_BY_TEXTCAT,
@@ -117,7 +117,13 @@ def test_training_learns_to_separate_fields() -> None:
     assert accuracy([(predict(nlp, t)[0], label) for t, label in examples])[0] > 0.8
 
 
-def test_planned_writes_store_the_english_names() -> None:
+def test_planned_writes_store_the_english_names(monkeypatch) -> None:
+    from enrichment import branch_observations
+
+    names = {"Architekturmarkt": "Architecture Market", "Additive Fertigung": "Additive Manufacturing",
+             "5G- bzw. 6G Anwendungen": "5G/6G Applications"}
+    taxonomy = taxonomy_from_rows([{"name": k, "name_en": v} for k, v in names.items()], [])
+    monkeypatch.setattr(branch_observations, "_taxonomy", lambda: taxonomy)
     branch_row = {"outcome": "assigned", "technology_field": "Architekturmarkt",
                   "withheld_branch": "Additive Fertigung", "decided_by": DECIDED_BY_KEYWORDS}
     purpose_row = {"outcome": ASSIGNED_KEYWORDS, "purpose_field": "5G- bzw. 6G Anwendungen",
@@ -133,11 +139,9 @@ def test_planned_writes_store_the_english_names() -> None:
     }
 
 
-def test_load_taxonomy_refuses_a_branch_without_an_english_name(tmp_path) -> None:
-    path = tmp_path / "taxonomy.yaml"
-    path.write_text('branches:\n  "Software":\n    keywords: ["Software"]\n', encoding="utf-8")
+def test_the_taxonomy_refuses_a_field_without_an_english_name() -> None:
     with pytest.raises(ValueError, match="name_en"):
-        load_taxonomy(path)
+        taxonomy_from_rows([{"name": "Software", "name_en": None}], [("Software", "Software")])
 
 
 def test_german_votes_translate_english_names_and_keep_unknown_ones() -> None:

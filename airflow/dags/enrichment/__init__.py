@@ -29,10 +29,11 @@ Register
   register_names.py                  name key and legal form, shared with the OffeneRegister import
 
 Industry classification (three columns that must never be mixed: docs/branch-classification.md)
-  branch_classifier.py, branch_taxonomy.yaml   Technologiefeld from the words a company publishes
+  branch_classifier.py                         Technologiefeld from the words a company publishes;
+                                               fields and keywords in Postgres (technology_fields, #84)
   branch_textcat.py                            spaCy text classifier, seeded by the keywords, trained by technology_field_train
   purpose_branch.py                            the same 77 fields from the register purpose
-  wz_cluster.py, wz_titles.yaml                the official WZ cluster, a lookup
+  wz_cluster.py                                the official WZ cluster, a lookup in wz_divisions
 
 Writing
   observations.py, branch_observations.py   turn results into `company_field_observations`

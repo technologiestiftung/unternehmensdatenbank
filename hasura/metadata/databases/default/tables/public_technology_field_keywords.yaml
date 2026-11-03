@@ -1,0 +1,13 @@
+table:
+  name: technology_field_keywords
+  schema: public
+# Read-only (#84): every keyword, removed ones with the reason. Changed only by migrations.
+select_permissions:
+  - role: user
+    permission:
+      columns:
+        - field
+        - keyword
+        - removed_at
+        - removed_reason
+      filter: {}

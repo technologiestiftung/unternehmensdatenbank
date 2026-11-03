@@ -133,8 +133,9 @@ purpose, so for Berlin only the Technologiefeld can be filled today.
 2. **A Technologiefeld requires a downloaded website**, and the gate is Postgres, not a file.
 3. **`NONE` has four reasons kept apart:** `no_website`, `torn`, `no_keyword`, `no_text`.
 4. **Never match a keyword inside a German compound.** `BRANCH_HYPHEN_IS_BOUNDARY` is **off**, measured.
-5. **A keyword wrong for its field is deleted from the YAML with the count in a comment**, never a
-   stop-list in code.
+5. **The fields and keywords are tables** (`technology_fields`, `technology_field_keywords`,
+   `wz_divisions`; #84), changed only by a migration. A keyword wrong for its field gets
+   `removed_at` and a `removed_reason` with the count, never a deleted row or a stop-list in code.
 6. **Keywords decide; the spaCy classifier only fills gaps**, promoted only when it beats the
    keywords on companies people voted on.
 7. **Agreement is not correctness.** Hand checks happen on the fixed `review_sample` (V10, the app's
@@ -143,7 +144,7 @@ purpose, so for Berlin only the Technologiefeld can be filled today.
 ## Migrations
 
 `V1__baseline.sql` is the whole schema as of 2026-10-31, squashed four times (last: V1-V10, #68); the
-next migration is V3. Numbers like "(V3)" in comments and docs name the pre-squash migration, to find
+next migration is V4. Numbers like "(V3)" in comments and docs name the pre-squash migration, to find
 its reasoning in git history. A database migrated before the squash needs its Flyway history reset once
 ([data-model](docs/data-model.md), "Migration strategy"). **Forward-only:** never edit a migration
 that ran anywhere shared. Flyway runs under `--profile tools`, not with `docker compose up`; on the

@@ -12,3 +12,6 @@
 - "!include public_v_source_fields.yaml"
 - "!include public_review_sample.yaml"
 - "!include public_v_review_results.yaml"
+- "!include public_technology_fields.yaml"
+- "!include public_technology_field_keywords.yaml"
+- "!include public_wz_divisions.yaml"
