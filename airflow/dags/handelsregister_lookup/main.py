@@ -273,7 +273,8 @@ def _make_dag():  # noqa: ANN201
         schedule=None, start_date=datetime(2026, 10, 1, tzinfo=timezone.utc), catchup=False,
         max_active_runs=1, tags=["sources", "register"],
     ) as dag:
-        lookups = pipeline_task("look_up_companies", run_lookups, returns=True)
+        lookups = pipeline_task("look_up_companies", run_lookups, returns=True,
+                                retries=0)  # a retry would spend the request limit again
         wrote_any = ShortCircuitOperator(
             task_id="wrote_any", python_callable=lambda ti: bool(ti.xcom_pull(task_ids="look_up_companies")),
         )

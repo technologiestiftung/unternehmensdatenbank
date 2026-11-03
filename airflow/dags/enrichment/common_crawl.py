@@ -52,12 +52,16 @@ class Record:
 
 
 def _get(url: str, *, byte_range: tuple[int, int] | None = None, attempts: int = 5) -> bytes:
-    """GET with backoff: the archive answers 503 "slow down" under load."""
+    """GET with backoff: the archive answers 503 "slow down" under load, and 403 to a throttled IP.
+
+    403 is retried like 429: on play (#86) one block out of 300 was refused that way, while the same
+    block read fine from another machine.
+    """
     headers = {"Range": f"bytes={byte_range[0]}-{byte_range[0] + byte_range[1] - 1}"} if byte_range else {}
     for attempt in range(attempts):
         try:
             response = session().get(url, headers=headers, timeout=60)
-            if response.status_code not in (429, 500, 502, 503, 504):
+            if response.status_code not in (403, 429, 500, 502, 503, 504):
                 response.raise_for_status()
                 return response.content
         except (OSError, ValueError):

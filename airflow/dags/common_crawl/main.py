@@ -86,9 +86,9 @@ def run_harvest() -> int:
         blocks = state["blocks"][start:start + BLOCKS_PER_RUN]
 
         with ThreadPoolExecutor(max_workers=WORKERS) as pool:
-            # Each block keeps only its Impressum records: 300 blocks of lines would be ~500 MB.
-            records = [r for found_in_block in pool.map(lambda b: cc.impressum_records(cc.read_block(crawl, b)), blocks)
-                       for r in found_in_block]
+            read = read_blocks(pool, crawl, blocks)
+            blocks = blocks[:len(read)]
+            records = [r for found_in_block in read for r in found_in_block]
             found = [(record, registers) for record, registers in
                      zip(records, pool.map(_registers, records)) if registers]
 
@@ -111,6 +111,24 @@ def run_harvest() -> int:
         return len(blocks)
     finally:
         connection.close()
+
+
+def read_blocks(pool: ThreadPoolExecutor, crawl: str, blocks: list) -> list[list[cc.Record]]:
+    """The Impressum records of each block, in order, up to the first block the archive refuses.
+
+    The blocks before a refused one are kept, so the position moves on to it and the next run starts
+    there. Raises only when not even the first block could be read.
+    """
+    read: list[list[cc.Record]] = []
+    try:
+        # Each block keeps only its Impressum records: 300 blocks of lines would be ~500 MB.
+        for found_in_block in pool.map(lambda b: cc.impressum_records(cc.read_block(crawl, b)), blocks):
+            read.append(found_in_block)
+    except OSError as error:  # requests' errors are OSErrors too
+        if not read:
+            raise
+        log.warning("Block %d of this batch refused (%s); keeping the %d before it.", len(read), error, len(read))
+    return read
 
 
 def _registers(record: cc.Record) -> list[tuple[str, str]]:

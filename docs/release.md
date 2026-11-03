@@ -81,6 +81,32 @@ docker run --rm -e PG_DSN="host=host.docker.internal port=5433 dbname=unternehme
   udb-pipelines pipeline_coordinator.main:run_pipeline_coordinator
 ```
 
+### When a task fails
+
+A task fails as a pod (or container) whose run function raised. Before it exits, `run_task` logs
+one line:
+
+```
+pipeline_task_failed target=foerderkatalog.main:run_foerderkatalog last_try=true error=HTTPError: 503 Server Error …
+```
+
+Only the error's type and the first 200 characters of its message's first line, never a page's text.
+`last_try=false` means Airflow will run the task again (twice, 10 minutes apart); `true` means no
+retry follows. `pipeline_task` hands it to the pod as the environment variable `PIPELINE_LAST_TRY`.
+
+**Play:** Alloy ships every container's log to Loki, the task containers too. An alert in Grafana
+(folder `host-server-alerts`, contact point `tsb-slack-ds-infra-alerts`) on this query sends a Slack
+message to #ds-infra-alerts:
+
+```
+sum by (target) (count_over_time({source="<play's HOST_HOSTNAME>"} |= "pipeline_task_failed" |= "last_try=true" | regexp `target=(?P<target>\S+)` [15m]))
+```
+
+with the condition "above 0". The rule is created by hand in the Grafana UI, like the other rules
+in `ds-root-server/grafana/alerts/`.
+
+**Hub:** open. Which monitoring reads the pods' logs there is a question for the hub team.
+
 ## Staging and production
 
 | what you do | workflow | image tags | environment |

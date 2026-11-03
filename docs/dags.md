@@ -37,7 +37,12 @@ Shared code:
   `insert_text_observation`'s `ON CONFLICT ... WHERE` repeats the partial index predicate of the
   upsert key verbatim: widen one, widen the other, same commit.
 - `pipeline_task.py`: build every task with `pipeline_task(task_id, run)`; it runs in Airflow's
-  Python locally and as a pod on the hub ([release](release.md)).
+  Python locally and as a pod on the hub ([release](release.md)). A failed task runs again twice,
+  10 minutes apart: on play a 503 from foerderportal.bund.de and a Wikidata timeout each failed a
+  run that would otherwise wait for the next schedule (#86). `retries=0` turns that off;
+  `handelsregister_lookup` uses it, because a retry would spend the portal's request limit again.
+  `run` may live in any module of its package (`technology_field.train:run_train`); a unit test
+  resolves every task of every DAG file the way a pod does.
 - Import modules **by package name** (`from enrichment.confidence import ...`), never as a bare
   module after a `sys.path` insert: two same-named files would get each other's.
 

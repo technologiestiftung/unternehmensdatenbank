@@ -4,7 +4,9 @@ from __future__ import annotations
 import json
 
 from enrichment import common_crawl as cc
-from common_crawl.main import next_state, own_pages
+import pytest
+
+from common_crawl.main import next_state, own_pages, read_blocks
 
 
 def _cdx(url: str, status: str = "200", mime: str = "text/html") -> str:
@@ -48,6 +50,22 @@ def test_the_harvest_finishes_a_crawl_then_waits_for_the_next() -> None:
     assert next_state(done, "CC-MAIN-2026-39") is None
     assert next_state(done, "CC-MAIN-2026-43") == {"crawl": "CC-MAIN-2026-43", "blocks": None, "next": 0}
     assert next_state(None, "CC-MAIN-2026-43") == {"crawl": "CC-MAIN-2026-43", "blocks": None, "next": 0}
+
+
+def test_a_refused_block_keeps_the_blocks_before_it(monkeypatch) -> None:
+    from concurrent.futures import ThreadPoolExecutor
+
+    def read_block(crawl: str, block: str) -> str:
+        if block == "refused":
+            raise OSError("403 Forbidden")
+        return block
+
+    monkeypatch.setattr(cc, "read_block", read_block)
+    monkeypatch.setattr(cc, "impressum_records", lambda lines: [lines])
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        assert read_blocks(pool, "CC", ["a", "b", "refused", "c"]) == [["a"], ["b"]]
+        with pytest.raises(OSError):
+            read_blocks(pool, "CC", ["refused", "a"])
 
 
 def test_a_page_naming_more_than_two_of_our_companies_is_a_group_page() -> None:
