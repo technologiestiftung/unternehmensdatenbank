@@ -14,7 +14,8 @@ Website discovery
   own_site.py         the single predicate for "is this page the company's own site", as
                       opposed to a directory or register page ABOUT it
   structured_data.py, evidence read off the page itself; `name_frequency.py` measures which
-  name_frequency.py   name words are too common to identify a company
+  name_frequency.py   name words are too common to identify a company, and which affixes
+                      ("-berlin") websites add to their name (#89)
   url_scorer.py       how distinctive a company name is
 
 Reading pages
