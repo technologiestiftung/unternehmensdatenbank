@@ -125,8 +125,8 @@ Impressum gives an email at the domain, on 1,527 the page's structured data name
 `review_sample` first, then a fixed order) into a CSV for a person to mark `own_site`, `directory`,
 `parent`, `namesake` or `other`; `--score` gives the share of own sites, overall and per flag (for
 example exact-name domain plus email at the domain). Only at about 9 in 10 is a shown value
-defensible; otherwise these sites stay suggestions in the claims list, which already lists them under
-`website` (`v_company_claims`).
+defensible; otherwise these sites are never shown as the website, and stay only in the app's list
+of all claims under `website` (`v_company_claims`), like every other claim.
 
 **Checked by hand on play, 2026-11-04: 2 of 40 are the company's own site (5%).** 50 drawn, 10 not
 judgeable (5 parked or broken, 5 without enough on the page). Of the 40: 2 own sites, 29 another
@@ -135,8 +135,10 @@ in another German city), 5 a parent or group company, 4 another organisation. No
 bar: exact-name domain 2 of 21, exact-name domain plus email at the domain 1 of 5. A model suggested
 verdicts first; a person checked every row, and only the person's verdicts are counted.
 
-**Decision: these sites stay hidden, as today.** Neither shown nor offered as a suggestion. Instead,
-the signals against a site get sharper, so the wrong ones drop out of the 0.34 pool (#111, #112, #113):
+**Decision: these sites are never shown as the website, as today.** They stay listed in the app's
+"all claims" toggle (`v_company_claims`), like every other claim, and nothing more. Instead, the
+signals against a site get sharper: #111 (Impressum abroad, unread register numbers) marks most of the
+wrong ones as wrong, so they drop out of the 0.34 pool; #112 and #113 follow up the rest. The signals:
 an Impressum abroad, register numbers we cannot read yet (`HR B 61871`, Swiss `CH-…`), a page that
 proves another company in our database, and register numbers we do not have at all. Two right sites
 the guesses missed: `hma-berlin.de` (abbreviation plus "berlin", #89) and a "Legal Notice" link
