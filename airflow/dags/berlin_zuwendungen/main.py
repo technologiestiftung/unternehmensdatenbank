@@ -30,7 +30,7 @@ import re
 from datetime import date, datetime, timezone
 from typing import Any
 
-from enrichment.register_match import RegisterEntry, write_entry
+from enrichment.register_match import RegisterEntry, is_new_firm, snapshot_line, write_entry
 from enrichment.register_names import legal_form
 from source_enrichment_common import ensure_source, finish_sync_run, get_connection, start_sync_run
 
@@ -138,29 +138,6 @@ def run_berlin_zuwendungen() -> None:
 def _source_id(cur: Any) -> str:
     return ensure_source(cur, key=SOURCE_KEY, name="Zuwendungsdatenbank des Landes Berlin", source_type="fundings",
                          metadata={"dag_id": DAG_ID})
-
-
-def snapshot_line(cur: Any) -> dict[str, int]:
-    """Per register type, the number OffeneRegister's Berlin range ends at (99.9th percentile)."""
-    cur.execute(
-        r"""
-        SELECT substring(i.value from '(HR[AB]) \d'),
-               percentile_disc(0.999) WITHIN GROUP (ORDER BY substring(i.value from 'HR[AB] (\d+)')::int)
-        -- The numbers OffeneRegister itself wrote: one a later source adds to such a company (a new
-        -- number after a change of legal form) must not move the line.
-        FROM public.company_identifiers i
-        JOIN public.sources s ON s.id = i.source_id AND s.key = 'offeneregister'
-        WHERE i.scheme = 'register' AND i.value ~ '^Berlin \(Charlottenburg\) HR[AB] \d+'
-        GROUP BY 1
-        """
-    )
-    return dict(cur.fetchall())
-
-
-def is_new_firm(register: str, line: dict[str, int]) -> bool:
-    """'HRB 239529' above the snapshot's HRB range. False without a line: nothing to compare with."""
-    kind, _, number = register.partition(" ")
-    return kind in line and number.isdigit() and int(number) > line[kind]
 
 
 def entry_for(register: str, name: str, city: str | None, year: date | None, grants: int,

@@ -102,6 +102,30 @@ def company_for(
     return company_id, method, candidates
 
 
+def snapshot_line(cur: Any) -> dict[str, int]:
+    """Per register type, the number OffeneRegister's Berlin range ends at (99.9th percentile). A number
+    above it was registered after the 2017–2019 snapshot (`berlin_zuwendungen`, `common_crawl`)."""
+    cur.execute(
+        r"""
+        SELECT substring(i.value from '(HR[AB]) \d'),
+               percentile_disc(0.999) WITHIN GROUP (ORDER BY substring(i.value from 'HR[AB] (\d+)')::int)
+        -- The numbers OffeneRegister itself wrote: one a later source adds to such a company (a new
+        -- number after a change of legal form) must not move the line.
+        FROM public.company_identifiers i
+        JOIN public.sources s ON s.id = i.source_id AND s.key = 'offeneregister'
+        WHERE i.scheme = 'register' AND i.value ~ '^Berlin \(Charlottenburg\) HR[AB] \d+'
+        GROUP BY 1
+        """
+    )
+    return dict(cur.fetchall())
+
+
+def is_new_firm(register: str, line: dict[str, int]) -> bool:
+    """'HRB 239529' above the snapshot's HRB range. False without a line: nothing to compare with."""
+    kind, _, number = register.partition(" ")
+    return kind in line and number.isdigit() and int(number) > line[kind]
+
+
 def record_match(cur: Any, *, record_id: str, method: str, candidates: list[tuple[str, str | None]]) -> None:
     """How a source record was linked, set once, and the candidates a person has to decide."""
     # Set once: on a re-run a created company is found by its identifier, and that must not overwrite

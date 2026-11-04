@@ -32,6 +32,7 @@ from psycopg2.extras import Json, execute_values
 from enrichment import common_crawl as cc
 from enrichment import confidence as conf
 from enrichment import proposals
+from enrichment.register_match import is_new_firm, snapshot_line
 from source_enrichment_common import ensure_source, finish_sync_run, get_connection, start_sync_run
 
 log = logging.getLogger(__name__)
@@ -96,6 +97,7 @@ def run_harvest() -> int:
             source_id = _source_id(cur)
             sync_run_id = start_sync_run(cur, source_id=source_id)
             proposed = propose(cur, found, source_id=source_id, crawl=crawl)
+            unknown, new_firms = unknown_numbers(cur, found)
             state["next"] = start + len(blocks)
             cur.execute(
                 """
@@ -106,8 +108,10 @@ def run_harvest() -> int:
             )
             finish_sync_run(cur, sync_run_id=sync_run_id, records_seen=len(records), records_created=proposed,
                             records_updated=0, records_failed=0)
-        log.info("%s blocks %d-%d of %d: %d Impressum pages, %d with a Berlin register number, %d proposals.",
-                 crawl, start, state["next"], len(state["blocks"]), len(records), len(found), proposed)
+        log.info("%s blocks %d-%d of %d: %d Impressum pages, %d with a Berlin register number, %d proposals;"
+                 " %d register numbers we do not have, %d of them above the OffeneRegister range (#99).",
+                 crawl, start, state["next"], len(state["blocks"]), len(records), len(found), proposed,
+                 unknown, new_firms)
         return len(blocks)
     finally:
         connection.close()
@@ -137,6 +141,23 @@ def _registers(record: cc.Record) -> list[tuple[str, str]]:
     except Exception:  # noqa: BLE001  one unreadable page must not discard the batch
         log.warning("Could not read %s from the archive", record.url)
         return []
+
+
+def unknown_numbers(cur: Any, found: list[tuple[cc.Record, list[tuple[str, str]]]]) -> tuple[int, int]:
+    """(Berlin register numbers on these pages we do not have, how many of them are above the
+    OffeneRegister range). Counted only, to decide whether companies should be created from such pages
+    (#99): 1 of 14 pages in a 100-block sample of CC-MAIN-2026-43 named one."""
+    numbers = {(kind, number) for _, registers in found for kind, number in registers}
+    if not numbers:
+        return 0, 0
+    values = [value for kind, number in numbers for value in cc.identifier_values(kind, number)]
+    cur.execute("SELECT value FROM public.company_identifiers WHERE scheme = 'register' AND value = ANY(%s)",
+                (values,))
+    known = {value for (value,) in cur.fetchall()}
+    unknown = [(kind, number) for kind, number in numbers
+               if not known.intersection(cc.identifier_values(kind, number))]
+    line = snapshot_line(cur) if unknown else {}
+    return len(unknown), sum(is_new_firm(f"{kind} {number}", line) for kind, number in unknown)
 
 
 def own_pages(matches: list[tuple[str, str]]) -> set[str]:
