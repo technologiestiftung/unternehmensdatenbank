@@ -5,10 +5,14 @@ under the European Commission's reuse notice (exact terms to be confirmed): per 
 dates, per participating organisation its name, address, kind and EU contribution.
 
 **Measured on 2026-11-04:** 813 Berlin organisations, 523 of them private companies (`activityType`
-PRC) with 1,198 project participations and EUR 748 million of EU contribution. On play, 299 of the 523
-match exactly one company of ours by name key and Berlin, 7 several, 217 none: mostly firms founded
-after the OffeneRegister snapshot, and names CORDIS writes without umlauts ("INGENIEURBURO"), which the
-name key keeps apart from "Ingenieurbüro".
+PRC) with 1,198 project participations and EUR 748 million of EU contribution. Two measurements:
+
+1. Name match only, on the play server (our test server with the current data), 2026-11-04: 299 of
+   the 523 match exactly one company of ours by name key and Berlin, 7 several, 217 none: mostly firms
+   founded after the OffeneRegister snapshot, and names CORDIS writes without umlauts
+   ("INGENIEURBURO"), which the name key keeps apart from "Ingenieurbüro".
+2. The full load with the existing linking, on the local database copy, rolled back: 1,188
+   participations of 518 companies, 761 of them linked to 319 companies, EUR 248 million.
 
 Only private companies are loaded, one row per participation (`fkz` = "cordis-<project>-<organisation>"):
 research institutes, universities and public bodies are not companies of this database. CORDIS gives no
@@ -80,7 +84,9 @@ def _euro(value: str | None) -> float | None:
 def is_berlin_company(org: dict[str, str]) -> bool:
     """A private company (`PRC`) with a German address in Berlin ("Berlin", "BERLIN", "Berlin-Adlershof")."""
     city = (org.get("city") or "").strip().lower()
-    return org.get("country") == "DE" and org.get("activityType") == "PRC" and city.startswith("berlin")
+    return org.get("country") == "DE" and org.get("activityType") == "PRC" and (
+        city == "berlin" or city.startswith(("berlin-", "berlin "))
+    )
 
 
 def funding_rows(orgs: Iterable[dict[str, str]], projects: dict[str, dict[str, str]], funding_type: str) -> list[tuple]:

@@ -27,6 +27,8 @@ def test_only_private_companies_in_berlin() -> None:
     assert is_berlin_company(org(city="BERLIN-ADLERSHOF"))
     assert not is_berlin_company(org(activityType="REC"))  # a research institute
     assert not is_berlin_company(org(city="Potsdam"))
+    assert not is_berlin_company(org(city="Berlingerode"))  # Thuringia
+    assert not is_berlin_company(org(city="Berlinchen"))  # Brandenburg
     assert not is_berlin_company(org(country="AT", city="Berlin"))
 
 
