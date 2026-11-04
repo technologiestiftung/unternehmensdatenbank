@@ -1,6 +1,6 @@
 # DAGs: the pipelines
 
-Twenty-two DAG packages and one library, all in `airflow/dags/`. Which source each one reads:
+Twenty-three DAG packages and one library, all in `airflow/dags/`. Which source each one reads:
 [sources](sources.md). Every DAG starts paused (Airflow's default, `dags_are_paused_at_creation`);
 unpausing it in Airflow is the only switch.
 
