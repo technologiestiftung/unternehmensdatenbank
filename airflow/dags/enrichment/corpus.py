@@ -255,7 +255,7 @@ def get_bytes(name: str) -> bytes | None:
 
 def check() -> None:
     """Write one small object and read it back; raises on any failure. Needs only the permissions the
-    pipelines need (HeadBucket, PutObject, GetObject); the object is overwritten, never deleted."""
+    pipelines need (s3:ListBucket, s3:PutObject, s3:GetObject); the object is overwritten, never deleted."""
     if not configured():
         raise RuntimeError("CORPUS_S3_ENDPOINT is not set")
     name, data = "healthcheck/ping", datetime.now(timezone.utc).isoformat().encode()

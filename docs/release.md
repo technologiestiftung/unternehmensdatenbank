@@ -90,8 +90,9 @@ is only a working copy. The hub needs the bucket and the `CORPUS_S3_*` settings 
   | `CORPUS_S3_SECURE` | `true` when the endpoint uses TLS |
 
 - **Create the bucket before the first run.** The code creates it only when it is missing, which a key
-  scoped to one bucket usually may not do. The key needs, on that bucket only: HeadBucket, GetObject,
-  PutObject and HEAD on objects (StatObject). The code never lists or deletes.
+  scoped to one bucket usually may not do. The key needs, on that bucket only, the policy actions
+  `s3:ListBucket` (the check that the bucket exists), `s3:GetObject` (also covers HEAD on objects) and
+  `s3:PutObject`. The code never lists objects and never deletes.
 - **Private, no public read.** The bucket holds Impressum pages in full, with names, emails and
   phone numbers. A privacy review comes before any of it leaves local development (#18).
 - **Check it right after deploying.** In a pod or container of the pipelines image, from the DAGs
