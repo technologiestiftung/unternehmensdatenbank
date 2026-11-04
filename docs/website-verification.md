@@ -116,9 +116,9 @@ and no matching postcode, stays at 0.34 and is never shown. Two patterns from th
 the company moved since the 2017–2019 snapshot, so its postcode no longer matches; or the domain does
 not carry the name and is refused before its Impressum is read (`tub.co`).
 
-**How many**, local Berlin database, 2026-11-04: **7,042** active companies (sole traders left out)
-without a proven website have such a site. On 3,705 the domain is exactly the name, on 1,194 the
-Impressum gives an email at the domain, on 1,550 the page's structured data names the company. On play
+**How many**, local Berlin database, 2026-11-04: **7,014** active companies (sole traders left out)
+without a proven website have such a site. On 3,696 the domain is exactly the name, on 1,171 the
+Impressum gives an email at the domain, on 1,527 the page's structured data names the company. On play
 (2026-11-03) the issue counted 21,641 without these filters.
 
 **Nothing is shown before a hand check.** `scripts/check_unproven_sites.py --draw` draws 50 (the
