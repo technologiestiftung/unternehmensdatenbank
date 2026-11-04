@@ -96,7 +96,7 @@ python scripts/import_register_managers.py
 
 `V1__baseline.sql` is the whole schema as of 2026-10-31, squashed four times: the first example data set,
 V1-V9 and V10 on 2026-10-28, V1-V10 on 2026-10-31 (#68). Forward-only from here: never edit a
-migration that has run anywhere shared, add new ones as `V{N}__description.sql` (the next is V3), and
+migration that has run anywhere shared, add new ones as `V{N}__description.sql` (the next is V5), and
 run Flyway before Airflow touches the changed schema.
 The headings below and comments in the code keep the pre-squash migration numbers ("V3", "V10") so
 git history finds the reasoning.
@@ -382,10 +382,19 @@ court keeps each up for 8 weeks, so a weekly run misses none. It reads only the 
 What each source has collected, for the app's `/sources` page. **Counts only, never a value**, so
 `email` and `phone` can be counted (stored, but 0 shown).
 
-- `v_source_overview`: per source, records, companies covered (records and linked grants), companies
-  created, and the latest run read live from `source_sync_runs`. `runs_interrupted` counts runs left
-  `running` although a newer one started (a restarted worker leaves its row behind).
-- `v_source_fields`: per source and field, values stored, companies, and `companies_shown`.
+- `v_source_overview`: per source, its description, terms, `terms_url` and schedule (German, filled
+  by migration `V4__source_details.sql`; `terms` NULL means nobody checked them), records, companies
+  covered (records and linked grants), companies created, records matched by identifier, by name
+  (`fuzzy`) and by hand, the average match confidence, and the latest run read live from
+  `source_sync_runs`. `runs_interrupted` counts runs left `running` although a newer one started (a
+  restarted worker leaves its row behind).
+- `v_source_fields`: per source and field, values stored, companies, `companies_shown`,
+  `companies_beaten` (another source's *different* value is shown; the same value agreed, it did not
+  lose), the average confidence and values per confidence range (0, below 0.35, 0.35–0.6, 0.6–0.8,
+  0.8 and up). The ranges are the same fixed numbers for every field, not each field's resolver bar.
   Grants count as the field `fundings`.
+- `v_source_runs`: the last 20 runs per source, live, with counts and `interrupted`; never the error
+  message.
 - The counts are stored (`source_stats_mv`, `source_field_stats_mv`) and refreshed by
-  `refresh_company_profile()`. Hasura exposes both read-only (`source_overview` with `fields`).
+  `refresh_company_profile()`. Hasura exposes them read-only (`source_overview` with `fields` and
+  `recent_runs`, and `source_runs`; `recent_runs` because `runs` is already a count column).

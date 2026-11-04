@@ -1,0 +1,11 @@
+table:
+  name: v_source_runs
+  schema: public
+configuration:
+  custom_name: source_runs
+# Read-only, for the app's source page: the last 20 runs per source. Counts only, never an error message.
+select_permissions:
+  - role: user
+    permission:
+      columns: "*"
+      filter: {}
