@@ -144,7 +144,7 @@ purpose, so for Berlin only the Technologiefeld can be filled today.
 ## Migrations
 
 `V1__baseline.sql` is the whole schema as of 2026-10-31, squashed four times (last: V1-V10, #68); the
-next migration is V9. Numbers like "(V3)" in comments and docs name the pre-squash migration, to find
+next migration is V10. Numbers like "(V3)" in comments and docs name the pre-squash migration, to find
 its reasoning in git history. A database migrated before the squash needs its Flyway history reset once
 ([data-model](docs/data-model.md), "Migration strategy"). **Forward-only:** never edit a migration
 that ran anywhere shared. Flyway runs under `--profile tools`, not with `docker compose up`; on the

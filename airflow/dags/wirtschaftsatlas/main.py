@@ -40,7 +40,7 @@ from psycopg2.extras import Json, execute_values
 
 from enrichment import confidence as conf
 from enrichment import proposals
-from enrichment.register_names import DISSOLVED
+from enrichment.name_match import match_by_name
 from source_enrichment_common import ensure_source, finish_sync_run, get_connection, start_sync_run
 
 log = logging.getLogger(__name__)
@@ -177,31 +177,12 @@ def match_entries(cur: Any, rows: list[dict[str, Any]], *, source_id: str) -> tu
         GROUP BY 2, 3
         """
     )
-    cur.execute(
-        """
-        WITH named AS (
-          SELECT e.key, p.id AS company_id, p.postcode = e.postcode AS same_postcode,
-                 p.register_status IS DISTINCT FROM %(dissolved)s AS live
-          FROM _entry e
-          JOIN public.company_profile_mv p ON public.normalize_company_name(p.name) = e.name_key
-        ),
-        by_postcode AS (
-          SELECT key, (array_agg(company_id))[1] AS company_id FROM named
-          WHERE same_postcode GROUP BY key HAVING count(*) = 1
-        ),
-        by_name AS (
-          SELECT key, (array_agg(company_id))[1] AS company_id FROM named
-          WHERE live AND key NOT IN (SELECT key FROM by_postcode) GROUP BY key HAVING count(*) = 1
-        )
-        SELECT e.key, m.company_id, m.confidence, e.name, e.street, e.postcode, e.city, e.websites, e.layers
-        FROM (SELECT key, company_id, 0.9 AS confidence FROM by_postcode
-              UNION ALL SELECT key, company_id, 0.8 FROM by_name) m
-        JOIN _entry e USING (key)
-        WHERE cardinality(e.websites) > 0
-        """,
-        {"dissolved": DISSOLVED},
-    )
-    matches = cur.fetchall()
+    cur.execute("SELECT key, name, postcode FROM _entry WHERE cardinality(websites) > 0")
+    found = match_by_name(cur, [(key, name, [postcode]) for key, name, postcode in cur.fetchall()])
+    cur.execute("SELECT key, name, street, postcode, city, websites, layers FROM _entry WHERE key = ANY(%s)",
+                (list(found),))
+    matches = [(key, found[key][0], found[key][1], name, street, postcode, city, websites, layers)
+               for key, name, street, postcode, city, websites, layers in cur.fetchall()]
     cur.execute("SELECT count(*) FROM _entry")
     seen = cur.fetchone()[0]
     cur.execute("SELECT external_id, company_id::text FROM public.company_source_records WHERE source_id = %s",
