@@ -55,7 +55,7 @@ POPULATION = """
       AND e.website_url IS NULL
       AND e.merged_into IS NULL
       AND e.legal_form IS DISTINCT FROM 'e. K.'
-      AND e.company_name !~* '(eingetragene[rn]? kauf|inhaber)'
+      AND e.company_name !~* '(\\me\\.\\s*k(fm|ffr|fr)?\\M|eingetragene[rn]? kauf|inhaber|\\minh\\.)'
     ORDER BY o.company_id, o.observed_at DESC
 """
 
