@@ -64,6 +64,8 @@ x-airflow-common: &airflow-common
     CORPUS_S3_BUCKET: ${CORPUS_S3_BUCKET:-company-corpus}
     CORPUS_S3_SECURE: ${CORPUS_S3_SECURE:-false}
     CORPUS_MAX_AGE_DAYS: ${CORPUS_MAX_AGE_DAYS:-90}
+    # OpenRegister's API key (#88), for the `openregister` DAG; empty: the DAG fails at once with a clear error.
+    OPENREGISTER_API_KEY: ${OPENREGISTER_API_KEY:-}
     # Skip companies whose register_status is not 'active' (153,915 of the 296,486 Berlin companies).
     # See source_enrichment_common.ACTIVE_ONLY.
     DISCOVERY_ACTIVE_ONLY: ${DISCOVERY_ACTIVE_ONLY:-true}

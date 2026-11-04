@@ -17,6 +17,8 @@ cannot drift apart:
 """
 from __future__ import annotations
 
+import re
+from dataclasses import dataclass, field
 from typing import Any
 
 from enrichment.register_names import DISSOLVED
@@ -122,3 +124,92 @@ def record_match(cur: Any, *, record_id: str, method: str, candidates: list[tupl
             """,
             (record_id, candidate_id, register_status),
         )
+
+
+# --- writing a register entry ------------------------------------------------------------------
+
+#: The register facts a register source may state. A value a source no longer states drops to 0.
+ENTRY_FIELDS = ("name", "legal_form", "address", "postcode", "city", "register_status", "business_purpose")
+
+
+def same_name(a: str, b: str) -> bool:
+    """The same name but for case, spaces and punctuation: "e. V." and "e.V.", "GMBH" and "GmbH"."""
+    return re.sub(r"\W+", "", a.lower()) == re.sub(r"\W+", "", b.lower())
+
+
+@dataclass(frozen=True)
+class RegisterEntry:
+    """One company as a register source states it."""
+
+    external_id: str
+    external_url: str
+    name: str
+    #: How `company_identifiers` may hold the entry, the plain spelling first.
+    registers: list[str]
+    city: str | None
+    active: bool | None
+    #: Field name to value, among `ENTRY_FIELDS`.
+    fields: dict[str, str]
+    #: When the source last confirmed the entry, as `source_updated_at`.
+    updated: str
+    payload: dict[str, Any]
+    #: Further identifiers, scheme to value, e.g. {"lei": "5299..."}.
+    identifiers: dict[str, str] = field(default_factory=dict)
+
+
+def write_entry(cur: Any, entry: RegisterEntry, *, source_id: str, sync_run_id: str, created_by: str) -> str:
+    """One entry: its company (found, or created when active), source record, identifiers and observations.
+
+    Returns how it was linked, "skipped" for an inactive entry we cannot match by register number: a
+    deleted firm's name can be used again, so an inactive entry is never linked by name (#88).
+    """
+    from source_enrichment_common import insert_text_observation, upsert_source_record
+
+    company_id, method, candidates = company_for(
+        cur, registers=entry.registers, name=entry.name, city=entry.city, source_id=source_id,
+        created_by=created_by, create=bool(entry.active))
+    if company_id is None:
+        return "skipped"
+    record_id, _ = upsert_source_record(
+        cur, company_id=company_id, source_id=source_id, external_id=entry.external_id,
+        external_url=entry.external_url, source_company_name=entry.name, source_payload=entry.payload,
+    )
+    record_match(cur, record_id=record_id, method=method, candidates=candidates)
+    for scheme, value in entry.identifiers.items():
+        cur.execute(
+            """
+            INSERT INTO public.company_identifiers (company_id, scheme, value, source_id)
+            VALUES (%s, %s, %s, %s) ON CONFLICT (scheme, value) DO NOTHING
+            """,
+            (company_id, scheme, value, source_id),
+        )
+    fields = dict(entry.fields)
+    # Against another source's name only: compared with its own, a source would drop its name on the next
+    # read, the older name would win again, and the name would flip on every run.
+    cur.execute(
+        """
+        SELECT value_text FROM public.company_field_observations
+        WHERE company_id = %s AND field_name = 'name' AND is_canonical AND source_id <> %s
+        """,
+        (company_id, source_id),
+    )
+    current = cur.fetchone()
+    if current and "name" in fields and same_name(current[0], fields["name"]):
+        # "EVENIAT GMBH" for "eveniat GmbH": only a different name is news.
+        del fields["name"]
+    for field_name, value in fields.items():
+        insert_text_observation(
+            cur, company_id=company_id, source_record_id=record_id, source_id=source_id, sync_run_id=sync_run_id,
+            field_name=field_name, value_text=value, confidence=1.0, source_updated_at=entry.updated,
+            metadata={"decided_by": "read from the end of the registered name"} if field_name == "legal_form" else {},
+        )
+    # A value this entry no longer states (a moved address, a new name) drops out of the race.
+    cur.execute(
+        """
+        UPDATE public.company_field_observations SET confidence = 0, updated_at = now()
+        WHERE company_source_record_id = %s AND field_name = ANY(%s) AND confidence <> 0
+          AND NOT (field_name, value_text) IN (SELECT * FROM unnest(%s::text[], %s::text[]))
+        """,
+        (record_id, list(ENTRY_FIELDS), list(fields), list(fields.values())),
+    )
+    return method

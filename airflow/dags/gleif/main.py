@@ -52,15 +52,13 @@ from psycopg2.extras import Json
 
 from enrichment.common_crawl import identifier_values
 from enrichment.imprint_extractor import is_berlin_postcode
-from enrichment.register_match import company_for, record_match
+from enrichment.register_match import RegisterEntry, write_entry
 from enrichment.register_names import ACTIVE, DISSOLVED, legal_form
 from source_enrichment_common import (
     ensure_source,
     finish_sync_run,
     get_connection,
-    insert_text_observation,
     start_sync_run,
-    upsert_source_record,
 )
 
 log = logging.getLogger(__name__)
@@ -77,7 +75,6 @@ TIMEOUT_S = 600
 
 _REGISTER = re.compile(r"\b(HRA|HRB|VR|GnR|PR)\s*(\d+)", re.IGNORECASE)
 STATUS = {"ACTIVE": ACTIVE, "INACTIVE": DISSOLVED}
-FIELDS = ("name", "legal_form", "address", "postcode", "city", "register_status")
 
 COLUMNS = {
     "lei": "LEI", "name": "Entity.LegalName", "authority": "Entity.RegistrationAuthority.RegistrationAuthorityID",
@@ -139,11 +136,6 @@ def parse_row(row: dict[str, str]) -> LeiRecord | None:
     )
 
 
-def same_name(a: str, b: str) -> bool:
-    """The same name but for case, spaces and punctuation: "e. V." and "e.V.", "GMBH" and "GmbH"."""
-    return re.sub(r"\W+", "", a.lower()) == re.sub(r"\W+", "", b.lower())
-
-
 def berlin_records(lines: Iterator[str]) -> Iterator[LeiRecord]:
     """The Berlin records of a GLEIF CSV, read line by line: the full file is 5 GB."""
     for row in csv.DictReader(lines):
@@ -178,56 +170,19 @@ def _download(kind: str) -> Iterator[LeiRecord]:
             yield from berlin_records(io.TextIOWrapper(raw, encoding="utf-8", newline=""))
 
 
+def entry_for(record: LeiRecord) -> RegisterEntry:
+    """A GLEIF record as the register entry `write_entry` writes."""
+    return RegisterEntry(
+        external_id=record.lei, external_url=f"https://search.gleif.org/#/record/{record.lei}", name=record.name,
+        registers=record.registers, city=record.city, active=record.status == ACTIVE, fields=record.fields(),
+        updated=record.updated, identifiers={"lei": record.lei},
+        payload={"lei": record.lei, "register": record.registers[0], "status": record.status, "updated": record.updated},
+    )
+
+
 def write_record(cur: Any, record: LeiRecord, *, source_id: str, sync_run_id: str) -> str:
-    """One LEI: its company (found, or created when active), source record, identifier and observations.
-    Returns how it was linked, "skipped" for an inactive entity we do not have."""
-    company_id, method, candidates = company_for(
-        cur, registers=record.registers, name=record.name, city=record.city, source_id=source_id,
-        created_by=SOURCE_KEY, create=record.status == ACTIVE)
-    if company_id is None:
-        return "skipped"
-    record_id, _ = upsert_source_record(
-        cur, company_id=company_id, source_id=source_id, external_id=record.lei,
-        external_url=f"https://search.gleif.org/#/record/{record.lei}", source_company_name=record.name,
-        source_payload={"lei": record.lei, "register": record.registers[0], "status": record.status,
-                        "updated": record.updated},
-    )
-    record_match(cur, record_id=record_id, method=method, candidates=candidates)
-    cur.execute(
-        """
-        INSERT INTO public.company_identifiers (company_id, scheme, value, source_id)
-        VALUES (%s, 'lei', %s, %s) ON CONFLICT (scheme, value) DO NOTHING
-        """,
-        (company_id, record.lei, source_id),
-    )
-    fields = record.fields()
-    cur.execute(
-        """
-        SELECT value_text FROM public.company_field_observations
-        WHERE company_id = %s AND field_name = 'name' AND is_canonical AND source_id <> %s
-        """,
-        (company_id, source_id),
-    )
-    current = cur.fetchone()
-    if current and same_name(current[0], record.name):
-        # "EVENIAT GMBH" for "eveniat GmbH": GLEIF often writes capitals; only a different name is news.
-        del fields["name"]
-    for field, value in fields.items():
-        insert_text_observation(
-            cur, company_id=company_id, source_record_id=record_id, source_id=source_id, sync_run_id=sync_run_id,
-            field_name=field, value_text=value, confidence=1.0, source_updated_at=record.updated,
-            metadata={"decided_by": "read from the end of the registered name"} if field == "legal_form" else {},
-        )
-    # A value this record no longer states (a moved address, a new name) drops out of the race.
-    cur.execute(
-        """
-        UPDATE public.company_field_observations SET confidence = 0, updated_at = now()
-        WHERE company_source_record_id = %s AND field_name = ANY(%s) AND confidence <> 0
-          AND NOT (field_name, value_text) IN (SELECT * FROM unnest(%s::text[], %s::text[]))
-        """,
-        (record_id, list(FIELDS), list(fields), list(fields.values())),
-    )
-    return method
+    """One LEI through `enrichment.register_match.write_entry`. Returns how it was linked."""
+    return write_entry(cur, entry_for(record), source_id=source_id, sync_run_id=sync_run_id, created_by=SOURCE_KEY)
 
 
 def run_load() -> int:
