@@ -59,6 +59,7 @@ def test_a_company_or_a_person_ahead_of_the_street_is_not_the_address() -> None:
 
 
 def test_streets_of_several_words_are_still_streets() -> None:
-    for street in ["Unter den Linden 16", "Straße des 17. Juni 135", "Am Kupfergraben 6a", "Alt-Moabit 59-61",
+    for street in ["Alte Potsdamer Straße 7", "Große Hamburger Straße 28", "Neue Schönhauser Straße 3",
+                   "Unter den Linden 16", "Straße des 17. Juni 135", "Am Kupfergraben 6a", "Alt-Moabit 59-61",
                    "Rheinsberger Str. 76/77", "Karl-Marx-Allee 31"]:
         assert address_on(f"{street}\n10117 Berlin")["address"] == f"{street}, 10117 Berlin"

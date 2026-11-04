@@ -47,6 +47,7 @@ from typing import Any
 
 from enrichment.confidence import register_parts
 from enrichment.imprint_extractor import (
+    _PLACE_SUFFIXES,
     _UNIT_NOT_A_TOWN,
     POSTCODE_RE,
     extract_register_numbers,
@@ -95,12 +96,15 @@ _SEGMENT_SPLIT = re.compile(r"[,|·•;]")
 # A company name or a person ahead of the street on the same line is not part of the address.
 _LEGAL_FORM = re.compile("|".join(rf"(?:{pattern})(?![a-zäöüß])" for _, pattern in LEGAL_FORMS), re.IGNORECASE)
 _MAX_STREET_WORDS = 4
+# "Alte Potsdamer Straße": two capitalised words and a street word alone are a street, not a person.
+_STREET_WORDS = {*_PLACE_SUFFIXES, "damm", "chaussee"}
 
 
 def _is_street(name: str) -> bool:
     words = name.split()
     return (len(words) <= _MAX_STREET_WORDS and not _LEGAL_FORM.search(name)
-            and not (len(words) > 2 and looks_like_person_name(" ".join(words[:2]))))
+            and not (len(words) > 2 and looks_like_person_name(" ".join(words[:2]))
+                     and not (len(words) == 3 and words[2].rstrip(".").casefold() in _STREET_WORDS)))
 
 
 def _street_before(text: str, start: int) -> str | None:
