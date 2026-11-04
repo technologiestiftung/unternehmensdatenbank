@@ -39,12 +39,34 @@ from psycopg2.extras import Json
 from enrichment.common_crawl import identifier_values
 from enrichment.register_match import RegisterEntry, write_entry
 from enrichment.register_names import ACTIVE, DISSOLVED, legal_form
-from source_enrichment_common import ensure_source, finish_sync_run, get_connection, start_sync_run
+from source_enrichment_common import (
+    SourceDetails,
+    ensure_source,
+    finish_sync_run,
+    get_connection,
+    schedule_label,
+    start_sync_run,
+)
 
 log = logging.getLogger(__name__)
 
 DAG_ID = "openregister"
 SOURCE_KEY = "openregister"
+SCHEDULE = None
+#: What the app's source page says about this source (German).
+DETAILS = SourceDetails(
+    description=(
+        "Das Handelsregister als API: Berliner Firmen, die seit 2019 eingetragen wurden, mit Adresse "
+        "und Unternehmensgegenstand. Über die Registernummer zugeordnet; fehlt die Firma bei uns, "
+        "wird sie angelegt."
+    ),
+    schedule=schedule_label(SCHEDULE),
+    base_url="https://openregister.de",
+    terms=(
+        "Ob OpenRegister das Speichern und regelmäßige Abrufen erlaubt, ist angefragt und noch nicht "
+        "beantwortet. Deshalb startet jeden Lauf ein Mensch."
+    ),
+)
 API = "https://api.openregister.de"
 BERLIN_COURT = "Berlin (Charlottenburg)"
 #: Searches per run, 10 credits each. The free plan has 500 credits in 30 days.
@@ -142,7 +164,7 @@ def run_search() -> int:
             row = cur.fetchone()
             state = row[0] if row else None
             source_id = ensure_source(cur, key=SOURCE_KEY, name="OpenRegister (Handelsregister API)",
-                                      source_type="register_api", metadata={"dag_id": DAG_ID, "base_url": API})
+                                      source_type="register_api", metadata={"dag_id": DAG_ID, "base_url": API}, details=DETAILS)
             sync_run_id = start_sync_run(cur, source_id=source_id)
         methods: dict[str, int] = {}
         searches = 0
@@ -208,7 +230,7 @@ def _make_dag():  # noqa: ANN201
     with DAG(
         dag_id=DAG_ID,
         description="By hand only: Berlin companies since 2019 from OpenRegister's API, with address and purpose",
-        schedule=None, start_date=datetime(2026, 11, 1, tzinfo=timezone.utc), catchup=False,
+        schedule=SCHEDULE, start_date=datetime(2026, 11, 1, tzinfo=timezone.utc), catchup=False,
         max_active_runs=1, tags=["sources", "register"],
     ) as dag:
         # retries=0: a retry would spend credits again.

@@ -46,10 +46,12 @@ from urllib.parse import urljoin
 from enrichment.register_match import company_for, record_match
 from pipeline_coordinator.resolver import resolve_register_fields
 from source_enrichment_common import (
+    SourceDetails,
     ensure_source,
     finish_sync_run,
     get_connection,
     insert_text_observation,
+    schedule_label,
     start_sync_run,
     upsert_source_record,
 )
@@ -58,6 +60,17 @@ log = logging.getLogger(__name__)
 
 DAG_ID = "register_announcements"
 SOURCE_KEY = "registerbekanntmachungen"
+SCHEDULE = "@weekly"
+#: What the app's source page says about this source (German).
+DETAILS = SourceDetails(
+    description=(
+        "Bekanntmachungen des Registerportals für Berlin (Umwandlungen, Löschungsankündigungen, neue "
+        "Dokumente) der letzten acht Wochen. Nur die Ergebnisliste, nie eine Detailseite. Ein Hinweis"
+        " neben dem Registerstatus, nie seine Änderung."
+    ),
+    schedule=schedule_label(SCHEDULE),
+    base_url="https://www.handelsregister.de/rp_web/bekanntmachungen/welcome.xhtml",
+)
 FIELD_NAME = "register_announcement"
 URL = "https://www.handelsregister.de/rp_web/bekanntmachungen/welcome.xhtml"
 #: Says who we are. Never a browser's user agent.
@@ -237,8 +250,7 @@ def run_read() -> None:
         with connection, connection.cursor() as cur:
             source_id = ensure_source(
                 cur, key=SOURCE_KEY, name="Registerbekanntmachungen (handelsregister.de)",
-                source_type="register_announcements", metadata={"dag_id": DAG_ID, "base_url": URL},
-            )
+                source_type="register_announcements", metadata={"dag_id": DAG_ID, "base_url": URL}, details=DETAILS)
             sync_run_id = start_sync_run(cur, source_id=source_id)
             new = created = linked = 0
             for item in announcements:
@@ -275,7 +287,7 @@ def _make_dag():  # noqa: ANN201
     with DAG(
         dag_id=DAG_ID,
         description="Berlin's register announcements of the last 8 weeks from handelsregister.de",
-        schedule="@weekly", start_date=datetime(2026, 10, 1, tzinfo=timezone.utc), catchup=False,
+        schedule=SCHEDULE, start_date=datetime(2026, 10, 1, tzinfo=timezone.utc), catchup=False,
         max_active_runs=1, tags=["sources", "register"],
     ) as dag:
         read = pipeline_task("read_announcements", run_read)

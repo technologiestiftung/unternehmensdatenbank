@@ -32,12 +32,29 @@ from typing import Any
 
 from enrichment.register_match import RegisterEntry, is_new_firm, snapshot_line, write_entry
 from enrichment.register_names import legal_form
-from source_enrichment_common import ensure_source, finish_sync_run, get_connection, start_sync_run
+from source_enrichment_common import (
+    SourceDetails,
+    ensure_source,
+    finish_sync_run,
+    get_connection,
+    schedule_label,
+    start_sync_run,
+)
 
 log = logging.getLogger(__name__)
 
 DAG_ID = "berlin_zuwendungen"
 SOURCE_KEY = "berlin_zuwendungen"
+SCHEDULE = "@monthly"
+#: What the app's source page says about this source (German).
+DETAILS = SourceDetails(
+    description=(
+        "Zuwendungen des Landes Berlin an Empfänger mit HRA- oder HRB-Nummer, über die Registernummer"
+        " zugeordnet."
+    ),
+    schedule=schedule_label(SCHEDULE),
+    base_url="https://www.berlin.de/sen/finanzen/service/zuwendungsdatenbank/",
+)
 URL = os.getenv(
     "BERLIN_ZUWENDUNGEN_URL",
     "https://www.berlin.de/sen/finanzen/service/zuwendungsdatenbank/index.php/index/all.json?q=",
@@ -137,7 +154,7 @@ def run_berlin_zuwendungen() -> None:
 
 def _source_id(cur: Any) -> str:
     return ensure_source(cur, key=SOURCE_KEY, name="Zuwendungsdatenbank des Landes Berlin", source_type="fundings",
-                         metadata={"dag_id": DAG_ID})
+                         metadata={"dag_id": DAG_ID}, details=DETAILS)
 
 
 def entry_for(register: str, name: str, city: str | None, year: date | None, grants: int,
@@ -209,7 +226,7 @@ def _make_dag():  # noqa: ANN201
     with DAG(
         dag_id=DAG_ID,
         description="Monthly grants of the Land Berlin from the Zuwendungsdatenbank",
-        schedule="@monthly",
+        schedule=SCHEDULE,
         start_date=datetime(2026, 10, 1, tzinfo=timezone.utc),
         catchup=False,
         max_active_runs=1,

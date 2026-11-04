@@ -41,12 +41,34 @@ from psycopg2.extras import Json, execute_values
 from enrichment import confidence as conf
 from enrichment import proposals
 from enrichment.register_names import DISSOLVED
-from source_enrichment_common import ensure_source, finish_sync_run, get_connection, start_sync_run
+from source_enrichment_common import (
+    SourceDetails,
+    ensure_source,
+    finish_sync_run,
+    get_connection,
+    schedule_label,
+    start_sync_run,
+)
 
 log = logging.getLogger(__name__)
 
 DAG_ID = "wirtschaftsatlas"
 SOURCE_KEY = "wirtschaftsatlas"
+SCHEDULE = None
+#: What the app's source page says about this source (German).
+DETAILS = SourceDetails(
+    description=(
+        "Unternehmen mit Website aus den Branchenebenen des Wirtschaftsatlas von Berlin Partner, über"
+        " Name und Postleitzahl zugeordnet. Jede Website wird wie eine geratene Domain geprüft."
+    ),
+    schedule=schedule_label(SCHEDULE),
+    base_url="https://www.businesslocationcenter.de/wirtschaftsatlas-berlin/",
+    terms=(
+        "Laut Impressum braucht jede Verwendung die vorherige Zustimmung von Berlin Partner. Deshalb "
+        "startet jeden Lauf ein Mensch."
+    ),
+    terms_url="https://www.businesslocationcenter.de/impressum",
+)
 BASE_URL = "https://www.businesslocationcenter.de/wirtschaftsatlas-berlin/"
 CONFIG_URL = BASE_URL + "config/wab.config.json"
 USER_AGENT = "unternehmensdatenbank/1.0 (Technologiestiftung Berlin)"
@@ -66,7 +88,7 @@ def _source_id(cur: Any) -> str:
     return ensure_source(cur, key=SOURCE_KEY, name="Wirtschaftsatlas Berlin (Berlin Partner)",
                          source_type="directory",
                          metadata={"dag_id": DAG_ID, "base_url": BASE_URL,
-                                   "terms": "Impressum: use needs Berlin Partner's prior consent (#105)"})
+                                   "terms": "Impressum: use needs Berlin Partner's prior consent (#105)"}, details=DETAILS)
 
 
 # --- reading the atlas ----------------------------------------------------------------------
@@ -274,7 +296,7 @@ def _make_dag():  # noqa: ANN201
         dag_id=DAG_ID,
         description="Websites from Berlin Partner's Wirtschaftsatlas, verified like a guessed domain; started by hand only",
         # Never a schedule and never a self-trigger: see the module docstring (Berlin Partner's consent).
-        schedule=None, start_date=datetime(2026, 11, 1, tzinfo=timezone.utc), catchup=False,
+        schedule=SCHEDULE, start_date=datetime(2026, 11, 1, tzinfo=timezone.utc), catchup=False,
         max_active_runs=1, tags=["sources", "websites"],
     ) as dag:
         match = pipeline_task("match_entries", run_match, returns=True, retries=0)

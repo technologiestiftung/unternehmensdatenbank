@@ -104,19 +104,18 @@ The headings below and comments in the code keep the pre-squash migration number
 git history finds the reasoning.
 
 **Text is not schema.** What each source is, its origin, terms and schedule (the app's sources pages)
-live in `R__source_details.sql`, a *repeatable* migration: Flyway runs it after the versioned ones and
-again whenever the file changes. A wording fix is an edit there, not a new V-file.
+live in the code that registers the source (`SourceDetails` in each DAG, written by `ensure_source`),
+not in a migration. A wording fix is a code change.
 
 **A database migrated before the squash** (local, play) still has the old files in its Flyway
 history, and Flyway refuses to run until that is reset. No data moves. Only for a database with
 every pre-squash migration up to V6 applied (`flyway info`, the last one `founding year`; V7 and V8
-changed rows only, which the R file now writes); migrate an older one to V6 with the pre-squash files
-first (git history), or build it fresh. Then `migrate` runs the R file:
+changed rows only, which the DAGs now write); migrate an older one to V6 with the pre-squash files
+first (git history), or build it fresh:
 
 ```bash
 docker compose exec -T postgres psql -U app -d unternehmensdatenbank -c "DROP TABLE flyway_schema_history"
 docker compose --profile tools run --rm flyway baseline -baselineVersion=1 -baselineDescription=baseline
-docker compose --profile tools run --rm flyway migrate
 ```
 
 **Copying the database to a server** (play, 2026-10-31): dump only `public`, restore into an empty
@@ -399,8 +398,8 @@ court keeps each up for 8 weeks, so a weekly run misses none. It reads only the 
 What each source has collected, for the app's `/sources` page. **Counts only, never a value**, so
 `email` and `phone` can be counted (stored, but 0 shown).
 
-- `v_source_overview`: per source, its description, terms, `terms_url` and schedule (German, filled
-  by `R__source_details.sql`; `terms` NULL means nobody checked them), records, companies
+- `v_source_overview`: per source, its description, terms, `terms_url` and schedule (German, written
+  by each source's DAG through `ensure_source`; `terms` NULL means nobody checked them), records, companies
   covered (records and linked grants), companies created, records matched by identifier, by name
   (`fuzzy`) and by hand, the average match confidence, and the latest run read live from
   `source_sync_runs`. `runs_interrupted` counts runs left `running` although a newer one started (a

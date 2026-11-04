@@ -32,7 +32,7 @@
 -- can use its own, and default privileges apply to whoever runs this file. The materialized views are
 -- created WITH DATA: refresh_company_profile() refreshes them CONCURRENTLY, which an unpopulated view
 -- refuses. PostGIS and pgvector are created by the database setup, not here. The sources' text for the
--- app is in R__source_details.sql, which Flyway runs after this file.
+-- app is written by each source's DAG (`SourceDetails`, `ensure_source`), not here.
 
 -- pg_dump writes functions before the tables they read; their bodies are checked when called.
 SET check_function_bodies = false;

@@ -34,11 +34,13 @@ from typing import Any
 from enrichment import corpus
 from enrichment import structured_data as sd
 from source_enrichment_common import (
+    SourceDetails,
     ensure_source,
     finish_sync_run,
     get_connection,
     insert_text_observation,
     normalize_company_name_for_search,
+    schedule_label,
     start_sync_run,
     upsert_source_record,
 )
@@ -47,6 +49,16 @@ log = logging.getLogger(__name__)
 
 DAG_ID = "structured_data"
 SOURCE_KEY = "structured_data"
+SCHEDULE = "@weekly"
+#: What the app's source page says about this source (German).
+DETAILS = SourceDetails(
+    description=(
+        "Das Gründungsdatum oder -jahr, das die belegte Website einer Firma in ihren strukturierten "
+        "Daten (schema.org, JSON-LD) über sich selbst angibt. Nur Angaben, die die Firma beim Namen "
+        "nennen; keine Downloads, nur gespeicherte Seiten."
+    ),
+    schedule=schedule_label(SCHEDULE),
+)
 CONFIDENCE = 0.6
 FIELDS = ("established_at", "founding_year")
 _DATE = re.compile(r"^(\d{4})-(\d{2})-(\d{2})")
@@ -56,7 +68,7 @@ _YEAR = re.compile(r"^(\d{4})(?:-\d{2})?$")
 
 def _source_id(cur: Any) -> str:
     return ensure_source(cur, key=SOURCE_KEY, name="Structured data on the company website (schema.org)",
-                         source_type="website", metadata={"dag_id": DAG_ID})
+                         source_type="website", metadata={"dag_id": DAG_ID}, details=DETAILS)
 
 
 def founding(raw: str | None, today: date | None = None) -> tuple[str, str] | None:
@@ -218,7 +230,7 @@ def _make_dag():  # noqa: ANN201
     with DAG(
         dag_id=DAG_ID,
         description="Founding date or year from the structured data of the company's own stored pages",
-        schedule="@weekly", start_date=datetime(2026, 11, 1, tzinfo=timezone.utc), catchup=False,
+        schedule=SCHEDULE, start_date=datetime(2026, 11, 1, tzinfo=timezone.utc), catchup=False,
         max_active_runs=1, tags=["sources", "websites"],
     ) as dag:
         read = pipeline_task("read_structured_data", run_read, returns=True)

@@ -159,9 +159,9 @@ hub as the app's initContainer ([release](docs/release.md)).
   the company list take 71 s.
 - **The sources page reads stored counts** (`source_stats_mv`, `source_field_stats_mv`), refreshed by `refresh_company_profile()`. Counts
   only, never a value.
-- **A source's text for the app is `R__source_details.sql`**, a repeatable migration Flyway reruns
-  when the file changes: edit it in place, never add a V-migration for wording. A new source needs
-  its row there (`ensure_source` registers it without text).
+- **A source's text for the app lives in the code that registers it**: `SourceDetails` passed to
+  `ensure_source` (description, link, terms, schedule), written on every run. The schedule word comes
+  from the DAG's own `SCHEDULE` (`schedule_label`). Never a migration for wording.
 - **A new shown field needs its key in feedback and `v_field_provenance`.**
 - **The observation upsert key is a partial unique index (`uq_obs_company_field_source_value`), and
   `insert_text_observation` repeats its predicate verbatim in `ON CONFLICT (...) WHERE`.** Widen one,

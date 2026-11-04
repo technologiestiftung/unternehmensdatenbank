@@ -37,6 +37,7 @@ from urllib.parse import urlparse
 
 from enrichment import corpus
 from source_enrichment_common import (
+    SourceDetails,
     companies_with_website_to_read,
     ensure_source,
     failed_read_payload,
@@ -51,6 +52,14 @@ log = logging.getLogger(__name__)
 
 DAG_ID = "website_contacts"
 SOURCE_KEY = "impressum_contacts"
+#: What the app's source page says about this source (German).
+DETAILS = SourceDetails(
+    description=(
+        "E-Mail-Adresse und Telefonnummer der Firma aus dem Impressum ihrer belegten Website. "
+        "Gespeichert, nie angezeigt."
+    ),
+    schedule="nach der Website-Suche",
+)
 BATCH_SIZE = int(os.getenv("WEBSITE_CONTACTS_BATCH_SIZE", "50"))
 #: Nothing has measured how often these are right. 0.6 is what `manager_ner` gives an unmeasured
 #: Impressum reading: above the resolver's 0.5 floor, below anything with register evidence.
@@ -129,8 +138,7 @@ def run_read() -> None:
         with connection, connection.cursor() as cur:
             source_id = ensure_source(
                 cur, key=SOURCE_KEY, name="Impressum contacts", source_type="website",
-                metadata={"dag_id": DAG_ID, "rule": RULE},
-            )
+                metadata={"dag_id": DAG_ID, "rule": RULE}, details=DETAILS)
             sync_run_id = start_sync_run(cur, source_id=source_id)
             companies = companies_with_website_to_read(cur, source_id=source_id, limit=BATCH_SIZE)
 

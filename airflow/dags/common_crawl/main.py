@@ -33,12 +33,30 @@ from enrichment import common_crawl as cc
 from enrichment import confidence as conf
 from enrichment import proposals
 from enrichment.register_match import is_new_firm, snapshot_line
-from source_enrichment_common import ensure_source, finish_sync_run, get_connection, start_sync_run
+from source_enrichment_common import (
+    SourceDetails,
+    ensure_source,
+    finish_sync_run,
+    get_connection,
+    schedule_label,
+    start_sync_run,
+)
 
 log = logging.getLogger(__name__)
 
 DAG_ID = "common_crawl"
 SOURCE_KEY = "common_crawl"
+SCHEDULE = "@weekly"
+#: What the app's source page says about this source (German).
+DETAILS = SourceDetails(
+    description=(
+        "Impressumsseiten im Common Crawl, die eine Berliner Registernummer nennen. Die Domain wird "
+        "der Firma mit dieser Nummer vorgeschlagen und wie eine geratene Domain geprüft."
+    ),
+    schedule=schedule_label(SCHEDULE),
+    base_url="https://commoncrawl.org",
+    terms_url="https://commoncrawl.org/terms-of-use",
+)
 #: About 6 minutes of index and 1,500 archive pages; a crawl's .de part is ~38,000 blocks.
 BLOCKS_PER_RUN = int(os.getenv("COMMON_CRAWL_BLOCKS_PER_RUN", "300"))
 WORKERS = int(os.getenv("COMMON_CRAWL_WORKERS", "8"))
@@ -53,7 +71,7 @@ MAX_COMPANIES_PER_PAGE = 2
 
 def _source_id(cur: Any) -> str:
     return ensure_source(cur, key=SOURCE_KEY, name="Common Crawl (Impressum pages with a register number)",
-                         source_type="web_archive", metadata={"dag_id": DAG_ID, "terms": "https://commoncrawl.org/terms-of-use"})
+                         source_type="web_archive", metadata={"dag_id": DAG_ID, "terms": "https://commoncrawl.org/terms-of-use"}, details=DETAILS)
 
 
 # --- harvest --------------------------------------------------------------------------------
@@ -266,7 +284,7 @@ def _make_dag():  # noqa: ANN201
     with DAG(
         dag_id=DAG_ID,
         description="Company websites from Common Crawl Impressum pages, verified like a guessed domain",
-        schedule="@weekly", start_date=datetime(2026, 10, 1, tzinfo=timezone.utc), catchup=False,
+        schedule=SCHEDULE, start_date=datetime(2026, 10, 1, tzinfo=timezone.utc), catchup=False,
         max_active_runs=1, tags=["sources", "websites", "common_crawl"],
     ) as dag:
         harvest = pipeline_task("harvest", run_harvest, returns=True)

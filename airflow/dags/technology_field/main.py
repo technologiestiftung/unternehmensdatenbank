@@ -39,6 +39,7 @@ from enrichment import branch_classifier as bc, corpus
 from enrichment import branch_textcat as textcat
 from enrichment.branch_observations import SOURCE_KEY, planned_writes
 from source_enrichment_common import (
+    SourceDetails,
     companies_with_website_to_read,
     ensure_source,
     failed_read_payload,
@@ -52,6 +53,14 @@ from source_enrichment_common import (
 log = logging.getLogger(__name__)
 
 DAG_ID = "technology_field"
+#: What the app's source page says about this source (German).
+DETAILS = SourceDetails(
+    description=(
+        "Das Technologiefeld aus den Stichworten auf der Website (Berlins 77 Felder). Ein Textmodell "
+        "füllt nur Lücken, in denen kein Stichwort vorkam."
+    ),
+    schedule="nach der Website-Suche",
+)
 BATCH_SIZE = int(os.getenv("TECHNOLOGY_FIELD_BATCH_SIZE", "50"))
 MIN_COMPANIES = int(os.getenv("TECHNOLOGY_FIELD_MIN_COMPANIES", "500"))
 FIELDS = ("technology_field", "technology_field_withheld")
@@ -59,7 +68,7 @@ FIELDS = ("technology_field", "technology_field_withheld")
 
 def _source_id(cur: Any) -> str:
     return ensure_source(cur, key=SOURCE_KEY, name="Branch Classifier (Berlin 77-field taxonomy)",
-                         source_type="classifier", metadata={"dag_id": DAG_ID})
+                         source_type="classifier", metadata={"dag_id": DAG_ID}, details=DETAILS)
 
 
 # --- read -----------------------------------------------------------------------------------

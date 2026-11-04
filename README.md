@@ -67,8 +67,7 @@ Database: `unternehmensdatenbank` (the Berlin data).
 
 - **DAGs:** [docs/dags.md](docs/dags.md). Each starts paused; unpause it
   in Airflow to run it.
-- **Migrations:** `db/migrations/`, one `V1__baseline.sql` (squashed 2026-11-04) plus later steps, and the sources' text in
-  `R__source_details.sql` ([data-model](docs/data-model.md),
+- **Migrations:** `db/migrations/`, one `V1__baseline.sql` (squashed 2026-11-04) plus later steps ([data-model](docs/data-model.md),
   "Migration strategy"). Forward-only.
   Flyway runs as a one-shot service (`--profile tools`), not with `docker compose up`.
 - **Checks:** `scripts/free_checks.sh` (ruff, unit tests, six guards; no database, no network).

@@ -32,12 +32,30 @@ import zipfile
 from datetime import date, datetime, timezone
 from typing import Iterable
 
-from source_enrichment_common import get_connection
+from source_enrichment_common import SourceDetails, ensure_source, get_connection, schedule_label
 
 log = logging.getLogger(__name__)
 
 DAG_ID = "cordis"
 SOURCE_KEY = "cordis"
+SCHEDULE = "@monthly"
+#: What the app's source page says about this source (German).
+DETAILS = SourceDetails(
+    description=(
+        "Förderungen der EU-Forschungsprogramme Horizon Europe und Horizon 2020 an Firmen in Berlin, "
+        "über Name und Ort einer Firma zugeordnet."
+    ),
+    schedule=schedule_label(SCHEDULE),
+    base_url="https://cordis.europa.eu",
+    terms=(
+        "Weiterverwendung nach dem Reuse Notice der Europäischen Kommission; die genauen Bedingungen "
+        "sind noch nicht geprüft."
+    ),
+    terms_url=(
+        "https://data.europa.eu/data/datasets/cordis-eu-research-projects-under-horizon-"
+        "europe-2021-2027"
+    ),
+)
 BASE_URL = os.getenv("CORDIS_BASE_URL", "https://cordis.europa.eu/data/")
 #: Programme -> (file, name shown as the funding type).
 PROGRAMMES = {
@@ -149,6 +167,8 @@ def run_cordis() -> int:
     connection = get_connection()
     try:
         with connection, connection.cursor() as cur:
+            ensure_source(cur, key=SOURCE_KEY, name="CORDIS (EU research projects)", source_type="fundings",
+                          metadata={"dag_id": DAG_ID}, details=DETAILS)
             execute_values(cur, _UPSERT_SQL, rows, page_size=1000)
             cur.execute("SELECT public.refresh_company_funding_links()")
             cur.execute(
@@ -180,7 +200,7 @@ def _make_dag():  # noqa: ANN201
     with DAG(
         dag_id=DAG_ID,
         description="Monthly EU research grants (Horizon Europe, Horizon 2020) of Berlin companies from CORDIS",
-        schedule="@monthly", start_date=datetime(2026, 11, 1, tzinfo=timezone.utc), catchup=False,
+        schedule=SCHEDULE, start_date=datetime(2026, 11, 1, tzinfo=timezone.utc), catchup=False,
         max_active_runs=1, tags=["sources", "fundings"],
     ) as dag:
         pipeline_task("load_fundings", run_cordis)

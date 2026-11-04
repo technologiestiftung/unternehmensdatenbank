@@ -36,12 +36,31 @@ from psycopg2.extras import Json, execute_values
 from enrichment import confidence as conf
 from enrichment import corpus, proposals, wikidata
 from enrichment.register_names import DISSOLVED
-from source_enrichment_common import ensure_source, finish_sync_run, get_connection, start_sync_run
+from source_enrichment_common import (
+    SourceDetails,
+    ensure_source,
+    finish_sync_run,
+    get_connection,
+    schedule_label,
+    start_sync_run,
+)
 
 log = logging.getLogger(__name__)
 
 DAG_ID = "wikidata"
 SOURCE_KEY = "wikidata"
+SCHEDULE = "@daily"
+#: What the app's source page says about this source (German).
+DETAILS = SourceDetails(
+    description=(
+        "Offizielle Websites, die Wikidata für Berliner Organisationen nennt, über Registernummer "
+        "oder eindeutigen Namen zugeordnet und wie eine geratene Domain geprüft."
+    ),
+    schedule=schedule_label(SCHEDULE),
+    base_url="https://www.wikidata.org",
+    terms="Wikidata steht unter CC0.",
+    terms_url="https://www.wikidata.org/wiki/Wikidata:Licensing",
+)
 BATCH_SIZE = int(os.getenv("WIKIDATA_BATCH_SIZE", "100"))
 WORKERS = int(os.getenv("WIKIDATA_WORKERS", "8"))
 RECHECK_AFTER_DAYS = int(os.getenv("WIKIDATA_RECHECK_DAYS", "90"))
@@ -49,7 +68,7 @@ RECHECK_AFTER_DAYS = int(os.getenv("WIKIDATA_RECHECK_DAYS", "90"))
 
 def _source_id(cur: Any) -> str:
     return ensure_source(cur, key=SOURCE_KEY, name="Wikidata (official websites, P856)",
-                         source_type="knowledge_base", metadata={"dag_id": DAG_ID, "licence": "CC0"})
+                         source_type="knowledge_base", metadata={"dag_id": DAG_ID, "licence": "CC0"}, details=DETAILS)
 
 
 # --- match ----------------------------------------------------------------------------------
@@ -252,7 +271,7 @@ def _make_dag():  # noqa: ANN201
     with DAG(
         dag_id=DAG_ID,
         description="Websites Wikidata lists for Berlin companies, verified like a guessed domain",
-        schedule="@daily", start_date=datetime(2026, 10, 1, tzinfo=timezone.utc), catchup=False,
+        schedule=SCHEDULE, start_date=datetime(2026, 10, 1, tzinfo=timezone.utc), catchup=False,
         max_active_runs=1, tags=["sources", "websites", "wikidata"],
     ) as dag:
         match = pipeline_task("match_items", run_match, returns=True)

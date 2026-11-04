@@ -33,12 +33,21 @@ from psycopg2.extras import Json, execute_values
 
 from enrichment import confidence as conf
 from enrichment import proposals
-from source_enrichment_common import ensure_source, get_connection
+from source_enrichment_common import SourceDetails, ensure_source, get_connection, schedule_label
 
 log = logging.getLogger(__name__)
 
 DAG_ID = "register_crosslink"
 SOURCE_KEY = "register_crosslink"
+SCHEDULE = "@weekly"
+#: What the app's source page says about this source (German).
+DETAILS = SourceDetails(
+    description=(
+        "Seiten, die die Website-Suche für eine andere Firma gelesen hat und die die Registernummer "
+        "dieser Firma nennen. Die Domain wird ihr vorgeschlagen und wie eine geratene Domain geprüft."
+    ),
+    schedule=schedule_label(SCHEDULE),
+)
 #: More of our companies on one host is a group or directory page (Common Crawl's rule, measured there).
 MAX_COMPANIES_PER_HOST = 2
 BATCH_SIZE = int(os.getenv("REGISTER_CROSSLINK_VERIFY_BATCH_SIZE", "100"))
@@ -48,7 +57,7 @@ RECHECK_AFTER_DAYS = int(os.getenv("REGISTER_CROSSLINK_RECHECK_DAYS", "90"))
 
 def _source_id(cur: Any) -> str:
     return ensure_source(cur, key=SOURCE_KEY, name="Register numbers on other companies' guessed sites",
-                         source_type="derived", metadata={"dag_id": DAG_ID, "issue": 112})
+                         source_type="derived", metadata={"dag_id": DAG_ID, "issue": 112}, details=DETAILS)
 
 
 def host_of(url: str) -> str:
@@ -153,7 +162,7 @@ def _make_dag():  # noqa: ANN201
     with DAG(
         dag_id=DAG_ID,
         description="Websites from register numbers discovery found on other companies' guessed sites",
-        schedule="@weekly", start_date=datetime(2026, 11, 1, tzinfo=timezone.utc), catchup=False,
+        schedule=SCHEDULE, start_date=datetime(2026, 11, 1, tzinfo=timezone.utc), catchup=False,
         max_active_runs=1, tags=["sources", "websites"],
     ) as dag:
         harvest = pipeline_task("harvest", run_harvest, returns=True)
