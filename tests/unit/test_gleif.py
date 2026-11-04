@@ -3,7 +3,8 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
-from gleif.main import COLUMNS, berlin_records, file_to_read, parse_row, same_name
+from enrichment.register_match import same_name
+from gleif.main import COLUMNS, berlin_records, file_to_read, parse_row
 
 
 def row(**values: str) -> dict[str, str]:

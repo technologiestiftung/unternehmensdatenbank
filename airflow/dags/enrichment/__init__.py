@@ -29,7 +29,7 @@ Reading pages
 
 Register
   register_names.py                  name key and legal form, shared with the OffeneRegister import
-  register_match.py                  which of our companies a register entry is (register_announcements, gleif)
+  register_match.py                  which of our companies a register entry is (register_announcements, gleif, openregister)
 
 Industry classification (three columns that must never be mixed: docs/branch-classification.md)
   branch_classifier.py                         Technologiefeld from the words a company publishes;
