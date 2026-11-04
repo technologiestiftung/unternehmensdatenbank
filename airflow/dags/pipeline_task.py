@@ -36,7 +36,7 @@ DAGS = Path(__file__).resolve().parent
 #: Never PATH or PYTHONPATH (the image sets its own), never AIRFLOW_* (Airflow's secrets).
 PIPELINE_ENV_PREFIXES = ("PG_DSN", "DISCOVERY_", "WEBSITE_", "SOURCE_ENRICHMENT_",
                          "MANAGER_NER_", "URL_DISCOVERY_", "IMPRINT_", "WIKIDATA_",
-                         "CORPUS_", "OPENREGISTER_")
+                         "CORPUS_", "OPENREGISTER_", "BA_JOBSUCHE_")
 
 
 #: A task failed by an outside service (a 503, a timeout) runs again twice, 10 minutes apart (#86).

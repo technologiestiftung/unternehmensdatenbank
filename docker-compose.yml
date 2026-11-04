@@ -66,6 +66,8 @@ x-airflow-common: &airflow-common
     CORPUS_MAX_AGE_DAYS: ${CORPUS_MAX_AGE_DAYS:-90}
     # OpenRegister's API key (#88), for the `openregister` DAG; empty: the DAG fails at once with a clear error.
     OPENREGISTER_API_KEY: ${OPENREGISTER_API_KEY:-}
+    # The job search web app's public client id (bund.dev), for the `ba_jobsuche` DAG (#106); empty: the DAG fails at once with a clear error.
+    BA_JOBSUCHE_API_KEY: ${BA_JOBSUCHE_API_KEY:-}
     # Skip companies whose register_status is not 'active' (153,915 of the 296,486 Berlin companies).
     # See source_enrichment_common.ACTIVE_ONLY.
     DISCOVERY_ACTIVE_ONLY: ${DISCOVERY_ACTIVE_ONLY:-true}

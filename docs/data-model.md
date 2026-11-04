@@ -96,7 +96,7 @@ python scripts/import_register_managers.py
 
 `V1__baseline.sql` is the whole schema as of 2026-10-31, squashed four times: the first example data set,
 V1-V9 and V10 on 2026-10-28, V1-V10 on 2026-10-31 (#68). Forward-only from here: never edit a
-migration that has run anywhere shared, add new ones as `V{N}__description.sql` (the next is V9), and
+migration that has run anywhere shared, add new ones as `V{N}__description.sql` (the next is V10), and
 run Flyway before Airflow touches the changed schema.
 The headings below and comments in the code keep the pre-squash migration numbers ("V3", "V10") so
 git history finds the reasoning.
