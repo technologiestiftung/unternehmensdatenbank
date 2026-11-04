@@ -9,6 +9,7 @@
 - "!include public_v_field_provenance.yaml"
 - "!include public_sources.yaml"
 - "!include public_v_source_overview.yaml"
+- "!include public_v_source_runs.yaml"
 - "!include public_v_source_fields.yaml"
 - "!include public_review_sample.yaml"
 - "!include public_v_review_results.yaml"

@@ -13,6 +13,14 @@ array_relationships:
           schema: public
         column_mapping:
           source_key: source_key
+  - name: recent_runs
+    using:
+      manual_configuration:
+        remote_table:
+          name: v_source_runs
+          schema: public
+        column_mapping:
+          source_key: source_key
 select_permissions:
   - role: user
     permission:
