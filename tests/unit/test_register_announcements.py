@@ -6,7 +6,8 @@ from datetime import date
 import pytest
 
 from enrichment.register_names import legal_form
-from register_announcements.main import name_match, parse_announcements, parse_java_date, register_fields
+from enrichment.register_match import name_match
+from register_announcements.main import parse_announcements, parse_java_date, register_fields
 
 
 def row(n: int, when: str, portal_id: str, category: str, court: str, name_city: str) -> str:
