@@ -3,21 +3,25 @@ from __future__ import annotations
 
 from web_search.main import hosts, search_query
 
+NAME = "Muster Bau GmbH"
 
-def test_directories_and_repeats_are_skipped_and_at_most_three_hosts_kept() -> None:
-    results = [{"url": "https://www.northdata.de/Muster+GmbH,+Berlin"}, {"url": "https://muster.de/impressum"},
-               {"url": "https://muster.de/"}, {"url": "https://www.linkedin.com/company/muster"},
-               {"url": "https://a.de"}, {"url": "https://b.de"}, {"url": "https://c.de"}]
-    assert hosts(results) == ["https://muster.de", "https://a.de", "https://b.de"]
+
+def test_only_hosts_with_the_name_are_kept_and_at_most_three() -> None:
+    results = [{"url": "https://www.northdata.de/Muster+GmbH,+Berlin"}, {"url": "https://www.webvalid.de/muster-bau"},
+               {"url": "https://muster-bau.de/impressum"}, {"url": "https://muster-bau.de/"},
+               {"url": "https://www.linkedin.com/company/muster"}, {"url": "https://musterbau-berlin.de"},
+               {"url": "https://www.musterbau.com"}, {"url": "https://muster-bau.org"}]
+    assert hosts(results, NAME) == ["https://muster-bau.de", "https://musterbau-berlin.de", "https://www.musterbau.com"]
 
 
 def test_no_results_no_proposals() -> None:
-    assert hosts([]) == [] and hosts([{"url": ""}]) == []
+    assert hosts([], NAME) == [] and hosts([{"url": ""}], NAME) == []
+    assert hosts([{"url": "https://www.yellowmap.de/muster-bau"}], NAME) == []
 
 
 def test_www_and_bare_domain_are_one_host() -> None:
-    results = [{"url": "https://www.muster.de/"}, {"url": "https://muster.de/kontakt"}, {"url": "https://a.de"}]
-    assert hosts(results) == ["https://www.muster.de", "https://a.de"]
+    results = [{"url": "https://www.musterbau.de/"}, {"url": "https://musterbau.de/kontakt"}]
+    assert hosts(results, NAME) == ["https://www.musterbau.de"]
 
 
 def test_a_quote_in_the_name_does_not_end_the_phrase() -> None:

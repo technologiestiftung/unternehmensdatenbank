@@ -10,8 +10,10 @@ results may be stored (Brave's plans differ on that).
 1. **search**: up to `MAX_SEARCHES` active companies without a shown website and not searched in the
    last `RECHECK_AFTER_DAYS`, in a fixed order (md5 of the id). Query: the company's name and "Berlin".
    Sole traders are left out: their name is a person's name, and it would go to the search provider.
-   The first `MAX_RESULTS` result hosts that are not a directory (`own_site.is_directory_host`) become
-   one source record per company, proposing `https://host`.
+   Brave returns up to `RESULTS_PER_QUERY` results for the price of one query. The first `MAX_RESULTS`
+   hosts that carry the company's name (`own_site.own_site_verdict`, the rule verification applies)
+   become one source record per company, proposing `https://host`. Without that filter, directories
+   not on the directory list took the slots: 36 of 38 hosts in the first run (20 searches, 2026-11-04).
 2. **verify**: those proposals through `enrichment.proposals`, the check Common Crawl's get. A search
    rank proves nothing; only the page read again does (`confidence.METHOD_WEB_SEARCH`).
 
@@ -30,7 +32,7 @@ from psycopg2.extras import Json
 
 from enrichment import confidence as conf
 from enrichment import proposals
-from enrichment.own_site import is_directory_host
+from enrichment.own_site import own_site_verdict
 from enrichment.register_names import SOLE_TRADER_NAME_SQL
 from source_enrichment_common import SourceDetails, ensure_source, get_connection, schedule_label
 
@@ -42,6 +44,7 @@ SCHEDULE = None
 API = "https://api.search.brave.com/res/v1/web/search"
 MAX_SEARCHES = int(os.getenv("WEB_SEARCH_MAX_SEARCHES", "100"))
 MAX_RESULTS = 3
+RESULTS_PER_QUERY = 20  # the API's maximum; a query costs the same with 10 or 20
 RECHECK_AFTER_DAYS = 180
 PAUSE_S = 1.1  # the free plan allows one request a second
 WORKERS = int(os.getenv("WEB_SEARCH_WORKERS", "8"))
@@ -64,13 +67,19 @@ def _source_id(cur: Any) -> str:
                          metadata={"dag_id": DAG_ID, "issue": 92}, details=DETAILS)
 
 
-def hosts(results: Iterable[dict[str, Any]], limit: int = MAX_RESULTS) -> list[str]:
-    """The first `limit` distinct result hosts that are not a directory, as `https://host`."""
+def hosts(results: Iterable[dict[str, Any]], company_name: str, limit: int = MAX_RESULTS) -> list[str]:
+    """The first `limit` distinct result hosts that carry the company's name, as `https://host`.
+
+    A host without the name is refused at verification anyway (`host_name_mismatch`), unless the page's
+    structured data names the company; such a site is given up here so it cannot crowd out the rest.
+    """
     found: dict[str, str] = {}
     for result in results:
         url = result.get("url") or ""
         host = (urlparse(url).hostname or "").lower()
-        if not host or is_directory_host(url) or host.removeprefix("www.") in found:
+        if not host or host.removeprefix("www.") in found:
+            continue
+        if own_site_verdict(f"https://{host}", company_name) != "own_site":
             continue
         found[host.removeprefix("www.")] = f"https://{host}"
         if len(found) >= limit:
@@ -121,10 +130,10 @@ def run_search() -> int:
         searched, with_hits = 0, 0
         for company_id, name in companies:
             query = search_query(name)
-            response = session.get(API, params={"q": query, "country": "DE", "search_lang": "de", "count": 10},
+            response = session.get(API, params={"q": query, "country": "DE", "search_lang": "de", "count": RESULTS_PER_QUERY},
                                    timeout=20)
             response.raise_for_status()
-            proposed = hosts(((response.json().get("web") or {}).get("results") or []))
+            proposed = hosts((response.json().get("web") or {}).get("results") or [], name)
             with_hits += bool(proposed)
             # Written at once, so a later failure does not throw away searches already paid for. A company
             # with no usable hit is recorded too, so it is not searched again for RECHECK_AFTER_DAYS.
