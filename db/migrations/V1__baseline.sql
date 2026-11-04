@@ -1,8 +1,8 @@
--- Baseline: the whole schema as of 2026-10-31, in one file.
+-- Baseline: the whole schema as of 2026-11-04, in one file.
 --
--- Squashed four times: the 24 migrations of the Osnabrück era, then V1-V9 and V10 of the Berlin
--- rebuild (2026-10-28), then V1-V10 (2026-10-31, #68). They live on in git history; their reasoning
--- is in the comments of the objects they created. In short:
+-- Squashed five times: the 24 migrations of the Osnabrück era, then V1-V9 and V10 of the Berlin
+-- rebuild (2026-10-28), then V1-V10 (2026-10-31, #68), then V1-V8 (2026-11-04). They live on in git
+-- history; their reasoning is in the comments of the objects they created. In short:
 --
 --   identifiers and matching   company_identifiers, match columns on source records, merged_into,
 --                              match_candidates, pipeline_state (issue #18)
@@ -22,17 +22,21 @@
 --   company history            append-only history of every shown value, every claim on demand (#54)
 --   company documents          the index of the S3 corpus of every text read about a company (#61)
 --   review sample              a fixed sample people check by hand, precision per field (#71)
+--   Technologiefelder as tables technology_fields, technology_field_keywords, wz_divisions (#84)
+--   source details             description, terms, schedule; confidence ranges and runs per source (#102)
+--   founding year              established_year in the profile, from the register and schema.org
 --
--- Generated from a database migrated to V10 with `pg_dump --schema-only --no-owner`, privileges
--- included, so every grant is exactly what V1-V10 left. Role names are Flyway placeholders
--- (`${writer_role}`, `${reader_role}`) so the hub can use its own, and default privileges apply to
--- whoever runs this file. The materialized views are created WITH DATA: refresh_company_profile()
--- refreshes them CONCURRENTLY, which an unpopulated view refuses. PostGIS and pgvector are created
--- by the database setup, not here. Checked: a database built from this file and one built from
--- V1-V10 dump to the same schema, grants and seed rows.
+-- Generated from the play server's database (migrated to V6; V7 and V8 changed rows only) with
+-- `pg_restore --schema-only --no-owner`, privileges included, so every grant is exactly what the
+-- migrations left. Role names are Flyway placeholders (`${writer_role}`, `${reader_role}`) so the hub
+-- can use its own, and default privileges apply to whoever runs this file. The materialized views are
+-- created WITH DATA: refresh_company_profile() refreshes them CONCURRENTLY, which an unpopulated view
+-- refuses. PostGIS and pgvector are created by the database setup, not here. The sources' text for the
+-- app is in R__source_details.sql, which Flyway runs after this file.
 
 -- pg_dump writes functions before the tables they read; their bodies are checked when called.
 SET check_function_bodies = false;
+
 
 --
 -- Name: draw_review_sample(integer, integer, integer, integer); Type: FUNCTION; Schema: public; Owner: -
@@ -533,7 +537,7 @@ CREATE TABLE public.company_identifiers (
     value text NOT NULL,
     source_id uuid,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
-    CONSTRAINT company_identifiers_scheme_check CHECK ((scheme = ANY (ARRAY['register'::text, 'register_former'::text, 'opencorporates'::text, 'fusionbase'::text, 'vat'::text, 'lei'::text])))
+    CONSTRAINT company_identifiers_scheme_check CHECK ((scheme = ANY (ARRAY['register'::text, 'register_former'::text, 'opencorporates'::text, 'vat'::text, 'lei'::text])))
 );
 
 
@@ -629,6 +633,10 @@ CREATE TABLE public.sources (
     metadata jsonb DEFAULT '{}'::jsonb NOT NULL,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
     updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    description text,
+    terms text,
+    terms_url text,
+    schedule text,
     CONSTRAINT sources_default_sync_interval_minutes_check CHECK ((default_sync_interval_minutes > 0)),
     CONSTRAINT sources_priority_check CHECK ((priority >= 0))
 );
@@ -639,6 +647,34 @@ CREATE TABLE public.sources (
 --
 
 COMMENT ON TABLE public.sources IS 'Registry of upstream sources with sync scheduling metadata.';
+
+
+--
+-- Name: COLUMN sources.description; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.sources.description IS 'One or two sentences for the app (German): what the source is and how we get it.';
+
+
+--
+-- Name: COLUMN sources.terms; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.sources.terms IS 'What we know about its terms of use (German); NULL when nobody has checked them.';
+
+
+--
+-- Name: COLUMN sources.terms_url; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.sources.terms_url IS 'Where those terms are published, when there is such a page.';
+
+
+--
+-- Name: COLUMN sources.schedule; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.sources.schedule IS 'How often it runs (German), as the DAG is set up.';
 
 
 --
@@ -772,8 +808,13 @@ CREATE VIEW public.v_company_profile_live AS
     GREATEST(e.data_last_updated_at, chosen.selected_at) AS updated_at,
     obs_keywords.value_text AS activity_keywords,
     obs_announce.value_text AS register_announcement,
-    ((obs_announce.metadata ->> 'published_on'::text))::date AS register_announcement_date
-   FROM (((((((((((public.v_companies_enriched e
+    ((obs_announce.metadata ->> 'published_on'::text))::date AS register_announcement_date,
+    COALESCE(
+        CASE
+            WHEN (obs_year.value_text ~ '^\d{4}$'::text) THEN (obs_year.value_text)::integer
+            ELSE NULL::integer
+        END, (EXTRACT(year FROM e.established_at))::integer) AS established_year
+   FROM (((((((((((((public.v_companies_enriched e
      LEFT JOIN LATERAL ( SELECT count(*) AS funding_count,
             sum(f.amount_eur) AS funding_total_eur
            FROM public.v_company_fundings f
@@ -791,7 +832,9 @@ CREATE VIEW public.v_company_profile_live AS
      LEFT JOIN public.company_canonical_field_sources cfs_keywords ON (((cfs_keywords.company_id = e.id) AND (cfs_keywords.field_name = 'activity_keywords'::text))))
      LEFT JOIN public.company_field_observations obs_keywords ON ((obs_keywords.id = cfs_keywords.company_field_observation_id)))
      LEFT JOIN public.company_canonical_field_sources cfs_announce ON (((cfs_announce.company_id = e.id) AND (cfs_announce.field_name = 'register_announcement'::text))))
-     LEFT JOIN public.company_field_observations obs_announce ON ((obs_announce.id = cfs_announce.company_field_observation_id)));
+     LEFT JOIN public.company_field_observations obs_announce ON ((obs_announce.id = cfs_announce.company_field_observation_id)))
+     LEFT JOIN public.company_canonical_field_sources cfs_year ON (((cfs_year.company_id = e.id) AND (cfs_year.field_name = 'founding_year'::text))))
+     LEFT JOIN public.company_field_observations obs_year ON ((obs_year.id = cfs_year.company_field_observation_id)));
 
 
 --
@@ -869,7 +912,8 @@ CREATE MATERIALIZED VIEW public.company_profile_mv AS
     p.activity_keywords,
     p.register_announcement,
     p.register_announcement_date,
-    COALESCE(src.source_keys, '{}'::text[]) AS source_keys
+    COALESCE(src.source_keys, '{}'::text[]) AS source_keys,
+    p.established_year
    FROM (public.v_company_profile_live p
      LEFT JOIN ( SELECT v_company_sources.company_id,
             array_agg(DISTINCT v_company_sources.source_key ORDER BY v_company_sources.source_key) AS source_keys
@@ -914,7 +958,7 @@ CREATE TABLE public.extraction_feedback (
     CONSTRAINT extraction_feedback_correction_check CHECK (((correction IS NULL) OR ((length(correction) >= 1) AND (length(correction) <= 500)))),
     CONSTRAINT extraction_feedback_correction_only_when_wrong CHECK (((correction IS NULL) OR (verdict = 'wrong'::text))),
     CONSTRAINT extraction_feedback_empty_needs_correction CHECK (((value <> ''::text) OR ((verdict = 'wrong'::text) AND (correction IS NOT NULL)))),
-    CONSTRAINT extraction_feedback_field_name_check CHECK ((field_name = ANY (ARRAY['name'::text, 'address'::text, 'legal_form'::text, 'register_status'::text, 'wz_code'::text, 'established_at'::text, 'employee_count'::text, 'revenue'::text, 'fundings'::text, 'technology_field'::text, 'website'::text, 'management'::text, 'business_purpose'::text, 'deeptech'::text, 'is_ai'::text, 'activity_keywords'::text, 'register_announcement'::text, 'registration_number'::text]))),
+    CONSTRAINT extraction_feedback_field_name_check CHECK ((field_name = ANY (ARRAY['name'::text, 'address'::text, 'legal_form'::text, 'register_status'::text, 'wz_code'::text, 'established_at'::text, 'established_year'::text, 'employee_count'::text, 'revenue'::text, 'fundings'::text, 'technology_field'::text, 'website'::text, 'management'::text, 'business_purpose'::text, 'deeptech'::text, 'is_ai'::text, 'activity_keywords'::text, 'register_announcement'::text, 'registration_number'::text]))),
     CONSTRAINT extraction_feedback_value_check CHECK ((length(value) <= 500)),
     CONSTRAINT extraction_feedback_verdict_check CHECK ((verdict = ANY (ARRAY['correct'::text, 'wrong'::text])))
 );
@@ -990,16 +1034,34 @@ COMMENT ON TABLE public.review_sample IS 'Companies people check by hand, drawn 
 --
 
 CREATE MATERIALIZED VIEW public.source_field_stats_mv AS
+ WITH canonical AS (
+         SELECT company_field_observations.company_id,
+            company_field_observations.field_name,
+            company_field_observations.source_id,
+            company_field_observations.value_text,
+            company_field_observations.value_number,
+            company_field_observations.value_date,
+            company_field_observations.value_jsonb
+           FROM public.company_field_observations
+          WHERE company_field_observations.is_canonical
+        )
  SELECT s.key AS source_key,
     o.field_name,
     count(*) AS observations,
     count(DISTINCT o.company_id) AS companies,
     count(DISTINCT o.company_id) FILTER (WHERE (o.is_canonical OR (m.id IS NOT NULL))) AS companies_shown,
+    count(DISTINCT o.company_id) FILTER (WHERE ((o.confidence > (0)::numeric) AND (NOT o.is_canonical) AND (m.id IS NULL) AND (c.source_id IS NOT NULL) AND (c.source_id <> o.source_id) AND ((((c.value_text IS DISTINCT FROM o.value_text) OR (c.value_number IS DISTINCT FROM o.value_number)) OR (c.value_date IS DISTINCT FROM o.value_date)) OR (c.value_jsonb IS DISTINCT FROM o.value_jsonb)))) AS companies_beaten,
     round(avg(o.confidence), 3) AS avg_confidence,
+    count(*) FILTER (WHERE (o.confidence = (0)::numeric)) AS confidence_zero,
+    count(*) FILTER (WHERE ((o.confidence > (0)::numeric) AND (o.confidence < 0.35))) AS confidence_below_035,
+    count(*) FILTER (WHERE ((o.confidence >= 0.35) AND (o.confidence < 0.6))) AS confidence_035_060,
+    count(*) FILTER (WHERE ((o.confidence >= 0.6) AND (o.confidence < 0.8))) AS confidence_060_080,
+    count(*) FILTER (WHERE (o.confidence >= 0.8)) AS confidence_080_up,
     max(o.observed_at) AS last_observed_at
-   FROM ((public.company_field_observations o
+   FROM (((public.company_field_observations o
      JOIN public.sources s ON ((s.id = o.source_id)))
      LEFT JOIN public.company_managers m ON (((m.company_field_observation_id = o.id) AND m.is_current)))
+     LEFT JOIN canonical c ON (((c.company_id = o.company_id) AND (c.field_name = o.field_name))))
   GROUP BY s.key, o.field_name
 UNION ALL
  SELECT f.source AS source_key,
@@ -1007,7 +1069,13 @@ UNION ALL
     count(DISTINCT f.fkz) AS observations,
     count(DISTINCT l.company_id) AS companies,
     count(DISTINCT l.company_id) AS companies_shown,
+    (0)::bigint AS companies_beaten,
     NULL::numeric AS avg_confidence,
+    (0)::bigint AS confidence_zero,
+    (0)::bigint AS confidence_below_035,
+    (0)::bigint AS confidence_035_060,
+    (0)::bigint AS confidence_060_080,
+    (0)::bigint AS confidence_080_up,
     max(f.last_seen_at) AS last_observed_at
    FROM (public.company_fundings f
      LEFT JOIN public.company_funding_links l ON ((l.fkz = f.fkz)))
@@ -1024,20 +1092,26 @@ CREATE MATERIALIZED VIEW public.source_stats_mv AS
          SELECT r.source_id,
             r.company_id,
             true AS is_record,
-            (r.match_method = 'created'::text) AS created
+            r.match_method,
+            r.match_confidence
            FROM public.company_source_records r
         UNION ALL
          SELECT s_1.id,
             l.company_id,
             false,
-            false
+            NULL::text AS text,
+            NULL::numeric AS "numeric"
            FROM ((public.company_funding_links l
              JOIN public.company_fundings f ON ((f.fkz = l.fkz)))
              JOIN public.sources s_1 ON ((s_1.key = f.source)))
         ), per_source AS (
          SELECT covered.source_id,
             count(*) FILTER (WHERE covered.is_record) AS records,
-            count(*) FILTER (WHERE covered.created) AS companies_created,
+            count(*) FILTER (WHERE (covered.match_method = 'created'::text)) AS companies_created,
+            count(*) FILTER (WHERE (covered.match_method = 'identifier'::text)) AS records_by_identifier,
+            count(*) FILTER (WHERE (covered.match_method = 'fuzzy'::text)) AS records_by_name,
+            count(*) FILTER (WHERE (covered.match_method = 'manual'::text)) AS records_by_hand,
+            round(avg(covered.match_confidence) FILTER (WHERE covered.is_record), 3) AS avg_match_confidence,
             count(DISTINCT covered.company_id) AS companies
            FROM covered
           GROUP BY covered.source_id
@@ -1046,6 +1120,10 @@ CREATE MATERIALIZED VIEW public.source_stats_mv AS
     COALESCE(p.records, (0)::bigint) AS records,
     COALESCE(p.companies_created, (0)::bigint) AS companies_created,
     COALESCE(p.companies, (0)::bigint) AS companies,
+    COALESCE(p.records_by_identifier, (0)::bigint) AS records_by_identifier,
+    COALESCE(p.records_by_name, (0)::bigint) AS records_by_name,
+    COALESCE(p.records_by_hand, (0)::bigint) AS records_by_hand,
+    p.avg_match_confidence,
     now() AS computed_at
    FROM (public.sources s
      LEFT JOIN per_source p ON ((p.source_id = s.id)))
@@ -1108,6 +1186,102 @@ COMMENT ON TABLE public.tags IS 'Tags people give companies in the app. Free tex
 
 
 --
+-- Name: technology_field_keywords; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.technology_field_keywords (
+    field text NOT NULL,
+    keyword text NOT NULL,
+    removed_at date,
+    removed_reason text,
+    CONSTRAINT technology_field_keywords_removed_check CHECK (((removed_at IS NULL) = (removed_reason IS NULL)))
+);
+
+
+--
+-- Name: TABLE technology_field_keywords; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON TABLE public.technology_field_keywords IS 'Words on a company''s pages that suggest a Technologiefeld; one row per (field, keyword). Matched case-insensitively, as whole words only.';
+
+
+--
+-- Name: COLUMN technology_field_keywords.keyword; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.technology_field_keywords.keyword IS 'As Berlin wrote it; the classifier normalises it (lower case, NFKC).';
+
+
+--
+-- Name: COLUMN technology_field_keywords.removed_at; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.technology_field_keywords.removed_at IS 'Set when the keyword was found wrong for its field. The classifier skips such rows; they are never deleted.';
+
+
+--
+-- Name: COLUMN technology_field_keywords.removed_reason; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.technology_field_keywords.removed_reason IS 'Why it was removed, with the measurement (texts it fired on, companies it decided).';
+
+
+--
+-- Name: technology_fields; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.technology_fields (
+    name text NOT NULL,
+    name_en text NOT NULL,
+    senweb_unit text,
+    berlin_partner text,
+    related text[] DEFAULT '{}'::text[] NOT NULL
+);
+
+
+--
+-- Name: TABLE technology_fields; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON TABLE public.technology_fields IS 'Berlin''s 77 Technologie- und Anwendungsfelder (#84). The classifier answers with `name`; the database stores and the app shows `name_en`.';
+
+
+--
+-- Name: COLUMN technology_fields.name; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.technology_fields.name IS 'Berlin''s official German name; the key the keywords and the classifier use.';
+
+
+--
+-- Name: COLUMN technology_fields.name_en; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.technology_fields.name_en IS 'Our English translation (Berlin publishes none). What technology_field and purpose_field store.';
+
+
+--
+-- Name: COLUMN technology_fields.senweb_unit; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.technology_fields.senweb_unit IS 'The Senate department unit that owns the field, as in Berlin''s sheet.';
+
+
+--
+-- Name: COLUMN technology_fields.berlin_partner; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.technology_fields.berlin_partner IS 'The field''s contact person(s) as named in Berlin''s sheet, comma-separated (67 of 77 fields); NULL where the sheet said "nicht bekannt" or "?" or gave nothing. A person''s name: not exposed through Hasura.';
+
+
+--
+-- Name: COLUMN technology_fields.related; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.technology_fields.related IS 'Related fields or WZ codes, as in Berlin''s sheet. Never used to classify.';
+
+
+--
 -- Name: v_company_claims; Type: VIEW; Schema: public; Owner: -
 --
 
@@ -1118,6 +1292,7 @@ CREATE VIEW public.v_company_claims AS
             WHEN 'ceo_name_or_contact'::text THEN 'management'::text
             WHEN 'candidate_url'::text THEN 'website'::text
             WHEN 'deeptech_class'::text THEN 'deeptech'::text
+            WHEN 'founding_year'::text THEN 'established_year'::text
             ELSE o.field_name
         END AS field_key,
     COALESCE(o.value_text, (o.value_number)::text, (o.value_date)::text) AS value,
@@ -1131,7 +1306,7 @@ CREATE VIEW public.v_company_claims AS
     COALESCE(o.source_updated_at, o.observed_at) AS read_at
    FROM (public.company_field_observations o
      JOIN public.sources s ON ((s.id = o.source_id)))
-  WHERE (o.field_name = ANY (ARRAY['name'::text, 'legal_form'::text, 'address'::text, 'postcode'::text, 'city'::text, 'register_status'::text, 'established_at'::text, 'business_purpose'::text, 'wz_code'::text, 'website'::text, 'candidate_url'::text, 'technology_field'::text, 'purpose_field'::text, 'activity_keywords'::text, 'register_announcement'::text, 'ceo_name_or_contact'::text, 'employee_count'::text, 'revenue'::text, 'deeptech_class'::text, 'is_ai'::text]));
+  WHERE (o.field_name = ANY (ARRAY['name'::text, 'legal_form'::text, 'address'::text, 'postcode'::text, 'city'::text, 'register_status'::text, 'established_at'::text, 'business_purpose'::text, 'wz_code'::text, 'website'::text, 'candidate_url'::text, 'technology_field'::text, 'purpose_field'::text, 'activity_keywords'::text, 'register_announcement'::text, 'ceo_name_or_contact'::text, 'employee_count'::text, 'revenue'::text, 'deeptech_class'::text, 'is_ai'::text, 'founding_year'::text]));
 
 
 --
@@ -1150,6 +1325,7 @@ CREATE VIEW public.v_company_history AS
     h.company_id,
         CASE h.field_name
             WHEN 'deeptech_class'::text THEN 'deeptech'::text
+            WHEN 'founding_year'::text THEN 'established_year'::text
             ELSE h.field_name
         END AS field_key,
     h.event,
@@ -1201,7 +1377,8 @@ CREATE VIEW public.v_company_profile AS
     company_profile_mv.activity_keywords,
     company_profile_mv.register_announcement,
     company_profile_mv.register_announcement_date,
-    company_profile_mv.source_keys
+    company_profile_mv.source_keys,
+    company_profile_mv.established_year
    FROM public.company_profile_mv;
 
 
@@ -1209,7 +1386,7 @@ CREATE VIEW public.v_company_profile AS
 -- Name: VIEW v_company_profile; Type: COMMENT; Schema: public; Owner: -
 --
 
-COMMENT ON VIEW public.v_company_profile IS 'The target record per company, as of the last refresh_company_profile(). The live definition is v_company_profile_live.';
+COMMENT ON VIEW public.v_company_profile IS 'The target record per company, as of the last refresh_company_profile(). The live definition is v_company_profile_live. established_year is the canonical founding_year, else the year of established_at (V6).';
 
 
 --
@@ -1218,7 +1395,10 @@ COMMENT ON VIEW public.v_company_profile IS 'The target record per company, as o
 
 CREATE VIEW public.v_field_provenance AS
  SELECT cfs.company_id,
-    cfs.field_name,
+        CASE cfs.field_name
+            WHEN 'founding_year'::text THEN 'established_year'::text
+            ELSE cfs.field_name
+        END AS field_name,
     COALESCE(o.value_text, (o.value_number)::text, (o.value_date)::text) AS value,
     s.key AS source_key,
     s.name AS source_name,
@@ -1320,6 +1500,7 @@ CREATE VIEW public.v_review_results AS
                     WHEN 'register_status'::text THEN (f.value = p.register_status)
                     WHEN 'wz_code'::text THEN (f.value = p.wz_code)
                     WHEN 'established_at'::text THEN (f.value = (p.established_at)::text)
+                    WHEN 'established_year'::text THEN (f.value = (p.established_year)::text)
                     WHEN 'employee_count'::text THEN
                     CASE
                         WHEN (f.value ~ '^-?[0-9]+(\.[0-9]+)?$'::text) THEN ((f.value)::numeric = (p.employee_count)::numeric)
@@ -1373,7 +1554,13 @@ CREATE VIEW public.v_source_fields AS
     source_field_stats_mv.observations,
     source_field_stats_mv.companies,
     source_field_stats_mv.companies_shown,
+    source_field_stats_mv.companies_beaten,
     source_field_stats_mv.avg_confidence,
+    source_field_stats_mv.confidence_zero,
+    source_field_stats_mv.confidence_below_035,
+    source_field_stats_mv.confidence_035_060,
+    source_field_stats_mv.confidence_060_080,
+    source_field_stats_mv.confidence_080_up,
     source_field_stats_mv.last_observed_at
    FROM public.source_field_stats_mv;
 
@@ -1382,7 +1569,7 @@ CREATE VIEW public.v_source_fields AS
 -- Name: VIEW v_source_fields; Type: COMMENT; Schema: public; Owner: -
 --
 
-COMMENT ON VIEW public.v_source_fields IS 'Per source and field: values stored, companies, and companies whose shown value came from this source. Counts only; no value is exposed.';
+COMMENT ON VIEW public.v_source_fields IS 'Per source and field: values stored, companies, companies whose shown value came from this source, companies where another source''s different value is shown, and values per confidence range. Counts only; no value is exposed.';
 
 
 --
@@ -1394,9 +1581,18 @@ CREATE VIEW public.v_source_overview AS
     s.name,
     s.source_type,
     s.base_url,
+    s.description,
+    s.terms,
+    s.terms_url,
+    s.schedule,
+    s.priority,
     COALESCE(st.records, (0)::bigint) AS records,
     COALESCE(st.companies, (0)::bigint) AS companies,
     COALESCE(st.companies_created, (0)::bigint) AS companies_created,
+    COALESCE(st.records_by_identifier, (0)::bigint) AS records_by_identifier,
+    COALESCE(st.records_by_name, (0)::bigint) AS records_by_name,
+    COALESCE(st.records_by_hand, (0)::bigint) AS records_by_hand,
+    st.avg_match_confidence,
     run.started_at AS last_run_started_at,
     run.finished_at AS last_run_finished_at,
     run.status AS last_run_status,
@@ -1432,7 +1628,73 @@ CREATE VIEW public.v_source_overview AS
 -- Name: VIEW v_source_overview; Type: COMMENT; Schema: public; Owner: -
 --
 
-COMMENT ON VIEW public.v_source_overview IS 'One row per source for the app''s sources page: records, companies, companies created, and its latest run. Counts as of counts_as_of (refresh_company_profile()); the run is live.';
+COMMENT ON VIEW public.v_source_overview IS 'One row per source for the app''s sources pages: what it is, its terms, records and how they were matched, and its latest run. Counts as of counts_as_of (refresh_company_profile()); the run is live.';
+
+
+--
+-- Name: v_source_runs; Type: VIEW; Schema: public; Owner: -
+--
+
+CREATE VIEW public.v_source_runs AS
+ SELECT s.key AS source_key,
+    r.started_at,
+    r.finished_at,
+    r.status,
+    r.sync_type,
+    r.records_seen,
+    r.records_created,
+    r.records_updated,
+    r.records_failed,
+    ((r.status = 'running'::text) AND (EXISTS ( SELECT 1
+           FROM public.source_sync_runs n
+          WHERE ((n.source_id = r.source_id) AND (n.started_at > r.started_at))))) AS interrupted
+   FROM (public.sources s
+     CROSS JOIN LATERAL ( SELECT r_1.id,
+            r_1.source_id,
+            r_1.sync_type,
+            r_1.status,
+            r_1.started_at,
+            r_1.finished_at,
+            r_1.records_seen,
+            r_1.records_created,
+            r_1.records_updated,
+            r_1.records_failed,
+            r_1.metadata,
+            r_1.error_message,
+            r_1.created_at,
+            r_1.updated_at
+           FROM public.source_sync_runs r_1
+          WHERE (r_1.source_id = s.id)
+          ORDER BY r_1.started_at DESC
+         LIMIT 20) r);
+
+
+--
+-- Name: VIEW v_source_runs; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON VIEW public.v_source_runs IS 'The last 20 runs of every source: when, status and counts. Never the error message.';
+
+
+--
+-- Name: wz_divisions; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.wz_divisions (
+    division text NOT NULL,
+    title text NOT NULL,
+    section text NOT NULL,
+    section_title text NOT NULL,
+    CONSTRAINT wz_divisions_division_check CHECK ((division ~ '^[0-9]{2}$'::text)),
+    CONSTRAINT wz_divisions_section_check CHECK ((section ~ '^[A-Z]$'::text))
+);
+
+
+--
+-- Name: TABLE wz_divisions; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON TABLE public.wz_divisions IS 'The 87 divisions (Abteilungen) of WZ 2025 in their 22 sections, Statistisches Bundesamt. A company''s WZ cluster is its code''s first two digits looked up here. Never a Technologiefeld.';
 
 
 --
@@ -1635,6 +1897,30 @@ ALTER TABLE ONLY public.tags
 
 
 --
+-- Name: technology_field_keywords technology_field_keywords_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.technology_field_keywords
+    ADD CONSTRAINT technology_field_keywords_pkey PRIMARY KEY (field, keyword);
+
+
+--
+-- Name: technology_fields technology_fields_name_en_key; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.technology_fields
+    ADD CONSTRAINT technology_fields_name_en_key UNIQUE (name_en);
+
+
+--
+-- Name: technology_fields technology_fields_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.technology_fields
+    ADD CONSTRAINT technology_fields_pkey PRIMARY KEY (name);
+
+
+--
 -- Name: company_identifiers uq_company_identifiers_scheme_value; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -1663,6 +1949,14 @@ COMMENT ON CONSTRAINT uq_company_managers_company_name ON public.company_manager
 
 ALTER TABLE ONLY public.match_candidates
     ADD CONSTRAINT uq_match_candidates_record_company UNIQUE (source_record_id, company_id);
+
+
+--
+-- Name: wz_divisions wz_divisions_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.wz_divisions
+    ADD CONSTRAINT wz_divisions_pkey PRIMARY KEY (division);
 
 
 --
@@ -1810,6 +2104,13 @@ CREATE INDEX company_managers_company_id_idx ON public.company_managers USING bt
 --
 
 CREATE INDEX company_managers_observation_idx ON public.company_managers USING btree (company_field_observation_id);
+
+
+--
+-- Name: company_profile_mv_established_year; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX company_profile_mv_established_year ON public.company_profile_mv USING btree (established_year);
 
 
 --
@@ -1963,7 +2264,7 @@ CREATE UNIQUE INDEX tags_name_key ON public.tags USING btree (lower(btrim(name))
 -- Name: uq_obs_company_field_source_value; Type: INDEX; Schema: public; Owner: -
 --
 
-CREATE UNIQUE INDEX uq_obs_company_field_source_value ON public.company_field_observations USING btree (company_id, field_name, source_id, value_text) WHERE (field_name = ANY (ARRAY['website'::text, 'candidate_url'::text, 'directory_url'::text, 'discovery_tier'::text, 'osm_id'::text, 'technology_field'::text, 'purpose_field'::text, 'technology_field_withheld'::text, 'purpose_field_withheld'::text, 'name'::text, 'legal_form'::text, 'address'::text, 'postcode'::text, 'city'::text, 'register_status'::text, 'established_at'::text, 'business_purpose'::text, 'wz_code'::text]));
+CREATE UNIQUE INDEX uq_obs_company_field_source_value ON public.company_field_observations USING btree (company_id, field_name, source_id, value_text) WHERE (field_name = ANY (ARRAY['website'::text, 'candidate_url'::text, 'directory_url'::text, 'discovery_tier'::text, 'osm_id'::text, 'technology_field'::text, 'purpose_field'::text, 'technology_field_withheld'::text, 'purpose_field_withheld'::text, 'name'::text, 'legal_form'::text, 'address'::text, 'postcode'::text, 'city'::text, 'register_status'::text, 'established_at'::text, 'business_purpose'::text, 'wz_code'::text, 'founding_year'::text]));
 
 
 --
@@ -2261,6 +2562,14 @@ ALTER TABLE ONLY public.source_sync_runs
     ADD CONSTRAINT source_sync_runs_source_id_fkey FOREIGN KEY (source_id) REFERENCES public.sources(id) ON DELETE CASCADE;
 
 
+--
+-- Name: technology_field_keywords technology_field_keywords_field_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.technology_field_keywords
+    ADD CONSTRAINT technology_field_keywords_field_fkey FOREIGN KEY (field) REFERENCES public.technology_fields(name) ON UPDATE CASCADE;
+
+
 -- ================================================================================================
 -- Seed rows: the sources the DAGs and the app expect to exist.
 -- ================================================================================================
@@ -2293,6 +2602,756 @@ VALUES (
     "confidence_by_net_agreement": {"1": 0.30, "1 on an empty field": 0.60, "2": 0.60, "3+": 0.75}}'
 )
 ON CONFLICT (key) DO UPDATE SET priority = EXCLUDED.priority;
+
+-- Berlin's 77 Technologiefelder with their keywords, and the WZ divisions (#84). A change is a new
+-- migration: a keyword is removed by setting `removed_at` and `removed_reason`, never deleted.
+
+INSERT INTO public.technology_fields (name, name_en, senweb_unit, berlin_partner, related) VALUES
+    ('5G- bzw. 6G Anwendungen', '5G/6G Applications', 'IIIB4', 'Juliane Haupt', ARRAY['62.10.3']::text[]),
+    ('Additive Fertigung', 'Additive Manufacturing', 'IIIC1', 'David Hampel', '{}'::text[]),
+    ('Advanced Materials', 'Advanced Materials', 'III B 3', 'David Hampel', '{}'::text[]),
+    ('Architekturmarkt', 'Architecture Market', 'IIB4', 'Justina Siegmund-Born', '{}'::text[]),
+    ('Automobilwirtschaft', 'Automotive Industry', 'IIIB3, IIIC1', 'Sascha Tiede, David Hampel', '{}'::text[]),
+    ('Autonomes, vernetzes Fahren', 'Autonomous and Connected Driving', 'IIIB3', 'Sascha Tiede', '{}'::text[]),
+    ('Bahnindustrie', 'Rail Industry', 'IIIB3', 'Sascha Tiede', '{}'::text[]),
+    ('Batterietechnologien', 'Battery Technologies', NULL, NULL, ARRAY['Elektromobilität', 'Ladeinfrastruktur']::text[]),
+    ('Bauindustrie', 'Construction Industry', 'IIIC1', 'David Hampel', '{}'::text[]),
+    ('Bioproduktion', 'Bioproduction', 'IIIC1', 'David Hampel', '{}'::text[]),
+    ('Biotechnologie', 'Biotechnology', 'IIIB2', 'Carolin Clement', ARRAY['Pharma & Wirkstoffe', 'Künstliche Intelligenz']::text[]),
+    ('Buchmarkt', 'Book Market', 'IIB4', 'Justina Siegmund-Born', '{}'::text[]),
+    ('Carbon Management', 'Carbon Management', 'IIIA4', 'Wolfgang Korek', '{}'::text[]),
+    ('Chemische Industrie', 'Chemical Industry', 'IIIC1', 'David Hampel', '{}'::text[]),
+    ('Cybersicherheit', 'Cybersecurity', 'IIIB1', 'Juliane Haupt', ARRAY['Künstliche Intelligenz']::text[]),
+    ('Defence Tech', 'Defence Tech', NULL, NULL, ARRAY['Drohnen', 'Raumfahrt']::text[]),
+    ('Designwirtschaft', 'Design Industry', 'IIB4', 'Justina Siegmund-Born', '{}'::text[]),
+    ('Dienstleistung', 'Services', 'IIB2', NULL, '{}'::text[]),
+    ('Digital Health', 'Digital Health', 'IIIB2', 'Petra Schmauß', ARRAY['Künstliche Intelligenz', 'Softwaretechnologien']::text[]),
+    ('Drohnen', 'Drones', 'IIIB3', 'Sascha Tiede', ARRAY['Dual Use']::text[]),
+    ('Elektroindustrie', 'Electrical Industry', 'IIIC1', 'David Hampel', '{}'::text[]),
+    ('Elektromobilität', 'Electromobility', 'IIIB3', 'Sascha Tiede', ARRAY['Ladeinfrastruktur', 'Batterietechnologien']::text[]),
+    ('Energiespeicher', 'Energy Storage', 'IIIA4', 'Wolfgang Korek', '{}'::text[]),
+    ('Ernährungsindustrie', 'Food Industry', 'III C 11', 'David Hampel, Jens Woelki, Dorota Thiel-Jankievicz', '{}'::text[]),
+    ('Fernwärme', 'District Heating', 'IIIA4', 'Wolfgang Korek', '{}'::text[]),
+    ('Filmwirtschaft', 'Film Industry', 'IIB4', 'Justina Siegmund-Born', '{}'::text[]),
+    ('FinTech', 'FinTech', 'IIA4', 'Juliane Haupt', ARRAY['Web3', 'Blockchain', 'DLT']::text[]),
+    ('Foodtech', 'Foodtech', 'III C 11', 'Jens Woelki', '{}'::text[]),
+    ('Freiberufler', 'Freelancers', 'IIB2', NULL, '{}'::text[]),
+    ('Games', 'Games', 'IIB4', 'Justina Siegmund-Born', '{}'::text[]),
+    ('Gastgewerbe', 'Hospitality', 'IIB3', NULL, '{}'::text[]),
+    ('Geothermie', 'Geothermal Energy', 'IIIA4', 'Wolfgang Korek', '{}'::text[]),
+    ('Gesundheitsversorgung & Pflege', 'Healthcare & Nursing', 'IIIB2', 'Petra Schmauß', ARRAY['Digital Health', 'Medizintechnik', 'Künstliche Intelligenz']::text[]),
+    ('GovTech', 'GovTech', 'IIA4', 'Juliane Haupt', '{}'::text[]),
+    ('Gummi- und Kunststoffverarbeitende Industrie', 'Rubber and Plastics Processing Industry', 'IIIC1', 'David Hampel', '{}'::text[]),
+    ('Halbleitertechnologien', 'Semiconductor Technologies', 'IIIB1', 'Gerrit Rössler', ARRAY['Mikroelektronik']::text[]),
+    ('Handel', 'Trade', 'IIB2', NULL, '{}'::text[]),
+    ('Handwerk', 'Skilled Crafts', 'IIB2', NULL, '{}'::text[]),
+    ('Immersive Technologien (VR, AR, XR)', 'Immersive Technologies (VR, AR, XR)', 'IIIB1', 'Juliane Haupt', '{}'::text[]),
+    ('Kreislaufwirtschaft', 'Circular Economy', NULL, NULL, '{}'::text[]),
+    ('Kunstmarkt', 'Art Market', 'IIB4', 'Justina Siegmund-Born', '{}'::text[]),
+    ('Künstliche Intelligenz', 'Artificial Intelligence', 'IIIB1', 'Juliane Haupt', '{}'::text[]),
+    ('Ladeinfrastruktur', 'Charging Infrastructure', 'IIIB3', 'Sascha Tiede', ARRAY['Elektromobilität', 'Batterietechnologien']::text[]),
+    ('Logistik', 'Logistics', 'IIIB3', 'Sascha Tiede', '{}'::text[]),
+    ('Markt für darstellende Künste', 'Performing Arts Market', 'IIB4', 'Justina Siegmund-Born', '{}'::text[]),
+    ('Maschinen- und Anlagenbau', 'Mechanical and Plant Engineering', 'IIIC1', 'David Hampel', '{}'::text[]),
+    ('Medizintechnik', 'Medical Technology', 'IIIB2', 'Petra Schmauß', ARRAY['Digital Health', 'Optik & Photonik', 'Künstliche Intelligenz']::text[]),
+    ('Messe- und Kongresswirtschaft', 'Trade Fair and Congress Industry', 'IIB3', NULL, '{}'::text[]),
+    ('Metallindustrie', 'Metal Industry', 'IIIC1', 'David Hampel', '{}'::text[]),
+    ('Mikroelektronik', 'Microelectronics', 'IIIB1', 'Gerrit Rössler', ARRAY['Halbleitertechnologien']::text[]),
+    ('Mobilitätssoftware', 'Mobility Software', 'IIIB3', 'Sascha Tiede', '{}'::text[]),
+    ('Modewirtschaft', 'Fashion Industry', 'IIB4', 'Justina Siegmund-Born', '{}'::text[]),
+    ('Musikwirtschaft', 'Music Industry', 'IIB4', 'Justina Siegmund-Born', '{}'::text[]),
+    ('Nachhaltige Wirtschaft', 'Sustainable Economy', 'IIA6', 'Diana Woelki, Robin Bruck', '{}'::text[]),
+    ('Neue Mobilitätsangebote', 'New Mobility Services', 'IIIB3', 'Sascha Tiede', '{}'::text[]),
+    ('Papier- und Druckindustrie', 'Paper and Printing Industry', 'IIIC1', 'David Hampel', '{}'::text[]),
+    ('Pharma & Wirkstoffe', 'Pharma & Active Ingredients', 'IIIB2', 'Carolin Clement', ARRAY['Biotechnologie', 'Medizintechnik']::text[]),
+    ('Pharmaindustrie', 'Pharmaceutical Industry', 'IIIC1', 'Carolin Clement', '{}'::text[]),
+    ('Photonik', 'Photonics', 'IIIB1', 'Gerrit Rössler', ARRAY['Quantentechnologien']::text[]),
+    ('Pressemarkt', 'Press Market', 'IIB4', 'Justina Siegmund-Born', '{}'::text[]),
+    ('Quantentechnologien', 'Quantum Technologies', 'IIIB1', 'Gerrit Rössler', ARRAY['Photonik']::text[]),
+    ('Raumfahrt', 'Space', 'IIIB3', 'Sascha Tiede', ARRAY['DefenceTech']::text[]),
+    ('Rechenzentrenbetreiber', 'Data Centre Operators', 'IIIB4', 'Juliane Haupt', ARRAY['63.10.1', '63.10.2', '63.10.9']::text[]),
+    ('Recycling', 'Recycling', 'IIIC1', 'Hannes Lebert', '{}'::text[]),
+    ('Robotik', 'Robotics', 'IIIC1', 'David Hampel', '{}'::text[]),
+    ('Rundfunkwirtschaft', 'Broadcasting Industry', 'IIB4', 'Justina Siegmund-Born', '{}'::text[]),
+    ('Sicherheits- und Verteidigungsindustrie', 'Security and Defence Industry', 'III C 1', 'David Hampel', '{}'::text[]),
+    ('Solarenergie', 'Solar Energy', 'IIIA4', 'Wolfgang Korek', '{}'::text[]),
+    ('Soziale Unternehmen', 'Social Enterprises', 'IIA6', 'Diana Woelki, Anne Le Rolland, Janis Gummersbach', '{}'::text[]),
+    ('Stromnetz', 'Power Grid', 'IIIA4', 'Wolfgang Korek', '{}'::text[]),
+    ('Telekommunikationsanbieter', 'Telecommunications Providers', 'IIIB4', 'Juliane Haupt', ARRAY['61.10.0', '61.10.1', '61.10.2']::text[]),
+    ('Tourismus', 'Tourism', 'IIB3', NULL, '{}'::text[]),
+    ('Wasserstoff', 'Hydrogen', 'IIIA4', 'Wolfgang Korek', '{}'::text[]),
+    ('Wassertechnologien', 'Water Technologies', 'IIIA4', 'Wolfgang Korek', '{}'::text[]),
+    ('Web3, Blockchain, DLT', 'Web3, Blockchain, DLT', 'IIIB1', 'Juliane Haupt', ARRAY['FinTech']::text[]),
+    ('Werbemarkt', 'Advertising Market', 'IIB4', 'Justina Siegmund-Born', '{}'::text[]),
+    ('Windenergie', 'Wind Energy', 'IIIA4', 'Wolfgang Korek', '{}'::text[]);
+
+INSERT INTO public.technology_field_keywords (field, keyword) VALUES
+    ('5G- bzw. 6G Anwendungen', 'Campusnetze'),
+    ('5G- bzw. 6G Anwendungen', 'IoT'),
+    ('5G- bzw. 6G Anwendungen', 'Edge Computing'),
+    ('5G- bzw. 6G Anwendungen', 'Network Slicing'),
+    ('Additive Fertigung', '3D-Druck'),
+    ('Additive Fertigung', 'Rapid Prototyping'),
+    ('Additive Fertigung', 'Serienfertigung'),
+    ('Additive Fertigung', 'Leichtbau'),
+    ('Additive Fertigung', 'Funktionsbauteile'),
+    ('Advanced Materials', 'Hochleistungswerkstoffe'),
+    ('Advanced Materials', 'Verbundwerkstoffe'),
+    ('Advanced Materials', 'Leichtbau'),
+    ('Advanced Materials', 'Nanotechnologie'),
+    ('Advanced Materials', 'Funktionswerkstoffe'),
+    ('Architekturmarkt', 'BIM'),
+    ('Architekturmarkt', 'Nachhaltiges Bauen'),
+    ('Architekturmarkt', 'Generalplanung'),
+    ('Architekturmarkt', 'Objektplanung'),
+    ('Architekturmarkt', 'Revitalisierung'),
+    ('Automobilwirtschaft', 'Elektromobilität'),
+    ('Automobilwirtschaft', 'Autonomes Fahren'),
+    ('Automobilwirtschaft', 'Konnektivität'),
+    ('Automobilwirtschaft', 'Nachhaltigkeit'),
+    ('Automobilwirtschaft', 'Automotive'),
+    ('Automobilwirtschaft', 'Fahrzeugtechnik'),
+    ('Automobilwirtschaft', 'Smart Mobility'),
+    ('Automobilwirtschaft', 'Future Mobility'),
+    ('Automobilwirtschaft', 'Fahrzeugentwicklung'),
+    ('Automobilwirtschaft', 'Fahrzeugproduktion'),
+    ('Automobilwirtschaft', 'Automotive Engineering'),
+    ('Automobilwirtschaft', 'Smart Factory'),
+    ('Automobilwirtschaft', 'Industrie 4.0'),
+    ('Automobilwirtschaft', 'Robotik'),
+    ('Automobilwirtschaft', 'Predictive Maintenance'),
+    ('Automobilwirtschaft', 'Supply Chain'),
+    ('Automobilwirtschaft', 'Leichtbau'),
+    ('Automobilwirtschaft', 'Circular Economy'),
+    ('Autonomes, vernetzes Fahren', 'V2X-Kommunikation'),
+    ('Autonomes, vernetzes Fahren', 'Sensorfusion'),
+    ('Autonomes, vernetzes Fahren', 'Fahrerassistenzsysteme'),
+    ('Autonomes, vernetzes Fahren', 'Software-defined Vehicle'),
+    ('Autonomes, vernetzes Fahren', 'Telematik'),
+    ('Autonomes, vernetzes Fahren', 'Teleoperiertes Fahren'),
+    ('Autonomes, vernetzes Fahren', 'Connected Car'),
+    ('Autonomes, vernetzes Fahren', 'V2X'),
+    ('Autonomes, vernetzes Fahren', 'V2I (Vehicle-to-Infrastructure)'),
+    ('Autonomes, vernetzes Fahren', 'V2V (Vehicle-to-Vehicle)'),
+    ('Autonomes, vernetzes Fahren', 'Cloud Connectivity'),
+    ('Autonomes, vernetzes Fahren', 'Autonomous Driving'),
+    ('Autonomes, vernetzes Fahren', 'Automated Driving'),
+    ('Autonomes, vernetzes Fahren', 'ADAS'),
+    ('Autonomes, vernetzes Fahren', 'LiDAR'),
+    ('Autonomes, vernetzes Fahren', 'Radar'),
+    ('Autonomes, vernetzes Fahren', 'Machine Learning'),
+    ('Autonomes, vernetzes Fahren', 'Deep Learning'),
+    ('Autonomes, vernetzes Fahren', 'Digital Twin'),
+    ('Autonomes, vernetzes Fahren', 'AI'),
+    ('Autonomes, vernetzes Fahren', 'Simulation'),
+    ('Autonomes, vernetzes Fahren', 'Selbstfahrende Autos'),
+    ('Autonomes, vernetzes Fahren', 'Robotaxis'),
+    ('Autonomes, vernetzes Fahren', 'SAE/Level 3-5'),
+    ('Autonomes, vernetzes Fahren', 'Operational Design Domain'),
+    ('Autonomes, vernetzes Fahren', 'Motion Planing'),
+    ('Autonomes, vernetzes Fahren', 'Localization'),
+    ('Autonomes, vernetzes Fahren', 'Autonomous Shuttle'),
+    ('Autonomes, vernetzes Fahren', 'Shuttle-Bus'),
+    ('Autonomes, vernetzes Fahren', 'Connected Vehicle'),
+    ('Autonomes, vernetzes Fahren', 'Vehicle Operating System'),
+    ('Autonomes, vernetzes Fahren', 'AI for Mobility'),
+    ('Autonomes, vernetzes Fahren', '3D-Umgebungserfassung'),
+    ('Autonomes, vernetzes Fahren', 'Vollautonome Fahrzeuge'),
+    ('Bahnindustrie', 'Bahntechnik'),
+    ('Bahnindustrie', 'Schienenfahrzeuge'),
+    ('Bahnindustrie', 'Signaltechnik'),
+    ('Bahnindustrie', 'Schieneninfrastruktur'),
+    ('Bahnindustrie', 'Railway Technology'),
+    ('Bahnindustrie', 'Rail Industry'),
+    ('Bahnindustrie', 'Railway Engineering'),
+    ('Bahnindustrie', 'Rail Systems'),
+    ('Bahnindustrie', 'Rail Infrastructure'),
+    ('Bahnindustrie', 'Schienenverkehr'),
+    ('Bahnindustrie', 'Eisenbahntechnik'),
+    ('Bahnindustrie', 'Bahninfrastruktur'),
+    ('Bahnindustrie', 'Bahnbetrieb'),
+    ('Bahnindustrie', 'Digitale Schiene'),
+    ('Bahnindustrie', 'Digitaler Zwilling'),
+    ('Bahnindustrie', 'Automatisierter Bahnverkehr'),
+    ('Bahnindustrie', 'hochautomatisiertes Fahren'),
+    ('Bahnindustrie', 'Zugsteuerung'),
+    ('Bahnindustrie', 'Sensorik'),
+    ('Bahnindustrie', 'Bahnsicherheit'),
+    ('Bahnindustrie', 'Autonomous Rail'),
+    ('Bahnindustrie', 'Smart Infrastructure'),
+    ('Bahnindustrie', 'Green Rail'),
+    ('Bahnindustrie', 'Sustainable Mobility'),
+    ('Bahnindustrie', 'Rail Telematics'),
+    ('Bahnindustrie', 'AI for Rail'),
+    ('Bahnindustrie', 'European Train Control System (ETCS)'),
+    ('Bahnindustrie', 'European Rail Traffic Management System (ERTMS)'),
+    ('Batterietechnologien', 'Lithium-Ionen-Technologie'),
+    ('Batterietechnologien', 'Lithium-Schwefel-Batterien'),
+    ('Batterietechnologien', 'Feststoffbatterie'),
+    ('Batterietechnologien', 'Energiespeichersysteme'),
+    ('Batterietechnologien', 'Batteriemanagementsystem'),
+    ('Batterietechnologien', 'Batterierecycling'),
+    ('Batterietechnologien', 'Akkus'),
+    ('Bauindustrie', 'Nachhaltiges Bauen'),
+    ('Bauindustrie', 'Kreislaufwirtschaft'),
+    ('Bauindustrie', 'Baustoffe'),
+    ('Bauindustrie', 'Holzbau'),
+    ('Bauindustrie', 'Dekarbonisierung'),
+    ('Bioproduktion', 'Fermentation'),
+    ('Bioproduktion', 'Bioreaktoren'),
+    ('Bioproduktion', 'Bioprozesstechnik'),
+    ('Bioproduktion', 'Zellkultur'),
+    ('Biotechnologie', 'Biotechnologie'),
+    ('Biotechnologie', 'Wirkstoffentwicklung'),
+    ('Biotechnologie', 'Antikörper'),
+    ('Biotechnologie', 'Bioprozess'),
+    ('Biotechnologie', 'GMP'),
+    ('Biotechnologie', 'Genomik'),
+    ('Biotechnologie', 'ATMP'),
+    ('Biotechnologie', 'Zell- und Gentherapie'),
+    ('Buchmarkt', 'Verlagswesen'),
+    ('Buchmarkt', 'Digital Publishing'),
+    ('Buchmarkt', 'Buchvertrieb'),
+    ('Buchmarkt', 'Print-on-Demand'),
+    ('Buchmarkt', 'Self-Publishing'),
+    ('Buchmarkt', 'Buchhandel'),
+    ('Carbon Management', 'direct air capture'),
+    ('Carbon Management', 'ccs'),
+    ('Carbon Management', 'ccu'),
+    ('Chemische Industrie', 'Spezialchemie'),
+    ('Chemische Industrie', 'Feinchemikalien'),
+    ('Chemische Industrie', 'Polymere'),
+    ('Chemische Industrie', 'Kreislaufwirtschaft'),
+    ('Chemische Industrie', 'Grüne Chemie'),
+    ('Cybersicherheit', 'IT-Sicherheit'),
+    ('Cybersicherheit', 'Verschlüsselung'),
+    ('Cybersicherheit', 'Penetration Testing'),
+    ('Cybersicherheit', 'Cloud-Security'),
+    ('Cybersicherheit', 'Digitale Identität'),
+    ('Defence Tech', 'Dual Use'),
+    ('Defence Tech', 'Verteidigung'),
+    ('Defence Tech', 'Defense Technology'),
+    ('Defence Tech', 'Verteidigungstechnik'),
+    ('Defence Tech', 'Cyber-Defense'),
+    ('Defence Tech', 'Schutzsysteme'),
+    ('Defence Tech', 'Sensorik'),
+    ('Defence Tech', 'Aufklärungssysteme'),
+    ('Defence Tech', 'Drohnenabwehr'),
+    ('Defence Tech', 'KI basierte Lagebilder'),
+    ('Defence Tech', 'Erdbedobachtung'),
+    ('Defence Tech', 'Satellitendaten'),
+    ('Defence Tech', 'Raumfahrttechnologien'),
+    ('Defence Tech', 'Software Defined Defence'),
+    ('Designwirtschaft', 'Mediendesign'),
+    ('Designwirtschaft', 'Markenidentität'),
+    ('Designwirtschaft', 'Produktdesign'),
+    ('Designwirtschaft', 'Kreativagentur'),
+    ('Designwirtschaft', 'Corporate Design'),
+    ('Dienstleistung', 'Schausteller'),
+    ('Dienstleistung', 'Sicherheitskräfte'),
+    ('Dienstleistung', 'Taxigewerbe'),
+    ('Dienstleistung', 'Lieferdienste'),
+    ('Dienstleistung', 'Makler'),
+    ('Dienstleistung', 'Fitnessstudio'),
+    ('Digital Health', 'Digital Health'),
+    ('Digital Health', 'Telemedizin'),
+    ('Digital Health', 'DiGA'),
+    ('Digital Health', 'ePA'),
+    ('Digital Health', 'Interoperabilität'),
+    ('Digital Health', 'KI-Diagnostik'),
+    ('Drohnen', 'UAV'),
+    ('Drohnen', 'UAM'),
+    ('Drohnen', 'UIC'),
+    ('Drohnen', 'unbemannte Luftfahrt'),
+    ('Drohnen', 'Drohnentechnologie'),
+    ('Drohnen', 'Luftbildvermessung'),
+    ('Drohnen', 'Sensorik'),
+    ('Drohnen', 'Vermessung'),
+    ('Drohnen', 'Drohnensicherheit'),
+    ('Drohnen', 'Bildkomposition'),
+    ('Drohnen', 'Lufträume'),
+    ('Drohnen', 'U-Space'),
+    ('Drohnen', 'unbemannten Fluggeräte'),
+    ('Drohnen', 'Drohnendetektion'),
+    ('Drohnen', 'Drohneninfrastruktur'),
+    ('Elektroindustrie', 'Automatisierungstechnik'),
+    ('Elektroindustrie', 'Elektrifizierung'),
+    ('Elektroindustrie', 'Elektrotechnik'),
+    ('Elektroindustrie', 'Halbleiter'),
+    ('Elektroindustrie', 'Industrie 4.0'),
+    ('Elektroindustrie', 'Sensorik'),
+    ('Elektroindustrie', 'Elektromobilität'),
+    ('Elektromobilität', 'Ladeinfrastruktur'),
+    ('Elektromobilität', 'Batterietechnologie'),
+    ('Elektromobilität', 'Ladestationen'),
+    ('Elektromobilität', 'E-Mobilität'),
+    ('Elektromobilität', 'E-Autos'),
+    ('Elektromobilität', 'Flottenmanagement'),
+    ('Elektromobilität', 'Elektrifizierung'),
+    ('Elektromobilität', 'Elektrotechnik'),
+    ('Energiespeicher', 'Wasserstoffspeicher'),
+    ('Energiespeicher', 'Wärmespeicher'),
+    ('Energiespeicher', 'Stromspeicher'),
+    ('Ernährungsindustrie', 'Lebensmittelsicherheit'),
+    ('Ernährungsindustrie', 'Rückverfolgbarkeit'),
+    ('Ernährungsindustrie', 'Nachhaltigkeit'),
+    ('Fernwärme', 'Wärmequellen'),
+    ('Fernwärme', 'Steuerung'),
+    ('Fernwärme', 'Smart Grid'),
+    ('Filmwirtschaft', 'Filmproduktion'),
+    ('Filmwirtschaft', 'Postproduktion'),
+    ('Filmwirtschaft', 'Content Creation'),
+    ('Filmwirtschaft', 'Audiovisuelle Medien'),
+    ('Filmwirtschaft', 'VFX'),
+    ('FinTech', 'Payment-Lösungen'),
+    ('FinTech', 'Open Banking'),
+    ('FinTech', 'Digital Banking'),
+    ('FinTech', 'Blockchain'),
+    ('FinTech', 'Robo-Advisory'),
+    ('Foodtech', 'Pflanzenbasierte Proteine'),
+    ('Foodtech', 'Biotechnologie'),
+    ('Foodtech', 'Feermentation'),
+    ('Foodtech', 'Aquaponik'),
+    ('Freiberufler', 'Ingenieure'),
+    ('Freiberufler', 'Architekten'),
+    ('Freiberufler', 'Steuerberater'),
+    ('Freiberufler', 'Unternehmensberater'),
+    ('Freiberufler', 'Wirtschaftsprüfer'),
+    ('Games', 'Spieleentwicklung'),
+    ('Games', 'Game Design'),
+    ('Games', 'Gamification'),
+    ('Games', 'Esports'),
+    ('Games', 'Virtual Reality'),
+    ('Gastgewerbe', 'Hotellerie'),
+    ('Gastgewerbe', 'Gastronomie'),
+    ('Gastgewerbe', 'Beherbergung'),
+    ('Gastgewerbe', 'Bewirtung'),
+    ('Gastgewerbe', 'Restaurant'),
+    ('Gastgewerbe', 'Café'),
+    ('Geothermie', 'Umweltwärme'),
+    ('Geothermie', 'Tiefengeothermie'),
+    ('Geothermie', 'Erdwärme'),
+    ('Gesundheitsversorgung & Pflege', 'Krankenhaus'),
+    ('Gesundheitsversorgung & Pflege', 'ambulante Versorgung'),
+    ('Gesundheitsversorgung & Pflege', 'MVZ'),
+    ('Gesundheitsversorgung & Pflege', 'Pflegedienst'),
+    ('Gesundheitsversorgung & Pflege', 'Rehabilitation'),
+    ('Gesundheitsversorgung & Pflege', 'Pflege-Robotik'),
+    ('GovTech', 'Verwaltungsdigitalisierung'),
+    ('GovTech', 'E-Government'),
+    ('GovTech', 'Digitale Souveränität'),
+    ('GovTech', 'Bürgerservice'),
+    ('GovTech', 'Smart Government'),
+    ('Gummi- und Kunststoffverarbeitende Industrie', 'Spritzguss'),
+    ('Gummi- und Kunststoffverarbeitende Industrie', 'Extrusion'),
+    ('Gummi- und Kunststoffverarbeitende Industrie', 'Elastomertechnik'),
+    ('Gummi- und Kunststoffverarbeitende Industrie', 'Thermoplaste'),
+    ('Gummi- und Kunststoffverarbeitende Industrie', 'Compoundierung'),
+    ('Gummi- und Kunststoffverarbeitende Industrie', 'Formenbau'),
+    ('Gummi- und Kunststoffverarbeitende Industrie', 'Verpackungen'),
+    ('Gummi- und Kunststoffverarbeitende Industrie', 'Kunststoffrecycling'),
+    ('Halbleitertechnologien', 'Mikroelektronik'),
+    ('Halbleitertechnologien', 'Halbleiterfertigung'),
+    ('Halbleitertechnologien', 'Leistungselektronik'),
+    ('Halbleitertechnologien', 'Chipdesign'),
+    ('Halbleitertechnologien', 'Wafertechnologie'),
+    ('Halbleitertechnologien', 'Semiconductor'),
+    ('Handel', 'E-Commerce'),
+    ('Handel', 'Einzelhandel'),
+    ('Handel', 'Lebensmittel'),
+    ('Handel', 'Spätverkaufsstellen'),
+    ('Handel', 'Shoppingcenter/Einkaufszentren'),
+    ('Immersive Technologien (VR, AR, XR)', 'Virtual Reality'),
+    ('Immersive Technologien (VR, AR, XR)', 'Augmented Reality'),
+    ('Immersive Technologien (VR, AR, XR)', 'Mixed Reality'),
+    ('Immersive Technologien (VR, AR, XR)', 'Spatial Computing'),
+    ('Immersive Technologien (VR, AR, XR)', 'Immersive Experience'),
+    ('Kreislaufwirtschaft', 'Cradle-to-Cradle'),
+    ('Kreislaufwirtschaft', 'Ressourceneffizienz'),
+    ('Kreislaufwirtschaft', 'Wertstoffkreislauf'),
+    ('Kreislaufwirtschaft', 'Kreislauffähigkeit'),
+    ('Kreislaufwirtschaft', 'Zero Waste'),
+    ('Kreislaufwirtschaft', 'Lebenszyklusverlängerung'),
+    ('Kreislaufwirtschaft', 'R-Strategien'),
+    ('Kreislaufwirtschaft', 'zirkulär'),
+    ('Kunstmarkt', 'Kunsthandel'),
+    ('Kunstmarkt', 'Kunstbewertung'),
+    ('Kunstmarkt', 'Sammlungsmanagement'),
+    ('Künstliche Intelligenz', 'Maschinelles Lernen'),
+    ('Künstliche Intelligenz', 'Neuronale Netze'),
+    ('Künstliche Intelligenz', 'Deep Learning'),
+    ('Künstliche Intelligenz', 'Generative KI'),
+    ('Künstliche Intelligenz', 'Natural Language Processing'),
+    ('Ladeinfrastruktur', 'Ladetechnologien'),
+    ('Ladeinfrastruktur', 'Schnellladen'),
+    ('Ladeinfrastruktur', 'Smart Charging'),
+    ('Ladeinfrastruktur', 'Wallbox'),
+    ('Ladeinfrastruktur', 'bidirektionales Laden'),
+    ('Ladeinfrastruktur', 'HPC-Laden'),
+    ('Ladeinfrastruktur', 'Megawatt-Charging'),
+    ('Ladeinfrastruktur', 'MCS'),
+    ('Logistik', 'Lieferkettenmanagement'),
+    ('Logistik', 'Kontraktlogistik'),
+    ('Logistik', 'Lagerlogistik'),
+    ('Logistik', 'Transportlogistik'),
+    ('Logistik', 'Green Logistics'),
+    ('Logistik', 'Verkehrslogistik'),
+    ('Logistik', 'Güterverkehr'),
+    ('Logistik', 'Warenverkehr'),
+    ('Logistik', 'Letzte Meile'),
+    ('Logistik', 'Spedition'),
+    ('Logistik', 'Logistikdienstleister'),
+    ('Logistik', 'Wertschöpfungskette'),
+    ('Logistik', 'Transportation Management System'),
+    ('Logistik', 'Supply Chain Resilience'),
+    ('Logistik', 'Digitale Logistik'),
+    ('Logistik', 'Internet of Things'),
+    ('Logistik', 'Smart Logistics'),
+    ('Logistik', 'Cloud Logistics'),
+    ('Logistik', 'Automatisiertes Lager'),
+    ('Logistik', 'Robotik'),
+    ('Logistik', 'Autonome Logistik'),
+    ('Logistik', 'Fahrerlose Transportsysteme'),
+    ('Logistik', 'Urbane Logistik'),
+    ('Logistik', 'Last Mile Delivery'),
+    ('Logistik', 'City Logistics'),
+    ('Logistik', 'Depot'),
+    ('Logistik', 'Mikrodepot'),
+    ('Logistik', 'Paketlogistik'),
+    ('Logistik', 'ITS'),
+    ('Logistik', 'Cargo Bikes'),
+    ('Logistik', 'Sustainable Logistics'),
+    ('Logistik', 'Nachhaltige Lieferketten'),
+    ('Logistik', 'Flurförderfahrzeuge'),
+    ('Logistik', 'Kurier-Express Dienstleistungen'),
+    ('Logistik', 'Drohnenlieferservice'),
+    ('Markt für darstellende Künste', 'Bühnenproduktion'),
+    ('Markt für darstellende Künste', 'Kulturmanagement'),
+    ('Markt für darstellende Künste', 'Live-Entertainment'),
+    ('Markt für darstellende Künste', 'Inszenierung'),
+    ('Markt für darstellende Künste', 'Spielstätte'),
+    ('Maschinen- und Anlagenbau', 'Automatisierungstechnik'),
+    ('Maschinen- und Anlagenbau', 'Antriebssysteme'),
+    ('Maschinen- und Anlagenbau', 'Prozessanlagen'),
+    ('Maschinen- und Anlagenbau', 'Industrieanlagen'),
+    ('Maschinen- und Anlagenbau', 'Werkzeugmaschinen'),
+    ('Maschinen- und Anlagenbau', 'Fördertechnik'),
+    ('Maschinen- und Anlagenbau', 'Sondermaschinenbau'),
+    ('Maschinen- und Anlagenbau', 'Industrie 4.0'),
+    ('Maschinen- und Anlagenbau', 'Steuerungstechnik'),
+    ('Medizintechnik', 'Medizinprodukt'),
+    ('Medizintechnik', 'MDR'),
+    ('Medizintechnik', 'Implantat'),
+    ('Medizintechnik', 'Diagnostik'),
+    ('Medizintechnik', 'Bildgebung'),
+    ('Medizintechnik', 'Automat'),
+    ('Messe- und Kongresswirtschaft', 'Veranstaltungsort'),
+    ('Messe- und Kongresswirtschaft', 'Networking'),
+    ('Messe- und Kongresswirtschaft', 'Standbau'),
+    ('Messe- und Kongresswirtschaft', 'Kongressorganisation'),
+    ('Metallindustrie', 'Metallverarbeitung'),
+    ('Metallindustrie', 'Blechbearbeitung'),
+    ('Metallindustrie', 'CNC-Zerspanung'),
+    ('Metallindustrie', 'Präzisionstechnik'),
+    ('Metallindustrie', 'Oberflächentechnik'),
+    ('Metallindustrie', 'Umformtechnik'),
+    ('Mikroelektronik', 'Halbleiter'),
+    ('Mikroelektronik', 'Chipdesign'),
+    ('Mikroelektronik', 'Sensorik'),
+    ('Mikroelektronik', 'Leistungselektronik'),
+    ('Mikroelektronik', 'Mikrosystemtechnik'),
+    ('Mikroelektronik', 'Advanced Packaging'),
+    ('Mikroelektronik', 'Heterointergration'),
+    ('Mobilitätssoftware', 'Mobility-as-a-Service'),
+    ('Mobilitätssoftware', 'Flottenmanagement'),
+    ('Mobilitätssoftware', 'Shared Mobility'),
+    ('Mobilitätssoftware', 'Routenoptimierung'),
+    ('Mobilitätssoftware', 'Smart Mobility'),
+    ('Mobilitätssoftware', 'Digitale Mobilität'),
+    ('Mobilitätssoftware', 'Mobilitätsplattform'),
+    ('Mobilitätssoftware', 'Mobilitätsdienstleistungen'),
+    ('Mobilitätssoftware', 'Verkehrstechnologie'),
+    ('Mobilitätssoftware', 'Verkehrssysteme'),
+    ('Mobilitätssoftware', 'Intelligente Mobilität'),
+    ('Mobilitätssoftware', 'Zukunftsmobilität'),
+    ('Mobilitätssoftware', 'Sustainable Mobility'),
+    ('Mobilitätssoftware', 'Multimodale Mobilität'),
+    ('Mobilitätssoftware', 'Mobilitäts-Apps'),
+    ('Mobilitätssoftware', 'Mobility Data'),
+    ('Mobilitätssoftware', 'Open Data'),
+    ('Mobilitätssoftware', 'Digitaler Zwilling'),
+    ('Mobilitätssoftware', 'Big Data'),
+    ('Mobilitätssoftware', 'Open Mobility Data'),
+    ('Mobilitätssoftware', 'Sharing'),
+    ('Mobilitätssoftware', 'Mobilitätssoftware'),
+    ('Mobilitätssoftware', 'Verkehrsoptimierung'),
+    ('Mobilitätssoftware', 'Verkehrsmanagement'),
+    ('Mobilitätssoftware', 'Smart City Plattform'),
+    ('Mobilitätssoftware', 'Digitale Infrastruktur'),
+    ('Mobilitätssoftware', 'ITS'),
+    ('Mobilitätssoftware', 'Intelligente Verkehrsysteme'),
+    ('Mobilitätssoftware', 'ÖPNV-Software'),
+    ('Mobilitätssoftware', 'Vehicle Data Platform'),
+    ('Mobilitätssoftware', 'Vehicle Connectivity'),
+    ('Mobilitätssoftware', 'Telematik'),
+    ('Modewirtschaft', 'Modedesign'),
+    ('Modewirtschaft', 'Kollektion'),
+    ('Musikwirtschaft', 'Musikproduktion'),
+    ('Musikwirtschaft', 'Musikvertrieb'),
+    ('Musikwirtschaft', 'Künstlermanagement'),
+    ('Musikwirtschaft', 'Musikverlag'),
+    ('Musikwirtschaft', 'Konzertveranstalter'),
+    ('Musikwirtschaft', 'Clubs'),
+    ('Nachhaltige Wirtschaft', 'Kreislaufwirtschaft'),
+    ('Nachhaltige Wirtschaft', 'Erneuerbare Energien'),
+    ('Nachhaltige Wirtschaft', 'Ressourceneffizienz'),
+    ('Nachhaltige Wirtschaft', 'CO2-Neutralität'),
+    ('Nachhaltige Wirtschaft', 'Corporate Social Responsibility'),
+    ('Nachhaltige Wirtschaft', 'ESG'),
+    ('Neue Mobilitätsangebote', 'Mobility-as-a-Service'),
+    ('Neue Mobilitätsangebote', 'Carsharing'),
+    ('Neue Mobilitätsangebote', 'Mikromobilität'),
+    ('Neue Mobilitätsangebote', 'Ridepooling'),
+    ('Neue Mobilitätsangebote', 'Intermodale Mobilität'),
+    ('Neue Mobilitätsangebote', 'Shared Mobility'),
+    ('Neue Mobilitätsangebote', 'Bikesharing'),
+    ('Neue Mobilitätsangebote', 'Ridehailing'),
+    ('Neue Mobilitätsangebote', 'On-Demand Mobility'),
+    ('Neue Mobilitätsangebote', 'Elektrokleinstfahrzeuge'),
+    ('Neue Mobilitätsangebote', 'E-Roller'),
+    ('Neue Mobilitätsangebote', 'E-Scooter'),
+    ('Papier- und Druckindustrie', 'Digitaldruck'),
+    ('Papier- und Druckindustrie', 'Offsetdruck'),
+    ('Papier- und Druckindustrie', 'Druckveredelung'),
+    ('Papier- und Druckindustrie', 'Verpackungsdruck'),
+    ('Papier- und Druckindustrie', 'Printmedien'),
+    ('Pharma & Wirkstoffe', 'Arzneimittel'),
+    ('Pharma & Wirkstoffe', 'Wirkstoff'),
+    ('Pharma & Wirkstoffe', 'klinische Studien'),
+    ('Pharma & Wirkstoffe', 'Galenik'),
+    ('Pharma & Wirkstoffe', 'Generika'),
+    ('Pharma & Wirkstoffe', 'Orphan Drugs'),
+    ('Pharma & Wirkstoffe', 'Pharmazeutika'),
+    ('Pharmaindustrie', 'Wirkstoffentwicklung'),
+    ('Pharmaindustrie', 'Klinische Studien'),
+    ('Pharmaindustrie', 'Biotechnologie'),
+    ('Pharmaindustrie', 'Arzneimittelsicherheit'),
+    ('Pharmaindustrie', 'Zulassungsverfahren'),
+    ('Photonik', 'Lasertechnik'),
+    ('Photonik', 'Optoelektronik'),
+    ('Photonik', 'Optische Systeme'),
+    ('Photonik', 'Sensorik'),
+    ('Photonik', 'Machine Vision'),
+    ('Pressemarkt', 'Digital-Publishing'),
+    ('Pressemarkt', 'Qualitätsjournalismus'),
+    ('Pressemarkt', 'Paid Content'),
+    ('Pressemarkt', 'Medienvertrieb'),
+    ('Pressemarkt', 'Printmedien'),
+    ('Quantentechnologien', 'Quantencomputing'),
+    ('Quantentechnologien', 'Quantensensorik'),
+    ('Quantentechnologien', 'Quantenkryptographie'),
+    ('Quantentechnologien', 'Quantenkommunikation'),
+    ('Quantentechnologien', 'Quantum Key Distribution'),
+    ('Raumfahrt', 'Satelliten'),
+    ('Raumfahrt', 'New Space'),
+    ('Raumfahrt', 'Luft- und Raumfahrt'),
+    ('Raumfahrt', 'Trägerraketen'),
+    ('Raumfahrt', 'Erdbeobachtung'),
+    ('Raumfahrt', 'Weltraumschrott'),
+    ('Raumfahrt', 'Mondmission'),
+    ('Raumfahrt', 'Kleinsatelliten'),
+    ('Raumfahrt', 'Datenauswertung'),
+    ('Raumfahrt', 'Moon Rover'),
+    ('Raumfahrt', 'Satellitenkonstellation'),
+    ('Rechenzentrenbetreiber', 'Compute'),
+    ('Rechenzentrenbetreiber', 'Rechenleistung'),
+    ('Rechenzentrenbetreiber', 'Cloud-Infrastruktur'),
+    ('Recycling', 'Kreislaufwirtschaft'),
+    ('Recycling', 'Wertstoffrückgewinnung'),
+    ('Recycling', 'Ressourceneffizienz'),
+    ('Recycling', 'Nachhaltigkeit'),
+    ('Recycling', 'Abfallmanagement'),
+    ('Robotik', 'Industrieroboter'),
+    ('Robotik', 'Cobots'),
+    ('Robotik', 'Sensorik'),
+    ('Rundfunkwirtschaft', 'Broadcasting'),
+    ('Rundfunkwirtschaft', 'Medienproduktion'),
+    ('Rundfunkwirtschaft', 'Content-Distribution'),
+    ('Rundfunkwirtschaft', 'Streaming-Technologie'),
+    ('Rundfunkwirtschaft', 'Medientechnologie'),
+    ('Sicherheits- und Verteidigungsindustrie', 'Rüstungsgüter'),
+    ('Solarenergie', 'Photovoltaik'),
+    ('Solarenergie', 'Solarthermie'),
+    ('Solarenergie', 'PVT'),
+    ('Soziale Unternehmen', 'Gemeinwohl'),
+    ('Soziale Unternehmen', 'Soziale Innovation'),
+    ('Soziale Unternehmen', 'Impact'),
+    ('Soziale Unternehmen', 'Inklusion'),
+    ('Soziale Unternehmen', 'Verantwortungseigentum'),
+    ('Soziale Unternehmen', 'Kollektiv'),
+    ('Stromnetz', 'Lastsenke'),
+    ('Stromnetz', 'Steuerung'),
+    ('Stromnetz', 'Smart-Grid'),
+    ('Stromnetz', 'Resilienz'),
+    ('Telekommunikationsanbieter', 'Glasfaser'),
+    ('Telekommunikationsanbieter', '5G'),
+    ('Telekommunikationsanbieter', '6G'),
+    ('Telekommunikationsanbieter', 'Campusnetze'),
+    ('Telekommunikationsanbieter', 'Richtfunk'),
+    ('Telekommunikationsanbieter', 'LoRaWAN'),
+    ('Telekommunikationsanbieter', 'Mobilfunk'),
+    ('Telekommunikationsanbieter', 'Telekommunikation'),
+    ('Telekommunikationsanbieter', 'Open RAN'),
+    ('Tourismus', 'Destination'),
+    ('Tourismus', 'Pauschalreise'),
+    ('Tourismus', 'Fremdenverkehr'),
+    ('Tourismus', 'Reiseveranstalter'),
+    ('Tourismus', 'Urlaubserlebnis'),
+    ('Tourismus', 'Incomingagentur'),
+    ('Tourismus', 'Stadtführung'),
+    ('Tourismus', 'Sightseeing'),
+    ('Wasserstoff', 'Elektrolyseur'),
+    ('Wassertechnologien', 'Abwasserbehandlung'),
+    ('Wassertechnologien', 'Trinkwasseraufbereitung'),
+    ('Wassertechnologien', 'Membrantechnologie'),
+    ('Wassertechnologien', 'Prozesswasser'),
+    ('Wassertechnologien', 'Wasserwiederverwendung'),
+    ('Web3, Blockchain, DLT', 'Tokenisierung'),
+    ('Web3, Blockchain, DLT', 'Dezentralisierung'),
+    ('Web3, Blockchain, DLT', 'Smart Contracts'),
+    ('Web3, Blockchain, DLT', 'Digitale Assets'),
+    ('Web3, Blockchain, DLT', 'Hash'),
+    ('Web3, Blockchain, DLT', 'Onchain Asset Management'),
+    ('Werbemarkt', 'Programmatic Advertising'),
+    ('Werbemarkt', 'Performance Marketing'),
+    ('Werbemarkt', 'Content-Kreation'),
+    ('Werbemarkt', 'Branding'),
+    ('Windenergie', 'Windenergieanlagen'),
+    ('Windenergie', 'Steuerung'),
+    ('Windenergie', 'Turbinen'),
+    ('Windenergie', 'Rotorblätter End-of-life');
+
+-- Deleted by hand from the YAML, each with the measurement that justified it. Never add one back
+-- without a new measurement. Handwerk's fifth keyword, a sentence about apprenticeships, was not kept
+-- in the YAML's comment and so is not here either.
+INSERT INTO public.technology_field_keywords (field, keyword, removed_at, removed_reason) VALUES
+    ('Automobilwirtschaft', 'Transformation', DATE '2026-08-24', '"Transformation" removed 2026-08-24. It fired on 53 texts and decided 6 companies for this branch, every one a consultancy with the word in its OWN NAME — zeitgeist Transformations, TransformIT Europe, Transferagentur Niedersachsen, "Transformation in Healthcare Services". None sells cars. Worth knowing generally: the page text we read includes the company''s own name in its header, so a generic word in a company name assigns that company to itself.'),
+    ('Bahnindustrie', 'Instandhaltung', DATE '2026-08-24', '"Instandhaltung" removed 2026-08-24. Measured: it fired on 60 of 7,739 texts and produced 26 of this branch''s 29 assignments on its own. Maintenance is what every workshop, facility manager, machine shop and building service does; it is a chore, not an industry, and none of the 26 was a railway company. Closing the hyphen hole does not help here — the word stands alone on those pages, so the count was 26 with the rule on as well. The branch keeps 28 keywords that do name the railway industry, down to "European Train Control System".'),
+    ('Bioproduktion', 'Skalierung', DATE '2026-08-24', '"Skalierung" removed 2026-08-24. Scaling up is what every start-up says it is doing. It decided 5 of this branch''s 8 assignments: a talent-recruitment firm (twice), a solar UG and a "Global Solutions" consultancy. Only one, MycelCore, was plausibly biological. The branch keeps Fermentation, Bioreaktoren, Bioprozesstechnik and Zellkultur — words with no second meaning in German.'),
+    ('Defence Tech', 'Sicherheit', DATE '2026-08-20', '"Sicherheit" removed 2026-08-20. Measured: it fired on 140 of 7,739 texts and produced 27 of this branch''s 35 assignments on its own — a bed shop, a lift company, an estate agent, a transport firm and a home-help service among them. On a German business page the word means Arbeitssicherheit or Datensicherheit, never defence. This is the one thing no measurement can decide: "sicherheit" appears on 1.8% of our texts and "einzelhandel" on 3.0%, and only one of those names an industry. The branch keeps 14 keywords that do name one.'),
+    ('Digital Health', 'App', DATE '2026-08-24', '"App" removed 2026-08-24. Measured: it fired on 90 of 7,739 texts — the 6th most common keyword we have — and produced 11 of this branch''s 14 assignments on its own. An app is how a business reaches its customers, not the field it works in, and every trade has one. It is also the keyword the hyphen rule hurt most: 171 of its 789 page hits came only from "Web-App" or "App-Entwicklung". The branch keeps DiGA, ePA, Telemedizin and KI-Diagnostik, which no company outside digital health writes.'),
+    ('Drohnen', 'Inspektion', DATE '2026-08-24', '"Inspektion" removed 2026-08-24. In Germany an Inspektion is the service interval on your car. It decided 5 companies for this branch: two car dealerships, a Pkw/Lkw repair shop, a testing service and a fittings maker. Drones do inspect things, but "Luftbildvermessung", "Drohnentechnologie" and "unbemannte Luftfahrt" say so.'),
+    ('Ernährungsindustrie', 'Qualitätsmanagement', DATE '2026-08-24', '"Qualitätsmanagement" (35 texts) and "Produktentwicklung" removed 2026-08-24. Every manufacturer of anything does both. Together they decided 7 companies for this branch: a shoe company, a skin-testing laboratory, a concept agency, a components firm. "Lebensmittelsicherheit" and "Rückverfolgbarkeit" stay — those are food words.'),
+    ('Ernährungsindustrie', 'Produktentwicklung', DATE '2026-08-24', '"Qualitätsmanagement" (35 texts) and "Produktentwicklung" removed 2026-08-24. Every manufacturer of anything does both. Together they decided 7 companies for this branch: a shoe company, a skin-testing laboratory, a concept agency, a components firm. "Lebensmittelsicherheit" and "Rückverfolgbarkeit" stay — those are food words.'),
+    ('Gastgewerbe', 'Bar', DATE '2026-08-24', '"Bar" removed 2026-08-24. In German "bar" is how you pay — "bar bezahlen", "bar oder mit Karte" — and it fired on 41 texts, deciding 9 companies for this branch alone: an insurance broker, a literature society, a media agency, a foundation. Three letters cannot carry a branch. "Hotellerie", "Gastronomie", "Beherbergung", "Bewirtung", "Restaurant" and "Café" all stay, and a real bar''s website says at least one of them.'),
+    ('Handwerk', 'Digitalisierung', DATE '2026-08-24', 'EMPTIED 2026-08-24, and this one is not a bad keyword — it is a branch with no usable keyword at all. Berlin''s sheet gave Handwerk five: "Digitalisierung", "Nachhaltigkeit", "Energieeffizienz", "Fachkräfte" and a sentence about apprenticeships. Not one of them names a craft. They are the topics a chamber of crafts talks ABOUT, and every company in Germany writes them.  Measured: all 26 assignments came from those words — digitalisierung 12, fachkräfte 9, energieeffizienz 8 — and the companies were an energy co-operative, a dental laboratory (twice), a document-management firm, a foundation, a metering company and an e-learning start-up. Zero craft businesses out of 26.  So the branch is left with nothing rather than filled with noise. A roofer, a joiner or an electrician is now correctly NONE: we would need words like Dachdecker, Tischlerei, Elektroinstallation, Sanitär, Malerbetrieb, and Berlin''s list does not have them. That is a gap in the taxonomy for whoever owns it — the same kind as the missing general-software field — and it is not something the classifier can fix.  "Nachhaltigkeit" survives elsewhere: Automobilwirtschaft, Ernährungsindustrie and Recycling also claim it, and removing Handwerk''s claim makes it worth more to each of them.'),
+    ('Handwerk', 'Nachhaltigkeit', DATE '2026-08-24', 'EMPTIED 2026-08-24, and this one is not a bad keyword — it is a branch with no usable keyword at all. Berlin''s sheet gave Handwerk five: "Digitalisierung", "Nachhaltigkeit", "Energieeffizienz", "Fachkräfte" and a sentence about apprenticeships. Not one of them names a craft. They are the topics a chamber of crafts talks ABOUT, and every company in Germany writes them.  Measured: all 26 assignments came from those words — digitalisierung 12, fachkräfte 9, energieeffizienz 8 — and the companies were an energy co-operative, a dental laboratory (twice), a document-management firm, a foundation, a metering company and an e-learning start-up. Zero craft businesses out of 26.  So the branch is left with nothing rather than filled with noise. A roofer, a joiner or an electrician is now correctly NONE: we would need words like Dachdecker, Tischlerei, Elektroinstallation, Sanitär, Malerbetrieb, and Berlin''s list does not have them. That is a gap in the taxonomy for whoever owns it — the same kind as the missing general-software field — and it is not something the classifier can fix.  "Nachhaltigkeit" survives elsewhere: Automobilwirtschaft, Ernährungsindustrie and Recycling also claim it, and removing Handwerk''s claim makes it worth more to each of them.'),
+    ('Handwerk', 'Energieeffizienz', DATE '2026-08-24', 'EMPTIED 2026-08-24, and this one is not a bad keyword — it is a branch with no usable keyword at all. Berlin''s sheet gave Handwerk five: "Digitalisierung", "Nachhaltigkeit", "Energieeffizienz", "Fachkräfte" and a sentence about apprenticeships. Not one of them names a craft. They are the topics a chamber of crafts talks ABOUT, and every company in Germany writes them.  Measured: all 26 assignments came from those words — digitalisierung 12, fachkräfte 9, energieeffizienz 8 — and the companies were an energy co-operative, a dental laboratory (twice), a document-management firm, a foundation, a metering company and an e-learning start-up. Zero craft businesses out of 26.  So the branch is left with nothing rather than filled with noise. A roofer, a joiner or an electrician is now correctly NONE: we would need words like Dachdecker, Tischlerei, Elektroinstallation, Sanitär, Malerbetrieb, and Berlin''s list does not have them. That is a gap in the taxonomy for whoever owns it — the same kind as the missing general-software field — and it is not something the classifier can fix.  "Nachhaltigkeit" survives elsewhere: Automobilwirtschaft, Ernährungsindustrie and Recycling also claim it, and removing Handwerk''s claim makes it worth more to each of them.'),
+    ('Handwerk', 'Fachkräfte', DATE '2026-08-24', 'EMPTIED 2026-08-24, and this one is not a bad keyword — it is a branch with no usable keyword at all. Berlin''s sheet gave Handwerk five: "Digitalisierung", "Nachhaltigkeit", "Energieeffizienz", "Fachkräfte" and a sentence about apprenticeships. Not one of them names a craft. They are the topics a chamber of crafts talks ABOUT, and every company in Germany writes them.  Measured: all 26 assignments came from those words — digitalisierung 12, fachkräfte 9, energieeffizienz 8 — and the companies were an energy co-operative, a dental laboratory (twice), a document-management firm, a foundation, a metering company and an e-learning start-up. Zero craft businesses out of 26.  So the branch is left with nothing rather than filled with noise. A roofer, a joiner or an electrician is now correctly NONE: we would need words like Dachdecker, Tischlerei, Elektroinstallation, Sanitär, Malerbetrieb, and Berlin''s list does not have them. That is a gap in the taxonomy for whoever owns it — the same kind as the missing general-software field — and it is not something the classifier can fix.  "Nachhaltigkeit" survives elsewhere: Automobilwirtschaft, Ernährungsindustrie and Recycling also claim it, and removing Handwerk''s claim makes it worth more to each of them.'),
+    ('Kunstmarkt', 'Galerie', DATE '2026-08-24', '"Galerie" removed 2026-08-24. Measured: 9 of this branch''s 11 assignments rested on it alone. On a German business site "Galerie" is the photo-gallery item in the navigation — a roofer''s finished jobs, a restaurant''s dishes — and 24 of the 67 pages carrying the word only had it as part of "Foto-Galerie" or "Bild-Galerie". The branch keeps Kunsthandel, Kunstbewertung and Sammlungsmanagement, all three of which name the art trade itself.'),
+    ('Maschinen- und Anlagenbau', 'Prozessoptimierung', DATE '2026-08-24', '"Prozessoptimierung" removed 2026-08-24. It fired on 38 texts and decided 6 companies here, all management consultancies — ECOVIS Unternehmensberatung, DO! Business Consulting, Praxis Erfolgskonzept. Optimising a process is advice, not machinery. "Industrieanlagen" is the counter-example and stays: its 8 companies are Weil Industrieanlagen, IAB Industrie-Anlagen-Bau, Balsmann Anlagenbau. It names the thing.'),
+    ('Messe- und Kongresswirtschaft', 'Eventmanagement', DATE '2026-08-24', '"Eventmanagement" removed 2026-08-24. It decided 4 of this branch''s 5 assignments: an IT company, a childcare service, a data company and a sausage stall. Every business that has ever run a summer party writes it. "Standbau" and "Kongressorganisation" stay — those are the trade itself.'),
+    ('Modewirtschaft', 'Fashion', DATE '2026-08-24', '"Fashion" removed 2026-08-24. An English word German businesses use as decoration — "Hair Fashion", "Fashion Store" — it decided 4 of this branch''s 6 assignments: a photo studio, a workwear and uniforms maker, a holding company. "Modedesign" and "Kollektion" stay, and a fashion label writes at least one of them.'),
+    ('Musikwirtschaft', 'Lizenzierung', DATE '2026-08-24', '"Lizenzierung" and "Labels" removed 2026-08-24 — 12 of this branch''s 20 assignments. Software is licensed too, so `lizenzierung` decided a travel app, a law firm and two IT companies. `labels` in German business text is what you stick on a product: it decided a distributor and a retail group three times over. Exactly one of the twelve was a music business. "Musikproduktion", "Musikvertrieb", "Musikverlag" and "Konzertveranstalter" stay, and they cannot mean anything else.'),
+    ('Musikwirtschaft', 'Labels', DATE '2026-08-24', '"Lizenzierung" and "Labels" removed 2026-08-24 — 12 of this branch''s 20 assignments. Software is licensed too, so `lizenzierung` decided a travel app, a law firm and two IT companies. `labels` in German business text is what you stick on a product: it decided a distributor and a retail group three times over. Exactly one of the twelve was a music business. "Musikproduktion", "Musikvertrieb", "Musikverlag" and "Konzertveranstalter" stay, and they cannot mean anything else.'),
+    ('Pharma & Wirkstoffe', 'Zulassung', DATE '2026-08-24', '"Zulassung" removed 2026-08-24. In pharma it means getting a drug approved; in ordinary German it is registering a car, admitting a student or certifying a machine. Measured with the hyphen rule on, it carried 6 of this branch''s 10 assignments alone, and the pages saying it write "Kfz-Zulassung". The branch keeps Arzneimittel, Wirkstoff, klinische Studien, Galenik, Generika, Orphan Drugs and Pharmazeutika — seven words nobody else uses.'),
+    ('Robotik', 'Automatisierung', DATE '2026-08-24', '"Automatisierung" (50 texts) and "Systemintegration" removed 2026-08-24 — all 7 of this branch''s assignments came from them, and not one company had a robot: four software firms, an IT consultancy and a Catholic youth charity. Automating a process and integrating a system are what every software company sells. "Industrieroboter" and "Cobots" stay, and a robotics company writes one of them.'),
+    ('Robotik', 'Systemintegration', DATE '2026-08-24', '"Automatisierung" (50 texts) and "Systemintegration" removed 2026-08-24 — all 7 of this branch''s assignments came from them, and not one company had a robot: four software firms, an IT consultancy and a Catholic youth charity. Automating a process and integrating a system are what every software company sells. "Industrieroboter" and "Cobots" stay, and a robotics company writes one of them.'),
+    ('Soziale Unternehmen', 'Wirkung', DATE '2026-08-24', '"Wirkung" removed 2026-08-24. It fired on 90 of 7,739 texts, level with "app". Berlin''s sheet plainly meant it as the German for "impact", but on a business page it is the ordinary word for "effect" — the effect of a cream, a fertiliser, an advert. Same class as the "Sicherheit" deletion under Defence Tech: it names a quality, not an industry.'),
+    ('Soziale Unternehmen', 'Fair', DATE '2026-08-24', '"Fair" removed 2026-08-24. It fired on 44 texts, and in German it is an adjective every business applies to itself — "faire Preise", "ein fairer Partner". In English it is also a trade fair, which is a different branch entirely. "Impact" and "Gemeinwohl" stay: those are terms of art, and a company writing them has chosen to.'),
+    ('Wasserstoff', 'Netz', DATE '2026-08-24', '"Netz" and "Speicher" removed 2026-08-24, and they were 19 of this branch''s 22 assignments. "Im Netz finden Sie uns" is how a German company says "we are online", so `netz` decided: Terre des Hommes (a children''s charity), a car-parts dealer, a vehicle-valuation firm, an office-supplies wholesaler, a theatre-education workshop. `speicher` is any storage — data, water, a warehouse — and decided a crypto UG, a body-care UG and the same theatre workshop. Hydrogen storage is a real thing, and these words are not how a company says it. "Elektrolyseur" stays: nobody writes it by accident, and it is the one word here that only this industry uses.'),
+    ('Wasserstoff', 'Speicher', DATE '2026-08-24', '"Netz" and "Speicher" removed 2026-08-24, and they were 19 of this branch''s 22 assignments. "Im Netz finden Sie uns" is how a German company says "we are online", so `netz` decided: Terre des Hommes (a children''s charity), a car-parts dealer, a vehicle-valuation firm, an office-supplies wholesaler, a theatre-education workshop. `speicher` is any storage — data, water, a warehouse — and decided a crypto UG, a body-care UG and the same theatre workshop. Hydrogen storage is a real thing, and these words are not how a company says it. "Elektrolyseur" stays: nobody writes it by accident, and it is the one word here that only this industry uses.'),
+    ('Werbemarkt', 'Social Media', DATE '2026-08-24', '"Social Media" removed 2026-08-24. It fired on 132 of 7,739 texts — the second most common keyword we have — and decided 24 companies for this branch on its own. Read those 24: a sports club, a firm of solicitors, a Caritas care service, a circus association, a landscape gardener, a furniture shop. Exactly one was an advertising business. Every German company links its Instagram in the footer, so the words say nothing about what the company sells. This costs the genuine agencies too — it also supported 29 assignments in other branches — and it is still worth it at 1 right in 12. The branch keeps four words only the trade uses.');
+
+INSERT INTO public.wz_divisions (division, title, section, section_title) VALUES
+    ('01', 'Landwirtschaft, Jagd und damit verbundene Tätigkeiten', 'A', 'LAND- UND FORSTWIRTSCHAFT, FISCHEREI'),
+    ('02', 'Forstwirtschaft und Holzeinschlag', 'A', 'LAND- UND FORSTWIRTSCHAFT, FISCHEREI'),
+    ('03', 'Fischerei und Aquakultur', 'A', 'LAND- UND FORSTWIRTSCHAFT, FISCHEREI'),
+    ('05', 'Kohlenbergbau', 'B', 'BERGBAU UND GEWINNUNG VON STEINEN UND ERDEN'),
+    ('06', 'Gewinnung von Erdöl und Erdgas', 'B', 'BERGBAU UND GEWINNUNG VON STEINEN UND ERDEN'),
+    ('07', 'Erzbergbau', 'B', 'BERGBAU UND GEWINNUNG VON STEINEN UND ERDEN'),
+    ('08', 'Gewinnung von Steinen und Erden, sonstiger Bergbau', 'B', 'BERGBAU UND GEWINNUNG VON STEINEN UND ERDEN'),
+    ('09', 'Erbringung von Dienstleistungen für den Bergbau und für die Gewinnung von Steinen und Erden', 'B', 'BERGBAU UND GEWINNUNG VON STEINEN UND ERDEN'),
+    ('10', 'Herstellung von Nahrungs- und Futtermitteln', 'C', 'VERARBEITENDES GEWERBE'),
+    ('11', 'Getränkeherstellung', 'C', 'VERARBEITENDES GEWERBE'),
+    ('12', 'Tabakverarbeitung', 'C', 'VERARBEITENDES GEWERBE'),
+    ('13', 'Herstellung von Textilien', 'C', 'VERARBEITENDES GEWERBE'),
+    ('14', 'Herstellung von Bekleidung', 'C', 'VERARBEITENDES GEWERBE'),
+    ('15', 'Herstellung von Leder, Lederwaren und ähnlichen Produkten aus anderen Materialen', 'C', 'VERARBEITENDES GEWERBE'),
+    ('16', 'Herstellung von Holz-, Flecht-, Korb- und Korkwaren, ohne Möbel', 'C', 'VERARBEITENDES GEWERBE'),
+    ('17', 'Herstellung von Papier, Pappe und Waren daraus', 'C', 'VERARBEITENDES GEWERBE'),
+    ('18', 'Herstellung von Druckerzeugnissen; Vervielfältigung von bespielten Ton-, Bild- und Datenträgern', 'C', 'VERARBEITENDES GEWERBE'),
+    ('19', 'Kokerei und Mineralölverarbeitung', 'C', 'VERARBEITENDES GEWERBE'),
+    ('20', 'Herstellung von chemischen Erzeugnissen', 'C', 'VERARBEITENDES GEWERBE'),
+    ('21', 'Herstellung von pharmazeutischen Erzeugnissen', 'C', 'VERARBEITENDES GEWERBE'),
+    ('22', 'Herstellung von Gummi- und Kunststoffwaren', 'C', 'VERARBEITENDES GEWERBE'),
+    ('23', 'Herstellung von Glas und Glaswaren, Keramik, Verarbeitung von Steinen und Erden', 'C', 'VERARBEITENDES GEWERBE'),
+    ('24', 'Metallerzeugung und -bearbeitung', 'C', 'VERARBEITENDES GEWERBE'),
+    ('25', 'Herstellung von Metallerzeugnissen', 'C', 'VERARBEITENDES GEWERBE'),
+    ('26', 'Herstellung von Datenverarbeitungsgeräten, elektronischen und optischen Erzeugnissen', 'C', 'VERARBEITENDES GEWERBE'),
+    ('27', 'Herstellung von elektrischen Ausrüstungen', 'C', 'VERARBEITENDES GEWERBE'),
+    ('28', 'Maschinenbau', 'C', 'VERARBEITENDES GEWERBE'),
+    ('29', 'Herstellung von Kraftwagen und Kraftwagenteilen', 'C', 'VERARBEITENDES GEWERBE'),
+    ('30', 'Sonstiger Fahrzeugbau', 'C', 'VERARBEITENDES GEWERBE'),
+    ('31', 'Herstellung von Möbeln', 'C', 'VERARBEITENDES GEWERBE'),
+    ('32', 'Herstellung von sonstigen Waren', 'C', 'VERARBEITENDES GEWERBE'),
+    ('33', 'Reparatur, Instandhaltung und Installation von Maschinen und Ausrüstungen', 'C', 'VERARBEITENDES GEWERBE'),
+    ('35', 'Energieversorgung', 'D', 'ENERGIEVERSORGUNG'),
+    ('36', 'Wasserversorgung', 'E', 'WASSERVERSORGUNG; ABWASSER- UND ABFALLENTSORGUNG UND BESEITIGUNG VON UMWELTVERSCHMUTZUNGEN'),
+    ('37', 'Abwasserentsorgung', 'E', 'WASSERVERSORGUNG; ABWASSER- UND ABFALLENTSORGUNG UND BESEITIGUNG VON UMWELTVERSCHMUTZUNGEN'),
+    ('38', 'Sammlung, Verwertung und Beseitigung von Abfällen', 'E', 'WASSERVERSORGUNG; ABWASSER- UND ABFALLENTSORGUNG UND BESEITIGUNG VON UMWELTVERSCHMUTZUNGEN'),
+    ('39', 'Beseitigung von Umweltverschmutzungen und sonstige Tätigkeiten in der Abfallbewirtschaftung', 'E', 'WASSERVERSORGUNG; ABWASSER- UND ABFALLENTSORGUNG UND BESEITIGUNG VON UMWELTVERSCHMUTZUNGEN'),
+    ('41', 'Hochbau', 'F', 'BAUGEWERBE'),
+    ('42', 'Tiefbau', 'F', 'BAUGEWERBE'),
+    ('43', 'Vorbereitende Baustellenarbeiten, Bauinstallation und sonstiges Ausbaugewerbe', 'F', 'BAUGEWERBE'),
+    ('46', 'Großhandel', 'G', 'HANDEL'),
+    ('47', 'Einzelhandel', 'G', 'HANDEL'),
+    ('49', 'Landverkehr und Transport in Rohrfernleitungen', 'H', 'VERKEHR UND LAGEREI'),
+    ('50', 'Schifffahrt', 'H', 'VERKEHR UND LAGEREI'),
+    ('51', 'Luftfahrt', 'H', 'VERKEHR UND LAGEREI'),
+    ('52', 'Lagerei sowie Erbringung von sonstigen Dienstleistungen für den Verkehr', 'H', 'VERKEHR UND LAGEREI'),
+    ('53', 'Post-, Kurier- und Expressdienste', 'H', 'VERKEHR UND LAGEREI'),
+    ('55', 'Beherbergung', 'I', 'GASTGEWERBE'),
+    ('56', 'Gastronomie', 'I', 'GASTGEWERBE'),
+    ('58', 'Verlagswesen', 'J', 'VERLAGSWESEN, RUNDFUNK SOWIE ERSTELLUNG UND VERBREITUNG VON MEDIENINHALTEN'),
+    ('59', 'Herstellung, Verleih und Vertrieb von Filmen und Fernsehprogrammen; Kinos; Tonstudios und Verlegen von Musik', 'J', 'VERLAGSWESEN, RUNDFUNK SOWIE ERSTELLUNG UND VERBREITUNG VON MEDIENINHALTEN'),
+    ('60', 'Rundfunkveranstalter, Nachrichtenagenturen und sonstige Verbreitung von Medieninhalten', 'J', 'VERLAGSWESEN, RUNDFUNK SOWIE ERSTELLUNG UND VERBREITUNG VON MEDIENINHALTEN'),
+    ('61', 'Telekommunikation', 'K', 'TELEKOMMUNIKATION, SOFTWAREENTWICKLUNG, IT-BERATUNG UND ERBRINGUNG SONSTIGER DIENSTLEISTUNGEN DER INFORMATIONSTECHNOLOGIE UND DER COMPUTERINFRASTRUKTUR'),
+    ('62', 'Erbringung von Dienstleistungen der Informationstechnologie', 'K', 'TELEKOMMUNIKATION, SOFTWAREENTWICKLUNG, IT-BERATUNG UND ERBRINGUNG SONSTIGER DIENSTLEISTUNGEN DER INFORMATIONSTECHNOLOGIE UND DER COMPUTERINFRASTRUKTUR'),
+    ('63', 'Datenverarbeitung, Hosting und Erbringung sonstiger Informationsdienstleistungen', 'K', 'TELEKOMMUNIKATION, SOFTWAREENTWICKLUNG, IT-BERATUNG UND ERBRINGUNG SONSTIGER DIENSTLEISTUNGEN DER INFORMATIONSTECHNOLOGIE UND DER COMPUTERINFRASTRUKTUR'),
+    ('64', 'Erbringung von Finanzdienstleistungen', 'L', 'ERBRINGUNG VON FINANZ- UND VERSICHERUNGSDIENSTLEISTUNGEN'),
+    ('65', 'Versicherungen, Rückversicherungen und Pensionskassen, ohne Sozialversicherung', 'L', 'ERBRINGUNG VON FINANZ- UND VERSICHERUNGSDIENSTLEISTUNGEN'),
+    ('66', 'Mit Finanz- und Versicherungsdienstleistungen verbundene Tätigkeiten', 'L', 'ERBRINGUNG VON FINANZ- UND VERSICHERUNGSDIENSTLEISTUNGEN'),
+    ('68', 'Grundstücks- und Wohnungswesen', 'M', 'GRUNDSTÜCKS- UND WOHNUNGSWESEN'),
+    ('69', 'Rechts- und Steuerberatung, Wirtschaftsprüfung', 'N', 'ERBRINGUNG VON WISSENSCHAFTLICHEN UND TECHNISCHEN DIENSTLEISTUNGEN'),
+    ('70', 'Verwaltung und Führung von Unternehmen und Betrieben; Unternehmensberatung', 'N', 'ERBRINGUNG VON WISSENSCHAFTLICHEN UND TECHNISCHEN DIENSTLEISTUNGEN'),
+    ('71', 'Tätigkeiten von Architektur- und Ingenieurbüros; technische, physikalische und chemische Untersuchung', 'N', 'ERBRINGUNG VON WISSENSCHAFTLICHEN UND TECHNISCHEN DIENSTLEISTUNGEN'),
+    ('72', 'Forschung und Entwicklung', 'N', 'ERBRINGUNG VON WISSENSCHAFTLICHEN UND TECHNISCHEN DIENSTLEISTUNGEN'),
+    ('73', 'Werbung und Marktforschung sowie Public-Relations-Beratung', 'N', 'ERBRINGUNG VON WISSENSCHAFTLICHEN UND TECHNISCHEN DIENSTLEISTUNGEN'),
+    ('74', 'Sonstige wissenschaftliche und technische Tätigkeiten', 'N', 'ERBRINGUNG VON WISSENSCHAFTLICHEN UND TECHNISCHEN DIENSTLEISTUNGEN'),
+    ('75', 'Veterinärwesen', 'N', 'ERBRINGUNG VON WISSENSCHAFTLICHEN UND TECHNISCHEN DIENSTLEISTUNGEN'),
+    ('77', 'Vermietung und Leasing', 'O', 'ERBRINGUNG VON SONSTIGEN WIRTSCHAFTLICHEN DIENSTLEISTUNGEN'),
+    ('78', 'Vermittlung und Überlassung von Arbeitskräften', 'O', 'ERBRINGUNG VON SONSTIGEN WIRTSCHAFTLICHEN DIENSTLEISTUNGEN'),
+    ('79', 'Reisebüros, Reiseveranstalter und Erbringung sonstiger Reservierungsdienstleistungen', 'O', 'ERBRINGUNG VON SONSTIGEN WIRTSCHAFTLICHEN DIENSTLEISTUNGEN'),
+    ('80', 'Wach- und Sicherheitsdienste sowie Detekteien', 'O', 'ERBRINGUNG VON SONSTIGEN WIRTSCHAFTLICHEN DIENSTLEISTUNGEN'),
+    ('81', 'Gebäudebetreuung; Garten- und Landschaftsbau', 'O', 'ERBRINGUNG VON SONSTIGEN WIRTSCHAFTLICHEN DIENSTLEISTUNGEN'),
+    ('82', 'Erbringung von wirtschaftlichen Dienstleistungen für Unternehmen und Privatpersonen', 'O', 'ERBRINGUNG VON SONSTIGEN WIRTSCHAFTLICHEN DIENSTLEISTUNGEN'),
+    ('84', 'Öffentliche Verwaltung, Verteidigung; Sozialversicherung', 'P', 'ÖFFENTLICHE VERWALTUNG, VERTEIDIGUNG; SOZIALVERSICHERUNG'),
+    ('85', 'Erziehung und Unterricht', 'Q', 'ERZIEHUNG UND UNTERRICHT'),
+    ('86', 'Gesundheitswesen', 'R', 'GESUNDHEITS- UND SOZIALWESEN'),
+    ('87', 'Heime, ohne Erholungs- und Ferienheime', 'R', 'GESUNDHEITS- UND SOZIALWESEN'),
+    ('88', 'Sozialwesen, ohne Heime', 'R', 'GESUNDHEITS- UND SOZIALWESEN'),
+    ('90', 'Kunstschaffende Tätigkeiten und Tätigkeiten in der darstellenden Kunst', 'S', 'KUNST, SPORT UND ERHOLUNG'),
+    ('91', 'Bibliotheken, Archive, Museen, botanische und zoologische Gärten', 'S', 'KUNST, SPORT UND ERHOLUNG'),
+    ('92', 'Spiel-, Wett- und Lotteriewesen', 'S', 'KUNST, SPORT UND ERHOLUNG'),
+    ('93', 'Erbringung von Dienstleistungen des Sports, der Unterhaltung und der Erholung', 'S', 'KUNST, SPORT UND ERHOLUNG'),
+    ('94', 'Interessenvertretungen sowie kirchliche und sonstige religiöse Vereinigungen, ohne Sozialwesen und Sport', 'T', 'ERBRINGUNG VON SONSTIGEN DIENSTLEISTUNGEN'),
+    ('95', 'Reparatur und Instandhaltung von Datenverarbeitungsgeräten und Gebrauchsgütern sowie von Kraftwagen und Krafträdern', 'T', 'ERBRINGUNG VON SONSTIGEN DIENSTLEISTUNGEN'),
+    ('96', 'Erbringung von überwiegend persönlichen Dienstleistungen', 'T', 'ERBRINGUNG VON SONSTIGEN DIENSTLEISTUNGEN'),
+    ('97', 'Private Haushalte mit Hauspersonal', 'U', 'PRIVATE HAUSHALTE MIT HAUSPERSONAL SOWIE HERSTELLUNG VON WAREN UND ERBRINGUNG VON DIENSTLEISTUNGEN DURCH PRIVATE HAUSHALTE FÜR DEN EIGENBEDARF OHNE AUSGEPRÄGTEN SCHWERPUNKT'),
+    ('98', 'Herstellung von Waren und Erbringung von Dienstleistungen durch private Haushalte für den Eigenbedarf ohne ausgeprägten Schwerpunkt', 'U', 'PRIVATE HAUSHALTE MIT HAUSPERSONAL SOWIE HERSTELLUNG VON WAREN UND ERBRINGUNG VON DIENSTLEISTUNGEN DURCH PRIVATE HAUSHALTE FÜR DEN EIGENBEDARF OHNE AUSGEPRÄGTEN SCHWERPUNKT'),
+    ('99', 'Exterritoriale Organisationen und Körperschaften', 'V', 'EXTERRITORIALE ORGANISATIONEN UND KÖRPERSCHAFTEN');
+
 
 --
 -- Name: SCHEMA public; Type: ACL; Schema: -; Owner: -
@@ -2549,6 +3608,22 @@ GRANT SELECT,INSERT ON TABLE public.tags TO ${reader_role};
 
 
 --
+-- Name: TABLE technology_field_keywords; Type: ACL; Schema: public; Owner: -
+--
+
+GRANT SELECT ON TABLE public.technology_field_keywords TO ${writer_role};
+GRANT SELECT ON TABLE public.technology_field_keywords TO ${reader_role};
+
+
+--
+-- Name: TABLE technology_fields; Type: ACL; Schema: public; Owner: -
+--
+
+GRANT SELECT ON TABLE public.technology_fields TO ${writer_role};
+GRANT SELECT ON TABLE public.technology_fields TO ${reader_role};
+
+
+--
 -- Name: TABLE v_company_claims; Type: ACL; Schema: public; Owner: -
 --
 
@@ -2605,6 +3680,22 @@ GRANT SELECT ON TABLE public.v_source_overview TO ${reader_role};
 
 
 --
+-- Name: TABLE v_source_runs; Type: ACL; Schema: public; Owner: -
+--
+
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.v_source_runs TO ${writer_role};
+GRANT SELECT ON TABLE public.v_source_runs TO ${reader_role};
+
+
+--
+-- Name: TABLE wz_divisions; Type: ACL; Schema: public; Owner: -
+--
+
+GRANT SELECT ON TABLE public.wz_divisions TO ${writer_role};
+GRANT SELECT ON TABLE public.wz_divisions TO ${reader_role};
+
+
+--
 -- Name: DEFAULT PRIVILEGES FOR SEQUENCES; Type: DEFAULT ACL; Schema: public; Owner: -
 --
 
@@ -2620,7 +3711,30 @@ ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT SELECT ON TABLES  TO ${reader_ro
 
 
 --
+-- Name: company_profile_mv; Type: MATERIALIZED VIEW DATA; Schema: public; Owner: -
 --
+
+REFRESH MATERIALIZED VIEW public.company_profile_mv;
+
+
+--
+-- Name: source_field_stats_mv; Type: MATERIALIZED VIEW DATA; Schema: public; Owner: -
+--
+
+REFRESH MATERIALIZED VIEW public.source_field_stats_mv;
+
+
+--
+-- Name: source_stats_mv; Type: MATERIALIZED VIEW DATA; Schema: public; Owner: -
+--
+
+REFRESH MATERIALIZED VIEW public.source_stats_mv;
+
+
+--
+-- PostgreSQL database dump complete
+--
+
 
 -- The DAGs' bulk updates use TEMP tables; a database-level grant, so pg_dump does not carry it.
 DO $$
