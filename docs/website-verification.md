@@ -109,6 +109,25 @@ left out, because their domain can carry the owner's name) holds 106 of the 110,
 by hand, and 292 of the 300 sampled hits; `scripts/measure_url_guesses.py` reports
 how many each group gets guessed. `--draw-hand-sample` draws the 200 companies for the hand search.
 
+## Sites that name the company but prove nothing (#96)
+
+A guessed site whose page carries the company's name, but no register number, no register officer
+and no matching postcode, stays at 0.34 and is never shown. Two patterns from the hand search (#89):
+the company moved since the 2017–2019 snapshot, so its postcode no longer matches; or the domain does
+not carry the name and is refused before its Impressum is read (`tub.co`).
+
+**How many**, local Berlin database, 2026-11-04: **7,042** active companies (sole traders left out)
+without a proven website have such a site. On 3,705 the domain is exactly the name, on 1,194 the
+Impressum gives an email at the domain, on 1,550 the page's structured data names the company. On play
+(2026-11-03) the issue counted 21,641 without these filters.
+
+**Nothing is shown before a hand check.** `scripts/check_unproven_sites.py --draw` draws 50 (the
+`review_sample` first, then a fixed order) into a CSV for a person to mark `own_site`, `directory`,
+`parent`, `namesake` or `other`; `--score` gives the share of own sites, overall and per flag (for
+example exact-name domain plus email at the domain). Only at about 9 in 10 is a shown value
+defensible; otherwise these sites stay suggestions in the claims list, which already lists them under
+`website` (`v_company_claims`). **Status: the 50 are not checked yet.**
+
 ## Pages are cached, so extraction changes are cheap to try
 
 `COMBINED_PAGE_CACHE_DIR` turns on a disk cache of raw HTML and status, for measurement runs. Inside
