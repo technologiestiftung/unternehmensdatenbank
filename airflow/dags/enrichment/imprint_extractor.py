@@ -240,7 +240,7 @@ def extract_postcodes(text: str) -> list[str]:
 #: Signs that a page belongs to a business abroad (#111). In the hand check of 50 unproven sites
 #: (#96) about 16 of 38 wrong ones were run from the US, Canada, Denmark, Austria, Vietnam, Dubai or
 #: Puerto Rico, and said so: a foreign VAT or company number, a US-style address, a foreign phone
-#: number, or the country. Each is weak alone; `is_abroad` also requires no German postcode.
+#: number, or the country. `is_abroad` decides where on the page each kind counts.
 _FOREIGN = (
     ("vat", re.compile(r"\b(?:ATU\s?\d{8}|CHE[-‐–\s]?\d{3}[.\s]?\d{3}[.\s]?\d{3})\b")),
     ("register", re.compile(r"\bCVR[-\s.]*(?:nr|no)\b|\bCH[-‐–]\d{3}\.\d\.\d{3}\.\d{3}-\d\b", re.I)),

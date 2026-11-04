@@ -74,7 +74,7 @@ from dataclasses import dataclass, field
 REGISTER_MATCH = "register_number_match"
 REGISTER_MISMATCH = "register_number_mismatch"
 #: The Impressum (or, without one, the page) is a business abroad: a foreign VAT or company number,
-#: a US-style address, or a foreign phone or country and no German postcode (#111).
+#: a US-style address, or (in an Impressum) a foreign phone or country and no German postcode (#111).
 IMPRINT_ABROAD = "imprint_abroad"
 #: A Geschäftsführer named on the page's Impressum is one of this company's officers in the register.
 #: Identity evidence of the same kind as the register number: a fact about THIS company that a
