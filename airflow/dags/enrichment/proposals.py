@@ -1,6 +1,6 @@
 """Websites another source proposes for a company, verified like a guessed domain.
 
-Shared by `wikidata`, `common_crawl`, `wirtschaftsatlas` and `register_crosslink`. Each match is a
+Shared by `wikidata`, `common_crawl`, `wirtschaftsatlas`, `register_crosslink` and `web_search`. Each match is a
 source record whose payload lists the proposed `websites`. `verify_batch` checks them with
 `pipeline.verify_proposed`, the same page reading and `confidence.score` as a guessed domain, and
 files every answer as an observation of that source. The page, not the match, proves a website.
