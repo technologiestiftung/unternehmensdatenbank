@@ -134,7 +134,7 @@ def main() -> int:
     # stale file.
     index_sql = "UNIQUE INDEX uq_obs_company_field_source_value"
     defining = [m for m in sorted((REPO / "db" / "migrations").glob("V*__*.sql"),
-                                  key=lambda m: int(m.name[1:].split("__")[0]))
+                                  key=lambda m: tuple(int(p) for p in m.name[1:].split("__")[0].split(".")))
                 if index_sql in m.read_text(encoding="utf-8")]
     check("a migration creates the observation upsert index", bool(defining), True)
     sql_text = defining[-1].read_text(encoding="utf-8") if defining else index_sql + " ;"
