@@ -429,13 +429,16 @@ def discover(
     *,
     use_url_patterns: bool = True,
     common_words: set[str] | frozenset[str] = frozenset(),
+    affixes: tuple[str, ...] = (),
 ) -> CompanyResult:
     """Run the enabled methods for one company and return one merged answer.
 
     `common_words` is the measured set of words that too many companies in this dataset share to
     identify one of them — `name_frequency.common_words` over the whole table. It decides whether
     a domain names an industry or a business. Passing nothing still works and falls back to the
-    short hand-written list in `url_patterns.GENERIC_WORDS`.
+    short hand-written list in `url_patterns.GENERIC_WORDS`. `affixes` is
+    `name_frequency.common_affixes` over the published websites: what Berlin's companies add to
+    their name in a domain (#89).
     """
     common = common_words
     started = time.monotonic()
@@ -465,7 +468,8 @@ def discover(
             (name, "former_name:") for name in getattr(company, "former_names", ())[:MAX_FORMER_NAMES]]
         for name, label in names:
             try:
-                found = url_patterns.find_live_urls(name, company.city, skip_hosts=tried)
+                found = url_patterns.find_live_urls(name, company.city, skip_hosts=tried,
+                                                   common=common, affixes=affixes)
                 tried |= found.guessed_hosts
                 result.candidates_generated += found.candidates_generated
                 result.candidates_resolved += found.candidates_resolved

@@ -98,7 +98,7 @@ def _discover_with_former_name(monkeypatch, register_on_imprint: str) -> tuple[o
 
     skipped: list[set[str]] = []
 
-    def find_live_urls(name, city=None, skip_hosts=frozenset()):
+    def find_live_urls(name, city=None, skip_hosts=frozenset(), **_settings):
         skipped.append(set(skip_hosts))
         found = url_patterns.UrlPatternResult(guessed_hosts={f"{name.split()[0].lower()}.de"})
         if name == "Altname GmbH":

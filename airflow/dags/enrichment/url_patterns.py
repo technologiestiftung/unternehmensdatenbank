@@ -110,10 +110,26 @@ LEGAL_SUFFIX_RE = re.compile(
     r"\b(?:"
     r"GmbH\s*&\s*Co\.?\s*KGaA|GmbH\s*&\s*Co\.?\s*KG|GmbH\s*&\s*Co\.?|GmbH"
     r"|AG\s*&\s*Co\.?\s*KG|KGaA|AG|KG|OHG|GbR|PartGmbB|PartG"
-    r"|UG\s*\(haftungsbeschränkt\)|UG|e\.?\s*V\.?|e\.?\s*K\.?|SE|mbH|Ltd\.?|Inc\.?"
+    # The bare word, not "UG (haftungsbeschränkt)": `\b` cannot sit next to a bracket, so the
+    # bracketed form never matched and "haftungsbeschraenkt" was guessed as a name word (#89).
+    r"|haftungsbeschr(?:ä|ae)nkt|gGmbH|gUG|gAG|UG"
+    r"|e\.?\s*V\.?|e\.?\s*K\.?|e\.?\s*G\.?|SE|mbH|Ltd\.?|Inc\.?|gemeinn(?:ü|ue)tzige"
     r")\b",
     flags=re.IGNORECASE,
 )
+
+#: "Alexandrinen-Apotheke Inhaber Martin Heineke e.K.": everything from "Inhaber" on names the
+#: owner, a person, and no domain carries it. 2,336 Berlin names have such a clause (#89).
+OWNER_CLAUSE_RE = re.compile(r"\bInh(?:aber(?:in)?\b|\.).*$", flags=re.IGNORECASE)
+
+
+def legal_form_slug(company_name: str) -> str:
+    """The name's last legal form as a domain writes it: "Navitas gGmbH" -> "ggmbh", "" for none.
+
+    "haftungsbeschränkt" only qualifies the "UG" before it: "Wester UG (haftungsbeschränkt)" -> "ug".
+    """
+    forms = [f for f in LEGAL_SUFFIX_RE.findall(company_name) if not f.lower().startswith("haftungsbeschr")]
+    return normalize(forms[-1]).replace(" ", "") if forms else ""
 
 #: Words that say what a company owns rather than what it does. A "Verwaltungs GmbH" is the
 #: administrative shell of an operating business; its website, if any, is the operating
@@ -228,15 +244,16 @@ def normalize(text: str) -> str:
     return re.sub(r"[^a-z0-9]+", " ", text).strip()
 
 
-def name_words(company_name: str) -> list[str]:
+def name_words(company_name: str, *, keep_single: bool = False) -> list[str]:
     """The words of a company name with the legal form removed.
 
     "Auto-Verkehr Heiter GmbH & Co. KG" -> ["auto", "verkehr", "heiter"]. Hyphens split,
     because a domain writes "auto-verkehr" and "autoverkehr" but never treats the hyphen as
-    part of a word.
+    part of a word. Single letters and digits are dropped unless `keep_single`: "8 Green Bottles"
+    is `8greenbottles.de`, "X-Filme" is `x-filme.de` (#89).
     """
     stripped = LEGAL_SUFFIX_RE.sub(" ", company_name)
-    words = [w for w in normalize(stripped).split() if len(w) > 1]
+    words = [w for w in normalize(stripped).split() if keep_single or len(w) > 1]
     return words
 
 
@@ -515,12 +532,65 @@ def _shapes_for(words: list[str], city: str | None) -> list[tuple[str, str]]:
     return shapes
 
 
-def generate_candidates(company_name: str, city: str | None = None) -> list[Candidate]:
+#: Guesses #89 added, at most this many per company, tried after every older guess and on the first
+#: TLD only: 97 of the 110 websites discovery missed are `.de`.
+MAX_EXTRA_CANDIDATES = int(os.getenv("COMBINED_URL_MAX_EXTRA_CANDIDATES", "12"))
+#: The patterns of those guesses, so a measurement can tell them from the older ones.
+EXTRA_PATTERNS = frozenset({"letters", "letters_joined", "run1_joined", "run2", "run2_joined", "run3",
+                            "run3_joined", "affix"})
+EXTRA_RULES = frozenset(os.getenv("COMBINED_URL_EXTRA_RULES", "letters,runs,affixes").split(","))
+
+
+def _runs(words: list[str], longest: int = 3) -> list[list[str]]:
+    """Every contiguous run of 1 to `longest` words that is not the whole name, longest first."""
+    return [words[i:i + n] for n in range(min(longest, len(words) - 1), 0, -1) for i in range(len(words) - n + 1)]
+
+
+def _extra_shapes(company_name: str, words: list[str], common: frozenset[str] | set[str],
+                  affixes: tuple[str, ...]) -> list[tuple[str, str]]:
+    """The shapes #89 measured: single letters kept, runs of words, learned affixes."""
+    shapes: list[tuple[str, str]] = []
+    core = [w for w in words if not is_low_signal(w)] or words
+
+    def distinctive(run: list[str]) -> bool:
+        # A part of the name must still name the company: `berlin.de` or `apotheke.de` does not.
+        return not any(w in GIVEN_NAMES for w in run) and not all(w in common or w in GENERIC_WORDS for w in run)
+
+    if "letters" in EXTRA_RULES:
+        letters = name_words(company_name, keep_single=True)
+        if letters != words and len(letters) > 1:
+            shapes += [("".join(letters), "letters_joined"), ("-".join(letters), "letters")]
+    if "runs" in EXTRA_RULES:
+        for run in _runs(core):
+            if distinctive(run):
+                shapes += [("".join(run), f"run{len(run)}_joined")]
+                if len(run) > 1:
+                    shapes += [("-".join(run), f"run{len(run)}")]
+    if "affixes" in EXTRA_RULES:
+        legal = legal_form_slug(company_name)
+        for template in affixes:
+            if "{legal}" in template and not legal:
+                continue
+            added = template.replace("{legal}", legal).replace("{}", "").strip("-")
+            for stem_words in ([core, core[:1]] if len(core) > 1 else [core]):
+                # "berlin" added to a name that says Berlin already, or to a word many names share.
+                if added in stem_words or not distinctive(stem_words):
+                    continue
+                sep = "-" if "{}-" in template or "-{}" in template else ""
+                shapes += [(template.replace("{legal}", legal).format(sep.join(stem_words)), "affix")]
+    return shapes
+
+
+def generate_candidates(company_name: str, city: str | None = None, *,
+                        common: frozenset[str] | set[str] = frozenset(),
+                        affixes: tuple[str, ...] = ()) -> list[Candidate]:
     """Guessed URLs for a company, best guess first.
 
     `city` adds `<name>-<city>.de`, which is how tradespeople and franchise branches name
-    their sites. It is tried last because it is the least likely shape.
+    their sites. It is tried last because it is the least likely shape. An owner clause is left
+    out of every guess, but not of the name words verification checks.
     """
+    company_name = OWNER_CLAUSE_RE.sub(" ", company_name)
     spellings = name_word_spellings(company_name)
     if not spellings or not spellings[0][1]:
         return []
@@ -565,7 +635,24 @@ def generate_candidates(company_name: str, city: str | None = None) -> list[Cand
                     )
                 )
                 if len(out) >= MAX_CANDIDATES:
-                    return out
+                    return out + _extra_candidates(company_name, spellings[0][1], seen_hosts, common, affixes, len(out))
+    return out + _extra_candidates(company_name, spellings[0][1], seen_hosts, common, affixes, len(out))
+
+
+def _extra_candidates(company_name: str, words: list[str], seen_hosts: set[str],
+                      common: frozenset[str] | set[str], affixes: tuple[str, ...], start: int) -> list[Candidate]:
+    """#89's guesses, after all older ones, so they spend only the probes the older ones left."""
+    out: list[Candidate] = []
+    for slug, why in _extra_shapes(company_name, words, common, affixes):
+        slug = re.sub(r"-+", "-", slug).strip("-")
+        host = to_ascii_host(f"{slug}.{TLDS[0]}")
+        if (len(slug.replace("-", "")) < MIN_STEM_LENGTH or len(slug) > MAX_LABEL_LENGTH
+                or host in seen_hosts or is_generic_stem(slug.replace("-", ""), common)):
+            continue
+        seen_hosts.add(host)
+        out.append(Candidate(url=f"https://{host}", host=host, pattern=why, rank=start + len(out)))
+        if len(out) >= MAX_EXTRA_CANDIDATES:
+            break
     return out
 
 
@@ -761,7 +848,8 @@ class UrlPatternResult:
 
 
 def find_live_urls(
-    company_name: str, city: str | None = None, skip_hosts: set[str] | frozenset[str] = frozenset()
+    company_name: str, city: str | None = None, skip_hosts: set[str] | frozenset[str] = frozenset(), *,
+    common: set[str] | frozenset[str] = frozenset(), affixes: tuple[str, ...] = (),
 ) -> UrlPatternResult:
     """Run all three stages for one company and return the live, non-parked URLs.
 
@@ -769,7 +857,8 @@ def find_live_urls(
     not tried again (hosts another name of the same company already guessed).
     """
     result = UrlPatternResult()
-    candidates = [c for c in generate_candidates(company_name, city) if c.host not in skip_hosts]
+    candidates = [c for c in generate_candidates(company_name, city, common=common, affixes=affixes)
+                  if c.host not in skip_hosts]
     result.guessed_hosts = {c.host for c in candidates}
     result.candidates_generated = len(candidates)
 

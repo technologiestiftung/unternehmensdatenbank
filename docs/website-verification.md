@@ -53,6 +53,8 @@ extra suspicion.
 - **Never search a page for bare digits.** `GnR 205` searched as "205" finds a price or a house number.
 - **A number with a space** (`HRB 794 28`) is also read as `HRB 79428`, but only a 1–3 digit tail is
   joined, and the joined number counts only if it is exactly the company's own.
+- **A Berlin number with its B glued on** (`HRB 132889B`) is read as `HRB 132889` (#89). Before, such
+  a page could never prove its company: 4 of the 91 stored pages with a register entry write it so.
 - **A brand before the legal form** ("3pc GmbH Neue Kommunikation") is guessed first
   (`url_patterns.brand_stem`). A host that *equals* the brand carries the name; one that merely
   contains it does not.
@@ -70,6 +72,38 @@ extra suspicion.
 - **A lifted refusal must not stop the page being read.** Otherwise the company's own register number
   further down the page is never seen.
 - **Email** and **VAT ID** only say "a real business site" and cannot lift the cap.
+
+## The guesses discovery missed (#89)
+
+On play (2026-11-03), Wikidata and Common Crawl proved 110 websites of active companies that
+discovery never found. Discovery had reached all of them; for 89 it never guessed the domain. Three
+rules, added after every older guess so those keep their rank, on `.de` only (97 of the 110 are
+`.de`), at most `MAX_EXTRA_CANDIDATES` (12) per company:
+
+| rule | example | misses it adds (of 110, each on top of the first row) |
+|---|---|---|
+| legal forms and owner clauses removed (`gGmbH`, `gUG`, `eG`, "gemeinnützige", "Inhaber …") | `aktiongegendenhunger.de` | 3 |
+| single letters and digits kept | `8greenbottles.de`, `a-zelte.de` | +4 |
+| runs of 1–3 name words from anywhere in the name; a run of only common words never | `orbitalsystems.de`, `technologiestiftung-berlin.de` | +9 |
+| learned affixes (`name_frequency.common_affixes`): what at least 8 published websites add to their name, measured each run | `navitas-ggmbh.de`, `akanthusberlin.de` | +3 |
+
+Together: 38 of the 110 guessed instead of 20, and 2,747 instead of 2,729 of 3,000 sampled websites
+discovery had found (none lost). The learned affixes on play are `{}-berlin`, `{}-{legal}` (the
+company's own legal form: 36 websites) and `{}berlin`.
+
+**Cost and yield**, measured on 1,000 random active companies without a website (play, seed 89):
+4.3 more DNS lookups per company (19.6 → 23.9, on 300 of them), 0.36 more page loads (the new guesses only get the
+probes the older ones leave), and **8 new websites proven** (0.8%), each by the own register number, a
+register officer or name and postcode.
+
+Still never guessed: a second name (`bebra-wissenschaft.de`), a reordered compound
+(`bildungsakademie-berlin.de` for "Akademie für berufliche Weiterbildung"), a brand unrelated to the
+name (`visitberlin.de`). These need a source that does not guess: Common Crawl, or a search API (#92).
+
+**Measuring a change:** `scripts/url_discovery_test_set.csv` (register entry and host only; sole traders
+left out, because their domain can carry the owner's name) holds 106 of the 110, the websites found
+by hand, and 292 of the 300 sampled hits; `scripts/measure_url_guesses.py` reports
+how many each group gets guessed. `--draw-hand-sample` draws the 200 companies for the hand search.
 
 ## Pages are cached, so extraction changes are cheap to try
 

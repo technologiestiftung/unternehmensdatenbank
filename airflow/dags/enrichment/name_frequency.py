@@ -123,3 +123,53 @@ def distinctive_words(name: str, city: str | None, common: set[str]) -> set[str]
         and word not in city_words
         and word not in common
     }
+
+
+#: How many proven websites must add the same text to their name before it is guessed (#89).
+MIN_AFFIX_COMPANIES = int(os.getenv("COMBINED_AFFIX_MIN", "8"))
+#: How many of the most frequent affixes are guessed.
+MAX_AFFIXES = int(os.getenv("COMBINED_MAX_AFFIXES", "4"))
+#: Longer additions are a second name ("bebra-wissenschaft"), not an affix.
+MAX_AFFIX_LENGTH = 8
+
+
+def affix_of(company_name: str, host: str) -> str | None:
+    """What a proven domain adds to a run of the company's name, as a template, or None.
+
+    "Navitas gGmbH" on `navitas-ggmbh.de` -> "{}-{legal}", its own legal form; "AKANTHUS GmbH" on `akanthusberlin.de` ->
+    "{}berlin"; a prefix the other way round ("my{}"). The run is the longest one that fits, so a
+    domain made of name words alone has no affix.
+    """
+    label = host.lower().removeprefix("www.").split(".")[0]
+    words = url_patterns.name_words(company_name)
+    legal = url_patterns.legal_form_slug(company_name)
+    runs = sorted((words[i:j] for i in range(len(words)) for j in range(i + 1, len(words) + 1)),
+                  key=len, reverse=True)
+    for run in runs:
+        for sep in ("-", ""):
+            stem = sep.join(run)
+            if len(label) <= len(stem):
+                continue
+            if label.startswith(stem + sep):
+                added, template = label[len(stem + sep):], "{}" + sep + "%s"
+            elif label.endswith(sep + stem):
+                added, template = label[:-len(sep + stem)], "%s" + sep + "{}"
+            else:
+                continue
+            if added == legal:
+                # The company's own legal form, which differs per company: one affix for all of them.
+                return template % "{legal}"
+            if 2 <= len(added) <= MAX_AFFIX_LENGTH and "-" not in added and added not in words:
+                return template % added
+    return None
+
+
+def common_affixes(proven: list[tuple[str, str]], min_companies: int = MIN_AFFIX_COMPANIES,
+                   limit: int = MAX_AFFIXES) -> tuple[str, ...]:
+    """The affixes most proven websites add to their company's name, most frequent first.
+
+    `proven` is (company name, host) of every proven website: measured like `common_words`, so
+    the guesses follow how Berlin's companies name their sites, not a list (CLAUDE.md).
+    """
+    counter = Counter(a for name, host in proven if (a := affix_of(name, host)))
+    return tuple(a for a, n in counter.most_common(limit) if n >= min_companies)
