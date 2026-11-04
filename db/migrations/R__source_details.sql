@@ -60,7 +60,7 @@ INSERT INTO public.sources (key, name, source_type, base_url, description, terms
   ('register_crosslink', 'Register numbers on other companies'' guessed sites', 'derived', NULL,
    'Seiten, die die Website-Suche für eine andere Firma gelesen hat und die die Registernummer dieser Firma nennen. Die Domain wird ihr vorgeschlagen und wie eine geratene Domain geprüft.',
    NULL, NULL, 'wöchentlich'),
-  ('gleif', 'GLEIF (LEI records, Berlin register)', 'register', 'https://www.gleif.org',
+  ('gleif', 'GLEIF (LEI records, Berlin register)', 'lei', 'https://www.gleif.org',
    'Die offenen Daten der Global Legal Entity Identifier Foundation: jede Firma mit einer LEI-Kennung am Amtsgericht Charlottenburg, mit Name, Rechtsform, Adresse und Status. Über die Registernummer zugeordnet; fehlt die Firma bei uns, wird sie angelegt.',
    'GLEIF veröffentlicht die LEI-Daten unter CC0.', NULL, 'täglich'),
   ('openregister', 'OpenRegister (Handelsregister API)', 'register_api', 'https://openregister.de',
