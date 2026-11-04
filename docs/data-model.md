@@ -306,7 +306,8 @@ page take 71 s; now 0.65 s.
 `company_fundings` has two sources (`source`): `foerderkatalog` and `berlin_zuwendungen`. Berlin
 grants keep `recipient_register` and the policy area; only grants to an HRA/HRB entry are loaded
 (22,354 of 55,454). Measured 2026-10-28: 18,427 Berlin grants linked to 3,861 companies, 3,927
-unlinked (most likely companies registered after the snapshot; not checked).
+unlinked (most likely companies registered after the snapshot; `berlin_zuwendungen` now creates
+those, #103: 22,278 of 22,354 linked locally on 2026-11-04).
 
 ## The stored company profile (V5)
 

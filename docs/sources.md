@@ -40,7 +40,7 @@ Record counts are from the local database on 2026-11-02.
 | `branch_classifier` | Technologiefeld from the keywords on the website ([branch-classification](branch-classification.md)) | DAG `technology_field`; a spaCy text classifier may fill gaps | after discovery | 542 |
 | `spacy_ner` | Geschäftsführer names a spaCy model finds on the Impressum | DAG `manager_ner_extract` | after discovery | 72 |
 | `foerderkatalog` | grants of the federal government (Förderkatalog des Bundes) | DAG `foerderkatalog`, into `company_fundings`, linked by name and city | monthly | grants table |
-| `berlin_zuwendungen` | grants of Land Berlin (Zuwendungsdatenbank) | DAG `berlin_zuwendungen`, into `company_fundings`, linked by register number | monthly | grants table |
+| `berlin_zuwendungen` | grants of Land Berlin (Zuwendungsdatenbank) | DAG `berlin_zuwendungen`, into `company_fundings`, linked by register number; a recipient registered after the snapshot that we lack becomes a company (name, legal form, city; #103) | monthly | grants table; 1,743 companies created (local, 2026-11-04) |
 | `user_feedback` | corrections people type in the app | DAG `feedback_observations`: one person 0.30 (listed, never shown), two who agree 0.60 | hourly | counts only, never who |
 
 Grants are not observations: they sit in `company_fundings` and are linked to companies by

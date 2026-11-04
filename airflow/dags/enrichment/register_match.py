@@ -1,7 +1,7 @@
 """Which of our companies a register entry from another source is: register number first, name second.
 
 Shared by every source that names a Berlin register entry (`register_announcements`, `gleif`,
-`openregister`), so they cannot drift apart:
+`openregister`, `berlin_zuwendungen`), so they cannot drift apart:
 
 1. **The register number**, through `company_identifiers` (scheme `register`).
 2. **The name**, when the number is unknown: a change of legal form gets a new number, so the company
@@ -150,8 +150,8 @@ class RegisterEntry:
     active: bool | None
     #: Field name to value, among `ENTRY_FIELDS`.
     fields: dict[str, str]
-    #: When the source last confirmed the entry, as `source_updated_at`.
-    updated: str
+    #: When the source last confirmed the entry, as `source_updated_at`. None only with no fields.
+    updated: str | None
     payload: dict[str, Any]
     #: Further identifiers, scheme to value, e.g. {"lei": "5299..."}.
     identifiers: dict[str, str] = field(default_factory=dict)

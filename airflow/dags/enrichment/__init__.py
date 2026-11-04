@@ -1,8 +1,8 @@
 """The building blocks that fill a company's fields from the open web. No API, no key, no bill.
 
 This package is a library, not a DAG. `website_discovery`, `wikidata`, `common_crawl`, `register_crosslink`,
-`wirtschaftsatlas`, `website_contacts`, `website_keywords`, `technology_field`, `register_announcements`, `gleif`
-and `manager_ner` run it.
+`wirtschaftsatlas`, `website_contacts`, `website_keywords`, `technology_field`, `register_announcements`, `gleif`,
+`berlin_zuwendungen` and `manager_ner` run it.
 
 Website discovery
   url_patterns.py     guess domains from the company name, check DNS, download the live ones
@@ -29,7 +29,8 @@ Reading pages
 
 Register
   register_names.py                  name key and legal form, shared with the OffeneRegister import
-  register_match.py                  which of our companies a register entry is (register_announcements, gleif, openregister)
+  register_match.py                  which of our companies a register entry is (register_announcements, gleif, openregister,
+                                     berlin_zuwendungen)
 
 Industry classification (three columns that must never be mixed: docs/branch-classification.md)
   branch_classifier.py                         Technologiefeld from the words a company publishes;
