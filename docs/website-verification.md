@@ -96,7 +96,11 @@ company's own legal form: 36 websites) and `{}berlin`.
 probes the older ones leave), and **8 new websites proven** (0.8%), each by the own register number, a
 register officer or name and postcode.
 
-Still never guessed: a second name (`bebra-wissenschaft.de`), a reordered compound
+A site found by hand can belong to a sister company: `bebra-wissenschaft.de` prints BeBra Verlag
+GmbH, HRB 103407 B, not HRB 51617, the company it was listed for, so verification was right to
+refuse it.
+
+Still never guessed: a reordered compound
 (`bildungsakademie-berlin.de` for "Akademie für berufliche Weiterbildung"), a brand unrelated to the
 name (`visitberlin.de`). These need a source that does not guess: Common Crawl, or a search API (#92).
 

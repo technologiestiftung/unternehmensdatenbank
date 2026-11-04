@@ -146,6 +146,29 @@ How a record from any source finds its company, in this order:
 Merging never deletes: the duplicate keeps `merged_into`, and its records and observations move to
 the survivor.
 
+### Same name, different companies (#93)
+
+On play (2026-11-04), 2,782 normalized names belong to more than one company: 5,626 companies.
+**None is a duplicate**, that is one register entry stored twice: no register number appears twice,
+and two hand checks found none.
+
+- **The 17 groups with two active companies:** 6 are an association (VR) and a company of the same
+  name ("UFA-Fabrik Berlin" e. V. and the GmbH); 6 are a change of legal form or related firms
+  (areontec AG and areontec GmbH at the same address; a sole trader and a GmbH of the same name);
+  2 are different names the normalization makes equal ("SE-MA Trading" and "MA Trading": `SE` is
+  read as a legal form; "in takt" and "IN.Takt"); 3 have the same name and form at the same court
+  (CIO Solutions GmbH, HRB 87414 and 118376). The register forbids that today (§ 30 HGB, § 57 BGB),
+  so one of each is probably gone. **"Both active" is an artifact of the snapshot:** OffeneRegister
+  read each entry on its own day between July 2017 and January 2019, so an AG read in 2017 still
+  shows active after it became the GmbH read in 2019. Only current register data (#88) settles it.
+- **50 other groups**, drawn with seed 93: 18 a change of legal form (Leuchte KG became Leuchte
+  GmbH), 32 a new registration under the old name after the first was dissolved (Universal Music
+  GmbH: three entries).
+
+So nothing is merged: `merged_into` means one company, and a successor is another legal entity. Not
+linked either: name, address and officers can suggest a successor but not prove one. The app tells
+them apart by the register number next to the name.
+
 ## Age: older values weigh less (V6, #49)
 
 Every observation knows when its **source** read the value: `source_updated_at`, else

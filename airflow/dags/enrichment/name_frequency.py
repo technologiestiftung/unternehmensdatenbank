@@ -129,7 +129,7 @@ def distinctive_words(name: str, city: str | None, common: set[str]) -> set[str]
 MIN_AFFIX_COMPANIES = int(os.getenv("COMBINED_AFFIX_MIN", "8"))
 #: How many of the most frequent affixes are guessed.
 MAX_AFFIXES = int(os.getenv("COMBINED_MAX_AFFIXES", "4"))
-#: Longer additions are a second name ("bebra-wissenschaft"), not an affix.
+#: Longer additions are a second name (a word like "-wissenschaft"), not an affix.
 MAX_AFFIX_LENGTH = 8
 
 
