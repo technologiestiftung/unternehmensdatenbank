@@ -51,7 +51,9 @@ from enrichment.imprint_extractor import (
     POSTCODE_RE,
     extract_register_numbers,
     is_berlin_postcode,
+    looks_like_person_name,
 )
+from enrichment.register_names import LEGAL_FORMS
 from source_enrichment_common import (
     SourceDetails,
     companies_with_website_to_read,
@@ -85,11 +87,20 @@ RULE = "own-register-only-first-berlin-address-2026-11-04"
 
 # A street and house number: "Bleibtreustr. 4", "Am Kupfergraben 6a", "Rheinsberger Str. 76/77".
 _STREET = re.compile(
-    r"[A-ZÄÖÜa-zäöü][\wÄÖÜäöüß.'’\- ]{1,60}?\s\d{1,4}\s?[a-zA-Z]?(?:\s?[-–/]\s?\d{1,4}\s?[a-zA-Z]?)?"
+    r"([A-ZÄÖÜa-zäöü][\wÄÖÜäöüß.'’\- ]{1,60}?)\s\d{1,4}\s?[a-zA-Z]?(?:\s?[-–/]\s?\d{1,4}\s?[a-zA-Z]?)?"
 )
 # A room, a building or a mailbox is not the street ("Raum 128"); whole words, so "Bleibtreustr." passes.
 _NOT_A_STREET = re.compile(r"\b(?:postfach|raum|haus|etage|zimmer|gebäude|aufgang|tel|fax|hr[ab]|ust)\b", re.IGNORECASE)
 _SEGMENT_SPLIT = re.compile(r"[,|·•;]")
+# A company name or a person ahead of the street on the same line is not part of the address.
+_LEGAL_FORM = re.compile("|".join(rf"(?:{pattern})(?![a-zäöüß])" for _, pattern in LEGAL_FORMS), re.IGNORECASE)
+_MAX_STREET_WORDS = 4
+
+
+def _is_street(name: str) -> bool:
+    words = name.split()
+    return (len(words) <= _MAX_STREET_WORDS and not _LEGAL_FORM.search(name)
+            and not (len(words) > 2 and looks_like_person_name(" ".join(words[:2]))))
 
 
 def _street_before(text: str, start: int) -> str | None:
@@ -99,7 +110,8 @@ def _street_before(text: str, start: int) -> str | None:
     if not before and line_start:
         before = text[text.rfind("\n", 0, line_start - 1) + 1:line_start - 1].strip(" ,")
     segment = _SEGMENT_SPLIT.split(before)[-1].strip()
-    if _STREET.fullmatch(segment) and not _NOT_A_STREET.search(segment):
+    street = _STREET.fullmatch(segment)
+    if street and _is_street(street.group(1)) and not _NOT_A_STREET.search(segment):
         return re.sub(r"\s+", " ", segment)
     return None
 

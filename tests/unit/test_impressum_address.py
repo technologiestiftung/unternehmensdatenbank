@@ -49,3 +49,16 @@ def test_a_room_or_a_mailbox_is_not_a_street() -> None:
     assert address_on("Haus der Demokratie\nRaum 128\n10243 Berlin") is None
     assert address_on("Postfach 12 34\n10115 Berlin") is None
     assert address_on("D-10969 Berlin") is None  # no street at all
+
+
+def test_a_company_or_a_person_ahead_of_the_street_is_not_the_address() -> None:
+    assert address_on("INOMICS GmbH Bleibtreustr. 4\n10623 Berlin") is None
+    assert address_on("INOMICS GmbH Bleibtreustr. 4 10623 Berlin") is None
+    assert address_on("Max Mustermann Musterstr. 1\n10115 Berlin") is None
+    assert address_on("Copyright Muster GmbH 2024\n10115 Berlin") is None
+
+
+def test_streets_of_several_words_are_still_streets() -> None:
+    for street in ["Unter den Linden 16", "Straße des 17. Juni 135", "Am Kupfergraben 6a", "Alt-Moabit 59-61",
+                   "Rheinsberger Str. 76/77", "Karl-Marx-Allee 31"]:
+        assert address_on(f"{street}\n10117 Berlin")["address"] == f"{street}, 10117 Berlin"
