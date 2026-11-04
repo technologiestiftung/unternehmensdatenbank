@@ -114,7 +114,7 @@ name (`visitberlin.de`). These need a source that does not guess: Common Crawl, 
 
 **Initials measured and not adopted** (2026-11-04): the first letters of three or more name words,
 alone and with the learned affixes (`hma-berlin.de` for "Humboldt Moot Association", found in the #96
-hand check). On the test set it guessed that one site and none of the other 106 misses, for 0.6 to
+hand check). On the test set it guessed that one site and none of the other 109 misses, for 0.6 to
 1.0 more DNS lookups per company (21.8 to 22.4 on the 292 found sites). `hma-berlin.de` stays in the
 test set as a hand-found miss.
 
