@@ -126,7 +126,21 @@ Impressum gives an email at the domain, on 1,527 the page's structured data name
 `parent`, `namesake` or `other`; `--score` gives the share of own sites, overall and per flag (for
 example exact-name domain plus email at the domain). Only at about 9 in 10 is a shown value
 defensible; otherwise these sites stay suggestions in the claims list, which already lists them under
-`website` (`v_company_claims`). **Status: the 50 are not checked yet.**
+`website` (`v_company_claims`).
+
+**Checked by hand on play, 2026-11-04: 2 of 40 are the company's own site (5%).** 50 drawn, 10 not
+judgeable (5 parked or broken, 5 without enough on the page). Of the 40: 2 own sites, 29 another
+business with the same name (about 16 abroad: US, Canada, Denmark, Austria, Vietnam, Dubai; about 10
+in another German city), 5 a parent or group company, 4 another organisation. No flag lifts it near the
+bar: exact-name domain 2 of 21, exact-name domain plus email at the domain 1 of 5. A model suggested
+verdicts first; a person checked every row, and only the person's verdicts are counted.
+
+**Decision: these sites stay hidden, as today.** Neither shown nor offered as a suggestion. Instead,
+the signals against a site get sharper, so the wrong ones drop out of the 0.34 pool (follow-up issues):
+an Impressum abroad, register numbers we cannot read yet (`HR B 61871`, Swiss `CH-…`), a page that
+proves another company in our database, and register numbers we do not have at all. Two right sites
+the guesses missed: `hma-berlin.de` (abbreviation plus "berlin", #89) and a "Legal Notice" link
+that was never followed (#109).
 
 ## Pages are cached, so extraction changes are cheap to try
 
