@@ -1,10 +1,10 @@
 -- A page per source in the app (#102): what the source is, where it comes from, under which terms,
--- and how good its values look: how confident, how often shown, how often another source won.
+-- and how good its values look: how confident, how often shown, how often another source's different value is shown.
 --
 -- 1. `sources` gets four descriptive columns, filled here for every source we have. A source a DAG
 --    registers later (ensure_source) gets a row without them until a migration fills them.
 -- 2. `source_field_stats_mv` also counts values per confidence range and the companies where another
---    source's value is shown. The ranges are fixed numbers, the same for every field; each field has
+--    source's different value is shown. The ranges are fixed numbers, the same for every field; each field has
 --    its own bar in the resolver, so "below 0.35" is not "never shown" for every field.
 -- 3. `source_stats_mv` also counts how records found their company (identifier, name, created).
 -- 4. `v_source_runs`: the last 20 runs per source, counts only (never the error message).
@@ -84,16 +84,19 @@ DROP MATERIALIZED VIEW public.source_stats_mv;
 
 CREATE MATERIALIZED VIEW public.source_field_stats_mv AS
  WITH canonical AS (
-   SELECT company_id, field_name, source_id FROM public.company_field_observations WHERE is_canonical
+   SELECT company_id, field_name, source_id, value_text, value_number, value_date, value_jsonb
+     FROM public.company_field_observations WHERE is_canonical
  )
  SELECT s.key AS source_key,
     o.field_name,
     count(*) AS observations,
     count(DISTINCT o.company_id) AS companies,
     count(DISTINCT o.company_id) FILTER (WHERE o.is_canonical OR m.id IS NOT NULL) AS companies_shown,
-    -- Shown for this company and field, but another source's value: this one lost.
+    -- Shown for this company and field: another source's different value. A same value agreed, not lost.
     count(DISTINCT o.company_id) FILTER (WHERE o.confidence > 0 AND NOT o.is_canonical AND m.id IS NULL
-                                         AND c.source_id IS NOT NULL AND c.source_id <> o.source_id) AS companies_beaten,
+                                         AND c.source_id IS NOT NULL AND c.source_id <> o.source_id
+                                         AND (c.value_text, c.value_number, c.value_date, c.value_jsonb)
+                                             IS DISTINCT FROM (o.value_text, o.value_number, o.value_date, o.value_jsonb)) AS companies_beaten,
     round(avg(o.confidence), 3) AS avg_confidence,
     count(*) FILTER (WHERE o.confidence = 0) AS confidence_zero,
     count(*) FILTER (WHERE o.confidence > 0 AND o.confidence < 0.35) AS confidence_below_035,
@@ -161,7 +164,7 @@ CREATE VIEW public.v_source_fields AS
         last_observed_at
    FROM public.source_field_stats_mv;
 COMMENT ON VIEW public.v_source_fields IS
-  'Per source and field: values stored, companies, companies whose shown value came from this source, companies where another source''s value is shown, and values per confidence range. Counts only; no value is exposed.';
+  'Per source and field: values stored, companies, companies whose shown value came from this source, companies where another source''s different value is shown, and values per confidence range. Counts only; no value is exposed.';
 
 CREATE VIEW public.v_source_overview AS
  SELECT s.key AS source_key,
