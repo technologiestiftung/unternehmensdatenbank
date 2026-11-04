@@ -1,6 +1,6 @@
 # DAGs: the pipelines
 
-Eighteen DAG packages and one library, all in `airflow/dags/`. Which source each one reads:
+Nineteen DAG packages and one library, all in `airflow/dags/`. Which source each one reads:
 [sources](sources.md). Every DAG starts paused (Airflow's default, `dags_are_paused_at_creation`);
 unpausing it in Airflow is the only switch.
 
@@ -22,6 +22,7 @@ unpausing it in Airflow is the only switch.
 | `wirtschaftsatlas/` | `wirtschaftsatlas` | **by hand only, never scheduled** | companies with a website from Berlin Partner's Wirtschaftsatlas (about 57 GeoJSON layers, 2 s apart), matched by name key and postcode, else a unique name of a company that is not dissolved; each website verified like a Wikidata proposal (`enrichment.proposals`), up to 500 a run. The atlas offers no licence; its Impressum asks for Berlin Partner's prior consent. Built anyway on the developer's decision of 2026-11-04 while Berlin Partner is asked (#105), so a person starts every run. The layers (AI, FinTech, ...) are kept in the record, not yet used |
 | `register_crosslink/` | `register_crosslink` | `@weekly` | websites from register numbers discovery found on another company's guessed site (#112): each (host, one of our companies' register entries) is proposed to that company and verified like a Common Crawl proposal; a host naming more than 2 of our companies proposes nothing. Local, 2026-11-04: 6,048 proposals, 7 of the first 100 proven (all by the own register number), 3 of them new |
 | `berlin_zuwendungen/` | `berlin_zuwendungen` | `@monthly` | Land Berlin grants to HRA/HRB recipients into `company_fundings`, linked by register number. Then `create_companies`: a recipient's register number we do not have is linked by a unique live name in the same city, or, above the OffeneRegister snapshot's range, created as a company (name, legal form, city; no register status); triggers the coordinator (#103) |
+| `cordis/` | `cordis` | `@monthly` | EU research grants (Horizon Europe, Horizon 2020) of private Berlin companies from CORDIS's CSV files into `company_fundings`, one row per participation, linked by a name key unique in its city like the Förderkatalog; never creates a company (no register number) |
 | `foerderkatalog/` | `foerderkatalog` | `@monthly` | every Berlin grant from the Förderkatalog des Bundes into `company_fundings` |
 | `feedback_observations/` | `feedback_observations` | `@hourly` | people's corrections from the app as observations of `user_feedback` (priority 50); shown once two people agree, never who. Triggers the coordinator only when something changed |
 | `manager_ner/` | `manager_ner_extract` | triggered | spaCy reads the Impressum and writes Geschäftsführer names (source `spacy_ner`) |

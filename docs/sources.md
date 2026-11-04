@@ -39,6 +39,7 @@ Record counts are from the local database on 2026-11-02.
 | `structured_data` | the founding date or year a company's own website states in its structured data (schema.org) | DAG `structured_data`: reads stored pages of the published website, no downloads | weekly | 12 (local, 2026-11-04, whole-name rule) |
 | `branch_classifier` | Technologiefeld from the keywords on the website ([branch-classification](branch-classification.md)) | DAG `technology_field`; a spaCy text classifier may fill gaps | after discovery | 542 |
 | `spacy_ner` | Geschäftsführer names a spaCy model finds on the Impressum | DAG `manager_ner_extract` | after discovery | 72 |
+| `cordis` | EU research grants (CORDIS: Horizon Europe, Horizon 2020) to private companies in Berlin. Reuse under the European Commission's reuse notice, exact terms not yet checked | DAG `cordis`, into `company_fundings`, linked by name and city (no register number). Local copy, 2026-11-04, rolled back: 1,188 participations of 518 companies, 761 linked to 319 of ours, EUR 248 million | monthly | grants table |
 | `foerderkatalog` | grants of the federal government (Förderkatalog des Bundes) | DAG `foerderkatalog`, into `company_fundings`, linked by name and city | monthly | grants table |
 | `berlin_zuwendungen` | grants of Land Berlin (Zuwendungsdatenbank) | DAG `berlin_zuwendungen`, into `company_fundings`, linked by register number; a recipient registered after the snapshot that we lack becomes a company (name, legal form, city; #103) | monthly | grants table; 1,743 companies created (local, 2026-11-04) |
 | `user_feedback` | corrections people type in the app | DAG `feedback_observations`: one person 0.30 (listed, never shown), two who agree 0.60 | hourly | counts only, never who |
@@ -62,7 +63,7 @@ The goal is one record per Berlin company with 20 columns. Counts are from the l
 | 1 | Name | `name` | OffeneRegister, `handelsregister_lookup`, `gleif` (companies with an LEI; a name differing only in case or punctuation is not written) | 296,897 |
 | 2 | Mitarbeiter | `employee_count` | no source yet | 0 |
 | 3 | Umsatz | `revenue` | no source yet | 0 |
-| 4 | Förderungen | `funding_count`, `funding_total_eur`, `fundings` | `foerderkatalog`, `berlin_zuwendungen` | 5,189 companies with a grant |
+| 4 | Förderungen | `funding_count`, `funding_total_eur`, `fundings` | `foerderkatalog`, `berlin_zuwendungen`, `cordis` | 5,189 companies with a grant |
 | 5 | WZ-Nummer | `wz_code` | no source yet: OffeneRegister has none | 0 |
 | 6 | Gründungsdatum | `established_at`, `established_year` | `structured_data` (the year goes to `founding_year`, V6; a full date also to `established_at`) | year 12, date 0 (local, 2026-11-04, whole-name rule) |
 | 7 | Adresse | `address`, `postcode`, `city` | OffeneRegister, `gleif` (the legal address, newer); seat from `handelsregister_lookup` | city 296,897; street and postcode 116,527 |
@@ -89,6 +90,7 @@ Every column can also be corrected in the app (`user_feedback`).
 | Annual accounts (Bundesanzeiger, Unternehmensregister) | 2, 3, with history | no bulk access, a CAPTCHA in front of the documents, and small companies need not publish revenue (§ 326 HGB, to be checked) |
 | Handelsregister documents (Gegenstand, founding date) | 6, 13 | the search page alone is used, and only by hand; documents would be systematic retrieval |
 | A commercial data vendor | many | no contract; whether one comes is open |
+| TED (EU public tenders) | none of the 20 | a notice lists all winners of all lots across countries; identifiers are VAT numbers, not register numbers; winners include individuals, so personal data. 11,113 notices with a Berlin winner (2026-11-04, #104) |
 
 ## Adding a source
 
