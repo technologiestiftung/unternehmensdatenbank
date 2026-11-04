@@ -136,7 +136,7 @@ def read_company(name: str, pages: list[tuple[str, str, Any]]) -> tuple[tuple[st
     return decide(found), {"evidence": evidence}
 
 
-def run() -> int:
+def run_read() -> int:
     """Read every company's stored pages and write what they state. Returns how many values changed."""
     if not corpus.enabled():
         log.info("No company corpus configured (CORPUS_S3_ENDPOINT); nothing to read.")
@@ -216,7 +216,7 @@ def _make_dag():  # noqa: ANN201
         schedule="@weekly", start_date=datetime(2026, 11, 1, tzinfo=timezone.utc), catchup=False,
         max_active_runs=1, tags=["sources", "websites"],
     ) as dag:
-        read = pipeline_task("read_structured_data", run, returns=True)
+        read = pipeline_task("read_structured_data", run_read, returns=True)
         changed = ShortCircuitOperator(
             task_id="changed_any", python_callable=lambda ti: bool(ti.xcom_pull(task_ids="read_structured_data")),
         )
