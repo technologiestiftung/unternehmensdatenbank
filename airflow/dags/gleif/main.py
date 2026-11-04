@@ -13,7 +13,7 @@ show `active`, GLEIF says inactive.
 
 **What a run reads.** GLEIF publishes the full file (485 MB zipped, 5 GB of CSV) and change files: every
 record changed in the last day, week or month. The first run reads the full file; later ones the change
-file that covers the time since the last good run (`pipeline_state` gleif / last_run). The DAG runs
+file that covers the time since the last good run (`pipeline_state` gleif / last_run_v2). The DAG runs
 daily: up to 5 days without a good run the weekly change file, up to 28 the monthly one, else the full
 file again (each change file covers 7 or about 30 days; the margin absorbs a late run). Each is streamed out of its zip, keeping only `RA000217` rows.
 
@@ -23,7 +23,12 @@ company; only an active entity is created or matched by name, an inactive one on
 that holds its register number), the LEI as
 an identifier, and name, legal form, address, postcode, city and register status as
 observations dated by GLEIF's last update of the record (`source_updated_at`), so they compete by age with
-OffeneRegister's values. Status: `ACTIVE` is `active`, `INACTIVE` is `dissolved` (the user's decision of
+OffeneRegister's values. The **founding date** is GLEIF's `EntityCreationDate`: the day the current legal
+entity was created, written as `established_at` and its year as `founding_year` (#137). It is the legal
+entity's date, not the business's: Mister Spex SE says 2021, the year it became an SE (Wikidata: 2007).
+Measured 2026-11-04 on the first 10,000 Berlin LEIs of GLEIF's API (it pages no further): 9,647 have the
+date, 101 of them equal to the day the LEI was issued; the year follows the order of the HRB numbers, and
+142 (1.5 %) are later than the register number allows, so some dates are wrong. Status: `ACTIVE` is `active`, `INACTIVE` is `dissolved` (the user's decision of
 2026-11-04). A value GLEIF no longer gives drops to confidence 0. The legal form is read from the end of
 the name, as for the other register sources (`enrichment.register_names`). A name that differs from
 another source's only in case or punctuation is not written: GLEIF often writes capitals. Once GLEIF's
@@ -45,7 +50,7 @@ import re
 import tempfile
 import zipfile
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from typing import Any, Iterator
 
 from psycopg2.extras import Json
@@ -72,7 +77,8 @@ SCHEDULE = "@daily"
 DETAILS = SourceDetails(
     description=(
         "Die offenen Daten der Global Legal Entity Identifier Foundation: jede Firma mit einer LEI-"
-        "Kennung am Amtsgericht Charlottenburg, mit Name, Rechtsform, Adresse und Status. Über die "
+        "Kennung am Amtsgericht Charlottenburg, mit Name, Rechtsform, Adresse, Status und dem Tag, an dem "
+        "die heutige Rechtsperson entstand (Gründungsdatum). Über die "
         "Registernummer zugeordnet; fehlt die Firma bei uns, wird sie angelegt."
     ),
     schedule=schedule_label(SCHEDULE),
@@ -82,7 +88,9 @@ DETAILS = SourceDetails(
 LATEST = "https://goldencopy.gleif.org/api/v2/golden-copies/publishes/latest"
 #: GLEIF's id for the Handelsregister at Amtsgericht Berlin (Charlottenburg).
 BERLIN_REGISTER = "RA000217"
-_STATE = ("gleif", "last_run")
+#: The key changes when a run must read the full file again: "last_run_v2" since the founding date (#137),
+#: which records no change file covers would otherwise never get.
+_STATE = ("gleif", "last_run_v2")
 #: The change file a run reads, by days since the last good run; older than all of them: the full file.
 DELTAS = ((5, "LastWeek"), (28, "LastMonth"))
 TIMEOUT_S = 600
@@ -95,6 +103,7 @@ COLUMNS = {
     "register": "Entity.RegistrationAuthority.RegistrationAuthorityEntityID", "status": "Entity.EntityStatus",
     "street": "Entity.LegalAddress.FirstAddressLine", "postcode": "Entity.LegalAddress.PostalCode",
     "city": "Entity.LegalAddress.City", "updated": "Registration.LastUpdateDate",
+    "created": "Entity.EntityCreationDate",
 }
 
 
@@ -109,12 +118,15 @@ class LeiRecord:
     postcode: str | None
     city: str | None
     updated: str
+    #: The day the legal entity was created, 'YYYY-MM-DD' (#137).
+    created: str | None = None
 
     def fields(self) -> dict[str, str]:
         """The register fields this record states, as our observations hold them."""
         address = ", ".join(p for p in (self.street, " ".join(p for p in (self.postcode, self.city) if p)) if p)
         values = {"name": self.name, "legal_form": legal_form(self.name), "address": address or None,
-                  "postcode": self.postcode, "city": self.city, "register_status": self.status}
+                  "postcode": self.postcode, "city": self.city, "register_status": self.status,
+                  "established_at": self.created, "founding_year": self.created and self.created[:4]}
         return {field: value for field, value in values.items() if value}
 
 
@@ -124,6 +136,18 @@ def in_berlin(city: str | None, postcode: str | None) -> bool:
     if city and city.strip():
         return city.strip().lower().startswith("berlin")
     return is_berlin_postcode(postcode)
+
+
+def creation_day(raw: str | None, today: date | None = None) -> str | None:
+    """'YYYY-MM-DD' from GLEIF's creation timestamp ("1997-09-19T08:00:00+02:00"), None outside 1800..today.
+
+    The date part is the day as GLEIF states it, in the offset it gives (local midnight in nearly all rows).
+    """
+    try:
+        day = date.fromisoformat((raw or "")[:10])
+    except ValueError:
+        return None
+    return day.isoformat() if date(1800, 1, 1) <= day <= (today or date.today()) else None
 
 
 def parse_row(row: dict[str, str]) -> LeiRecord | None:
@@ -147,6 +171,7 @@ def parse_row(row: dict[str, str]) -> LeiRecord | None:
         lei=row[COLUMNS["lei"]], name=clean("name") or "", status=STATUS.get(row.get(COLUMNS["status"]) or ""),
         registers=identifier_values(match[1].upper().replace("GNR", "GnR"), match[2]),
         street=clean("street"), postcode=clean("postcode"), city=city, updated=row[COLUMNS["updated"]],
+        created=creation_day(row.get(COLUMNS["created"])),
     )
 
 

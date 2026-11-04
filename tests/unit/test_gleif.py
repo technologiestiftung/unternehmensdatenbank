@@ -1,10 +1,10 @@
 """`gleif.main`: Berlin register entries out of GLEIF's CSV, and which file a run reads (#88)."""
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 
 from enrichment.register_match import same_name
-from gleif.main import COLUMNS, berlin_records, file_to_read, parse_row
+from gleif.main import COLUMNS, berlin_records, creation_day, file_to_read, parse_row
 
 
 def row(**values: str) -> dict[str, str]:
@@ -21,6 +21,15 @@ def test_a_berlin_entry_becomes_our_identifier_and_register_fields() -> None:
         "name": "Beispiel Software GmbH", "legal_form": "GmbH", "address": "Musterstraße 1, 10115 Berlin",
         "postcode": "10115", "city": "Berlin", "register_status": "active",
     }
+
+
+def test_the_creation_date_is_the_founding_date_and_its_year() -> None:
+    fields = parse_row(row(created="1997-09-19T08:00:00+02:00")).fields()
+    assert (fields["established_at"], fields["founding_year"]) == ("1997-09-19", "1997")
+    assert creation_day("2016-10-10T00:00:00.000+01:00") == "2016-10-10"
+    assert creation_day("1771-01-01T00:00:00Z") is None  # before 1800: an error, not a firm's founding
+    assert creation_day("2030-01-01T00:00:00Z", today=date(2026, 11, 4)) is None
+    assert creation_day("") is None and creation_day("unknown") is None
 
 
 def test_inactive_is_dissolved_and_a_glued_b_is_read() -> None:
