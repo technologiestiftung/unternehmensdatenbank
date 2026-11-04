@@ -241,7 +241,8 @@ def propose(cur: Any, found: list[tuple[cc.Record, list[tuple[str, str]]]], *, s
 def run_verify() -> int:
     return proposals.verify_batch(
         source_id_of=_source_id, provider=SOURCE_KEY, method=conf.METHOD_COMMON_CRAWL, batch_size=BATCH_SIZE,
-        recheck_after_days=RECHECK_AFTER_DAYS, workers=WORKERS, metadata_of=lambda payload: {"crawl": payload["crawl"]},
+        recheck_after_days=RECHECK_AFTER_DAYS, workers=WORKERS, active_only=True,
+        metadata_of=lambda payload: {"crawl": payload["crawl"]},
     )
 
 

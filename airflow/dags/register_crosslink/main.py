@@ -127,7 +127,7 @@ def run_harvest() -> int:
         connection.close()
     log.info("%d proposals from discovery pages that print one of our companies' register numbers;"
              " %d websites of group hosts dropped.", len(found), retired)
-    return len(found) + retired
+    return len(found)
 
 
 def run_verify() -> int:
