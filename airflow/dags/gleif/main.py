@@ -30,6 +30,11 @@ another source's only in case or punctuation is not written: GLEIF often writes 
 own name has won, a re-read writes it again rather than dropping it. Measured on the local copy:
 of 8,860 names of companies we had, 7,289 identical, 338 case or punctuation only, 1,233 other words,
 mostly renames and changes of legal form ("VOSTELL Holding UG" became "VOSTELL Holding GmbH").
+
+**A full run on the local copy** (2026-11-04, golden copy of that day, as the writer role, rolled back):
+625 of the 14,183 have a legal address outside Berlin and are left out. Of the 13,500 records written,
+8,558 were found by register number, 62 by name, 4,781 active companies were created and 99 inactive ones
+we do not have were skipped; 33 match candidates wait for a person. GLEIF's name wins for 5,976 companies.
 """
 from __future__ import annotations
 
@@ -113,7 +118,7 @@ def parse_row(row: dict[str, str]) -> LeiRecord | None:
     """One CSV row, or None when it is not a Berlin register entry we can read.
 
     A Charlottenburg entry whose legal address is outside Berlin is left out: the register court is the
-    one at the seat, so it is stale or wrong. 498 of the 14,183 (2026-11-04), e.g. "General Electric
+    one at the seat, so it is stale or wrong. 625 of the 14,183 (2026-11-04), e.g. "General Electric
     Deutschland Holding GmbH" in Frankfurt under HRB 98088, which in Berlin is another company.
     """
     if row.get(COLUMNS["authority"]) != BERLIN_REGISTER:
