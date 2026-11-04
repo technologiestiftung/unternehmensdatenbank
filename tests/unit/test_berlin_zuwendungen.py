@@ -36,3 +36,31 @@ def test_keeps_only_register_recipients_as_typed_rows() -> None:
 def test_missing_year_and_amount_become_null() -> None:
     (row,) = to_funding_rows([_grant(4, "hrb_1", jahr="", betrag="", anschrift="ohne Ort")])
     assert row[2:6] == (None, None, None, None)
+
+
+# --- companies we lack (#103) ---------------------------------------------------------------
+
+from datetime import date as _date  # noqa: E402
+
+from berlin_zuwendungen.main import entry_for, is_new_firm  # noqa: E402
+
+LINE = {"HRB": 203011, "HRA": 52000}
+
+
+def test_only_a_number_above_the_snapshot_range_is_a_new_firm() -> None:
+    assert is_new_firm("HRB 239529", LINE)
+    assert not is_new_firm("HRB 150000", LINE)  # unknown but inside the snapshot: more likely a typo
+    assert not is_new_firm("HRB 203011", LINE)
+    assert not is_new_firm("HRB 239529", {})  # no OffeneRegister to compare with: create nothing
+
+
+def test_a_recipient_becomes_a_register_entry_with_name_legal_form_and_city() -> None:
+    entry = entry_for("HRB 239529", "Beispiel Technologies GmbH", "Berlin", _date(2024, 1, 1), 3, LINE)
+    assert entry.registers == ["Berlin (Charlottenburg) HRB 239529", "Berlin (Charlottenburg) HRB 239529 B"]
+    assert entry.fields == {"name": "Beispiel Technologies GmbH", "legal_form": "GmbH", "city": "Berlin"}
+    assert entry.active and entry.updated == "2024-01-01"
+    assert entry.external_id == "recipient:HRB 239529"
+
+
+def test_a_recipient_inside_the_snapshot_range_is_only_linked_never_created() -> None:
+    assert not entry_for("HRB 150000", "Beispiel GmbH", "Berlin", None, 1, LINE).active
