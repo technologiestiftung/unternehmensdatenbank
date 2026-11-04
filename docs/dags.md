@@ -1,6 +1,6 @@
 # DAGs: the pipelines
 
-Thirteen DAG packages and one library, all in `airflow/dags/`. Which source each one reads:
+Fourteen DAG packages and one library, all in `airflow/dags/`. Which source each one reads:
 [sources](sources.md). Every DAG starts paused (Airflow's default, `dags_are_paused_at_creation`);
 unpausing it in Airflow is the only switch.
 
@@ -16,6 +16,7 @@ unpausing it in Airflow is the only switch.
 | | `technology_field_train` | `@weekly` | trains the text classifier on the keywords' answers and the app's votes, from the corpus; promotes it only when it is right often enough on held-out companies people judged and the keywords left empty (none yet) |
 | `register_announcements/` | `register_announcements` | `@weekly` | Berlin's register announcements of the last 8 weeks from handelsregister.de (2 requests, the result list only, never a detail page). Linked by register number, then name and city (never to a deleted company); unknown companies are created. Publishes the latest as `register_announcement`, a hint next to `register_status`, never a change of it |
 | `handelsregister_lookup/` | `handelsregister_lookup` | **by hand only, never scheduled** | name, seat and status of up to 50 companies with a website from handelsregister.de, one search each by register number, 72 s apart (the portal allows 60 an hour). The portal's Nutzungsordnung forbids systematic retrievals that keep a partial register current (Ziffer 3); built anyway on the developer's decision of 2026-10-31, so a person starts every run. Result list only, never a document |
+| `wirtschaftsatlas/` | `wirtschaftsatlas` | **by hand only, never scheduled** | companies with a website from Berlin Partner's Wirtschaftsatlas (about 57 GeoJSON layers, 2 s apart), matched by name key and postcode, else a unique name of a company that is not dissolved; each website verified like a Wikidata proposal (`enrichment.proposals`), up to 500 a run. The atlas offers no licence; its Impressum asks for Berlin Partner's prior consent. Built anyway on the developer's decision of 2026-11-04 while Berlin Partner is asked (#105), so a person starts every run. The layers (AI, FinTech, ...) are kept in the record, not yet used |
 | `berlin_zuwendungen/` | `berlin_zuwendungen` | `@monthly` | Land Berlin grants to HRA/HRB recipients into `company_fundings`, linked by register number |
 | `foerderkatalog/` | `foerderkatalog` | `@monthly` | every Berlin grant from the Förderkatalog des Bundes into `company_fundings` |
 | `feedback_observations/` | `feedback_observations` | `@hourly` | people's corrections from the app as observations of `user_feedback` (priority 50); shown once two people agree, never who. Triggers the coordinator only when something changed |

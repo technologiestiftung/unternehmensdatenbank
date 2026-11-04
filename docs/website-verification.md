@@ -151,6 +151,12 @@ Impressum pages carry managing-director names.
   more than 2 of our companies is a group page and proposes nothing: in that run, pages naming 1
   company gave 106 proposals (47 proven), 2 gave 12 (3 proven: a GmbH & Co. KG and its
   Verwaltungs-GmbH, e.g. abion-hotel.de), and one page naming 26 gave 26 (0 proven).
+- **Wirtschaftsatlas** (DAG `wirtschaftsatlas`, #105) proposes the website Berlin Partner's map lists
+  for a company matched by name and postcode (or by a name only one live company has). A name is not
+  an identifier, so each URL starts from the URL-pattern base (method `wirtschaftsatlas`) and only
+  the page can prove it. Started by hand only, while Berlin Partner's consent is asked. Local run on
+  2026-11-04: 7,625 entries, 2,253 matched; of the first 50 websites checked, 21 proven (18 by the
+  register number, 3 by an officer), 15 for companies without a website. No result was hand-checked.
 - **OpenStreetMap** was removed on 2026-10-30 (#57): the public overpass-api.de refused our
   requests, and it found 3 websites in 1,000 active Berlin companies. Its scoring stays in
   `confidence.py` (Wikidata starts from the same base, and stored rows keep their evidence).

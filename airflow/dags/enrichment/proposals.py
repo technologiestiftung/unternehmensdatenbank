@@ -1,6 +1,6 @@
 """Websites another source proposes for a company, verified like a guessed domain.
 
-Shared by `wikidata` and `common_crawl`. Each match is a source record whose payload lists the
+Shared by `wikidata`, `common_crawl` and `wirtschaftsatlas`. Each match is a source record whose payload lists the
 proposed `websites`. `verify_batch` checks them with `pipeline.verify_proposed`, the same page
 reading and `confidence.score` as a guessed domain, and files every answer as an observation of
 that source. The page, not the match, proves a website.
@@ -40,6 +40,12 @@ def unproven(observations: list[tuple[str, str, str]], proven: set[tuple[str, st
     their company lists their URL as proven."""
     return [obs_id for obs_id, company_id, url in observations
             if obs_id not in written and (company_id, url) not in proven]
+
+
+def moved_from(previous: dict[str, str], current: dict[str, str]) -> set[str]:
+    """Companies a record (external id -> company id) named before and now names another company
+    instead. A record that no longer matches at all keeps what its page proved."""
+    return {company_id for key, company_id in previous.items() if current.get(key, company_id) != company_id}
 
 
 def demote_unproven(cur: Any, *, source_id: str, company_ids: list[str],
