@@ -219,7 +219,9 @@ Impressum pages carry managing-director names.
   End to end on a copy of the Berlin database (CC-MAIN-2026-43, 2026-10-30): 640 of 38,118 `.de`
   index blocks, 6,706 Impressum pages, 154 proposals, 50 companies proven (42 had no website); all
   by the own register number. Roughly 3,000 per crawl if the rest of `.de` is alike. A page naming
-  more than 2 of our companies is a group page and proposes nothing: in that run, pages naming 1
+  more than 2 of our companies is a group page and proposes nothing; a host that reaches 3 over
+  several runs has all its records retired and the websites only they proved drop to 0
+  (`proposals.retire_group_hosts`, #125). In that run, pages naming 1
   company gave 106 proposals (47 proven), 2 gave 12 (3 proven: a GmbH & Co. KG and its
   Verwaltungs-GmbH, e.g. abion-hotel.de), and one page naming 26 gave 26 (0 proven).
 - **Register crosslink** (DAG `register_crosslink`, #112) reuses what discovery already read: a

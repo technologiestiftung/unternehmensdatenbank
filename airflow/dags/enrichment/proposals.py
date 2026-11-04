@@ -14,7 +14,7 @@ from __future__ import annotations
 import dataclasses
 import logging
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from typing import Any, Callable
+from typing import Any, Callable, Iterable
 
 from psycopg2.extras import Json
 
@@ -78,13 +78,46 @@ def demote_unproven(cur: Any, *, source_id: str, company_ids: list[str],
     return len(demote)
 
 
+def retire_group_hosts(cur: Any, *, source_id: str, max_companies: int, also: Iterable[str] = ()) -> int:
+    """Retire every record of a host that names more than `max_companies` of our companies (#125).
+
+    A harvest drops such a group or directory page only among what it reads in one run; a host found
+    for two companies once and for a third later kept the first two records active. Counted over all
+    of the source's records of the host, plus the hosts the caller found crowded in this run (`also`).
+    A retired record is inactive and proves nothing any more, so a website only it proved drops to 0
+    (`demote_unproven`). Records are keyed to the host by `source_company_name`. Returns how many
+    websites dropped.
+    """
+    cur.execute(
+        """
+        WITH crowded AS (
+          SELECT source_company_name AS host FROM public.company_source_records
+          WHERE source_id = %(source)s
+          GROUP BY 1 HAVING count(DISTINCT company_id) > %(max)s
+          UNION SELECT unnest(%(also)s::text[])
+        )
+        UPDATE public.company_source_records r
+        SET is_active = false, source_payload = r.source_payload - 'proven_urls', updated_at = now()
+        WHERE r.source_id = %(source)s AND r.source_company_name IN (SELECT host FROM crowded)
+          AND (r.is_active OR r.source_payload ? 'proven_urls')
+        RETURNING r.company_id::text
+        """,
+        {"source": source_id, "max": max_companies, "also": sorted(set(also))},
+    )
+    companies = sorted({row[0] for row in cur.fetchall()})
+    return demote_unproven(cur, source_id=source_id, company_ids=companies)
+
+
 def verify_batch(*, source_id_of: Callable[[Any], str], provider: str, method: str, batch_size: int,
                  recheck_after_days: int, workers: int,
-                 metadata_of: Callable[[dict[str, Any]], dict[str, Any]] = lambda payload: {}) -> int:
+                 metadata_of: Callable[[dict[str, Any]], dict[str, Any]] = lambda payload: {},
+                 active_only: bool = False) -> int:
     """Verify one batch of the source's records not verified in `recheck_after_days`. Returns how
     many it checked: 0 skips the coordinator, a full batch starts the next run.
 
     `metadata_of(payload)` adds the source's own keys (Wikidata's `qid`) to each observation.
+    `active_only`: skip inactive records (a retired group host, #125). Wikidata keeps verifying its
+    inactive items on purpose, so it is off by default.
     """
     connection = get_connection()
     try:
@@ -94,13 +127,13 @@ def verify_batch(*, source_id_of: Callable[[Any], str], provider: str, method: s
                 """
                 SELECT r.id, r.company_id::text, r.source_payload
                 FROM public.company_source_records r
-                WHERE r.source_id = %s
+                WHERE r.source_id = %s AND (r.is_active OR NOT %s)
                   AND (r.source_payload ->> 'verified_at' IS NULL
                        OR (r.source_payload ->> 'verified_at')::timestamptz < now() - %s * interval '1 day')
                 ORDER BY r.source_payload ->> 'verified_at' NULLS FIRST, r.id
                 LIMIT %s
                 """,
-                (source_id, recheck_after_days, batch_size),
+                (source_id, active_only, recheck_after_days, batch_size),
             )
             records = cur.fetchall()
             if not records:
