@@ -97,6 +97,13 @@ the 77 fields or `NONE` for companies the keywords left empty, from the same tex
 and phone numbers replaced (`enrichment.llm`). The labels sit in source records only, never in the
 app. They may train the text classifier only after a person has checked a sample
 (`scripts/llm_labels_sample.py`, 100 labels); precision and cost per label go here. Not measured yet.
+
+**Estimated WZ division (#140).** The same answer also names one of the 87 WZ divisions in
+`wz_divisions`, or `NONE`, stored as `wz_division` next to the label. It is an **estimate** of what the
+company does, from its website: never the official `wz_code`, and never in the WZ cluster column. It
+reaches the app only after the same sample's `wz_verdict` column measured it, and then as a field of its
+own, "WZ (geschätzt)". For now only companies the keywords left empty are asked, so the sample says
+nothing yet about companies that have a Technologiefeld. Not measured yet.
 Locally, 2026-11-04: 205 companies with `no_keyword` on a published website, 189 with stored text.
 
 ### `NONE` has four reasons, never added together
