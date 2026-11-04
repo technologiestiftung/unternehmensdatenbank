@@ -114,5 +114,16 @@ def test_a_partial_read_sets_no_record_inactive(monkeypatch) -> None:
     assert _run(monkeypatch, [_ad("A GmbH", "h1", "10115")], total=3) == []
 
 
+def test_a_read_without_a_total_sets_no_record_inactive(monkeypatch) -> None:
+    assert _run(monkeypatch, [_ad("A GmbH", "h1", "10115")], total=0) == []
+
+
+def test_a_total_sent_as_text_is_read_as_a_number(monkeypatch) -> None:
+    _serve(monkeypatch, _Response(200, {"maxErgebnisse": "2", "ergebnisliste": [_ad("A GmbH", "h1")]}),
+           _Response(200, {"maxErgebnisse": "2", "ergebnisliste": [_ad("B GmbH", "h2")]}))
+    ads, total = main.read_ads()
+    assert (len(ads), total) == (2, 2)
+
+
 def test_a_full_read_sets_unseen_records_inactive(monkeypatch) -> None:
     assert len(_run(monkeypatch, [_ad("A GmbH", "h1", "10115")], total=1)) == 1

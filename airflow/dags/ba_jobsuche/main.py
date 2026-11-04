@@ -76,7 +76,7 @@ def read_ads() -> tuple[list[dict[str, Any]], int]:
             log.warning("Page %d answered HTTP %d; stopping with %d ads read.", page, response.status_code, len(ads))
             break
         data = response.json()
-        total = data.get("maxErgebnisse") or total
+        total = int(data.get("maxErgebnisse") or 0) or total
         batch = data.get("ergebnisliste") or []
         ads += batch
         if not batch or len(ads) >= total:
@@ -138,7 +138,7 @@ def run_read() -> int:
                       for employer, (company_id, confidence) in matches.items()],
                     template="(%s, %s, %s, %s, %s, %s, %s, %s, now(), true)", page_size=1000)
             # An employer without ads now keeps its record, inactive: never deleted. Only after a full read.
-            if len(ads) >= total:
+            if len(ads) >= total and (total or not ads):
                 cur.execute("UPDATE public.company_source_records SET is_active = false"
                             " WHERE source_id = %s AND is_active AND NOT (external_id = ANY(%s))",
                             (source_id, list(matches)))
