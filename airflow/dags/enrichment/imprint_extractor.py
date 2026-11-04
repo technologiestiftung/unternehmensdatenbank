@@ -244,9 +244,9 @@ def extract_postcodes(text: str) -> list[str]:
 _FOREIGN = (
     ("vat", re.compile(r"\b(?:ATU\s?\d{8}|CHE[-‐–\s]?\d{3}[.\s]?\d{3}[.\s]?\d{3})\b")),
     ("register", re.compile(r"\bCVR[-\s.]*(?:nr|no)\b|\bCH[-‐–]\d{3}\.\d\.\d{3}\.\d{3}-\d\b", re.I)),
-    ("us_address", re.compile(r",\s*(?!DE\b)[A-Z]{2},?\s+\d{5}(?:-\d{4})?\b")),
+    ("us_address", re.compile(r",\s*(?!(?:DE|VR|PR)\b)[A-Z]{2},?\s+\d{5}(?:-\d{4})?\b")),
     ("phone", re.compile(r"(?<![\w+])\+\s?(?:1|7|20|31|32|33|34|39|41|43|44|45|46|47|48|84|90|971|974)"
-                         r"[\s()./-]*\d(?:[\s()./-]*\d){5,}")),
+                         r"[\s()./-]*\d(?:[\s()./-]*\d){6,}")),
     ("country", re.compile(r"\b(?:USA|U\.S\.A\.|United States|Österreich|Austria|Schweiz|Switzerland|"
                            r"Danmark|Denmark|Canada|United Kingdom|Viet ?Nam|United Arab Emirates|UAE|Qatar)\b")),
 )
@@ -263,14 +263,16 @@ _STRONG = frozenset({"vat", "register", "us_address"})
 _SAME_ADDRESS = 60
 
 
-def is_abroad(text: str) -> bool:
+def is_abroad(text: str, *, imprint: bool = True) -> bool:
     """A page run from abroad (#111).
 
     An Impressum names its owner first. So a strong sign (foreign VAT or company number, US-style
     address) counts only before the first German postcode, or within `_SAME_ADDRESS` characters
     after it; later on the page it is a service provider in the privacy text ("Google LLC, Mountain
     View, CA 94043, USA"). A weak sign (foreign phone, country name) counts only on a page with no
-    German postcode at all. "Deutschland", "Germany" or a +49 number anywhere means not abroad.
+    German postcode at all, and only in an Impressum (`imprint=False` for a homepage, where "Export in
+    die USA" or "Märkische Schweiz" is sales text). "Deutschland", "Germany" or a +49 number
+    anywhere means not abroad.
     """
     text = text or ""
     if _GERMAN.search(text):
@@ -279,7 +281,7 @@ def is_abroad(text: str) -> bool:
                            if m.group(1) in extract_postcodes(m.group(0))), None)
     for kind, pattern in _FOREIGN:
         match = pattern.search(text)
-        if not match:
+        if not match or (kind not in _STRONG and not imprint):
             continue
         if first_postcode is None:
             return True

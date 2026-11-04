@@ -28,6 +28,8 @@ def test_a_business_abroad_is_recognised(text: str) -> None:
     "Hotline +4930 1234567, London +44 20 7946 0000",                    # unspaced +49 is German
     "Fax 004930 1234567, Austria",                                       # unspaced 0049 is German
     "Musterstr. 1, DE 10115 Berlin",                                     # DE prefix, not a US state
+    "Musterstr. 1, 10115 Berlin, Amtsgericht Charlottenburg, VR 12345 B",  # association register
+    "Über +1.000.000 Besucher",                                          # a count, not a phone number
 ])
 def test_a_german_page_is_not_abroad(text: str) -> None:
     assert not is_abroad(text)
@@ -43,3 +45,13 @@ def test_abroad_disqualifies_unless_the_page_proves_the_company() -> None:
     assert conf.score(methods=["url_pattern"], evidence=base | {conf.IMPRINT_ABROAD}).value == 0.0
     for proof in (conf.REGISTER_MATCH, conf.OFFICER_MATCH):
         assert conf.score(methods=["url_pattern"], evidence=base | {conf.IMPRINT_ABROAD, proof}).value > 0.35
+
+
+@pytest.mark.parametrize("text", ["Ausflüge in die Märkische Schweiz", "Export in die USA, +1 214 555 1234"])
+def test_weak_signs_count_only_in_an_impressum(text: str) -> None:
+    assert is_abroad(text)
+    assert not is_abroad(text, imprint=False)
+
+
+def test_a_strong_sign_counts_on_a_homepage() -> None:
+    assert is_abroad("Ignite Sales, Dallas, TX 75254", imprint=False)

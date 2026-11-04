@@ -249,7 +249,7 @@ def _page_evidence(
         evidence.add(conf.NO_IMPRINT)
     # A business abroad says so in its Impressum; a site without one (most sites abroad have none)
     # says it on the page itself. Decided in `confidence.py`, where proof can lift it.
-    if extracted.get("abroad") if extracted else is_abroad(page_text[:20000]):
+    if extracted.get("abroad") if extracted else is_abroad(page_text[:20000], imprint=False):
         evidence.add(conf.IMPRINT_ABROAD)
 
     # A page can print its register number and still have no Impressum this code can find — the
