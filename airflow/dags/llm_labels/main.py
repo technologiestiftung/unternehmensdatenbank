@@ -28,7 +28,7 @@ import logging
 import os
 import time
 from datetime import datetime, timezone
-from typing import Any
+from typing import Any, Callable
 
 from psycopg2.extras import Json
 
@@ -95,10 +95,18 @@ def tokens_this_month(usage: dict[str, Any] | None, month: str) -> int:
     return int(usage["tokens"]) if usage and usage.get("month") == month else 0
 
 
-def pick(gaps: dict[str, tuple[str, str]], done: set[str], limit: int) -> list[str]:
-    """Up to `limit` gap companies not labelled yet, in a fixed order (a hash of the id)."""
-    todo = [cid for cid in gaps if cid not in done]
-    return sorted(todo, key=lambda cid: hashlib.sha256(cid.encode()).hexdigest())[:limit]
+def pick(gaps: dict[str, tuple[str, str]], done: set[str], limit: int,
+         text_of: Callable[[str], str]) -> dict[str, str]:
+    """company_id -> text for up to `limit` gap companies not labelled yet that have text, in a fixed
+    order (a hash of the id). `text_of` gets the website; a company without text is skipped, not counted."""
+    todo = sorted((cid for cid in gaps if cid not in done), key=lambda cid: hashlib.sha256(cid.encode()).hexdigest())
+    chosen: dict[str, str] = {}
+    for cid in todo:
+        if len(chosen) == limit:
+            break
+        if text := text_of(gaps[cid][1]):
+            chosen[cid] = text
+    return chosen
 
 
 def _gaps(cur: Any, taxonomy: bc.Taxonomy) -> dict[str, tuple[str, str]]:
@@ -125,8 +133,8 @@ def _labelled(cur: Any, source_id: str, version: str) -> set[str]:
     return {row[0] for row in cur.fetchall()}
 
 
-def _texts(companies: dict[str, tuple[str, str]]) -> dict[str, str]:
-    """company_id -> redacted text, for the companies with stored text."""
+def _texts(gaps: dict[str, tuple[str, str]], done: set[str]) -> dict[str, str]:
+    """company_id -> redacted text, for up to `MAX_COMPANIES` unlabelled gap companies with stored text."""
     import spacy
 
     from technology_field.train import require_store, stored_text
@@ -136,9 +144,9 @@ def _texts(companies: dict[str, tuple[str, str]]) -> dict[str, str]:
     def people(text: str) -> list[tuple[int, int]]:
         return [(e.start_char, e.end_char) for e in nlp(text).ents if e.label_ == "PER"]
 
-    texts = {cid: llm.redact(text, people) for cid, (_, website) in companies.items()
-             if (text := stored_text(website))}
+    chosen = pick(gaps, done, MAX_COMPANIES, stored_text)
     require_store()
+    texts = {cid: llm.redact(text, people) for cid, text in chosen.items()}
     return texts
 
 
@@ -171,8 +179,7 @@ def run_label() -> int:
             log.info("%d tokens used this month, budget %d; no new batch.", used, MONTHLY_TOKENS)
             return 0
         else:
-            chosen = {cid: gaps[cid] for cid in pick(gaps, done, MAX_COMPANIES)}
-            texts = _texts(chosen)
+            texts = _texts(gaps, done)
             if not texts:
                 log.info("%d gap companies, %d labelled; nothing left with stored text.", len(gaps), len(done))
                 return 0

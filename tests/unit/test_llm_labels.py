@@ -52,10 +52,26 @@ def test_answers_are_read_or_marked() -> None:
 
 
 def test_pick_skips_labelled_companies_in_a_fixed_order() -> None:
-    gaps = {cid: ("Name", "https://example.org") for cid in ("a", "b", "c", "d")}
-    first = pick(gaps, set(), 4)
-    assert pick(gaps, set(), 2) == first[:2]
-    assert pick(gaps, {first[0]}, 4) == first[1:]
+    gaps = {cid: ("Name", f"https://{cid}.example") for cid in ("a", "b", "c", "d")}
+    first = list(pick(gaps, set(), 4, lambda website: "text"))
+    assert list(pick(gaps, set(), 2, lambda website: "text")) == first[:2]
+    assert list(pick(gaps, {first[0]}, 4, lambda website: "text")) == first[1:]
+
+
+def test_pick_fills_the_limit_past_companies_without_text() -> None:
+    gaps = {cid: ("Name", f"https://{cid}.example") for cid in ("a", "b", "c", "d")}
+    order = list(pick(gaps, set(), 4, lambda website: "text"))
+    textless = {f"https://{cid}.example" for cid in order[:2]}
+    chosen = pick(gaps, set(), 2, lambda website: "" if website in textless else website)
+    assert chosen == {cid: f"https://{cid}.example" for cid in order[2:]}
+
+
+def test_an_email_or_phone_cut_at_the_limit_is_still_redacted() -> None:
+    for secret in ("erika.muster@beispiel.de", "030 1234 5678"):
+        text = "a" * (llm.MAX_CHARS - 10) + " " + secret + " mehr Text"
+        sent = llm.redact(text, lambda t: [])
+        assert len(sent) == llm.MAX_CHARS
+        assert not any(secret[:n] in sent for n in range(6, len(secret) + 1))
 
 
 def test_the_budget_starts_again_each_month() -> None:

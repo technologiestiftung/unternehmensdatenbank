@@ -84,7 +84,7 @@ def redact(text: str, person_spans: Callable[[str], Iterable[tuple[int, int]]]) 
     `person_spans` gives (start, end) of each person's name in the text (spaCy's PER entities in the
     DAG); a parameter so this stays testable without the model.
     """
-    text = _PHONE.sub("[PHONE]", _EMAIL.sub("[EMAIL]", text[:MAX_CHARS]))
+    text = _PHONE.sub("[PHONE]", _EMAIL.sub("[EMAIL]", text))[:MAX_CHARS]
     for start, end in sorted(person_spans(text), reverse=True):
         text = text[:start] + "[NAME]" + text[end:]
     return text
