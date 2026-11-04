@@ -82,7 +82,8 @@ def redact(text: str, person_spans: Callable[[str], Iterable[tuple[int, int]]]) 
     """The text cut to `MAX_CHARS`, with people's names, emails and phone numbers replaced.
 
     `person_spans` gives (start, end) of each person's name in the text (spaCy's PER entities in the
-    DAG); a parameter so this stays testable without the model.
+    DAG); a parameter so this stays testable without the model. Emails and phones are replaced
+    before the cut, so one crossing `MAX_CHARS` is never sent half.
     """
     text = _PHONE.sub("[PHONE]", _EMAIL.sub("[EMAIL]", text))[:MAX_CHARS]
     for start, end in sorted(person_spans(text), reverse=True):
