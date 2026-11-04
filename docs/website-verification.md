@@ -53,6 +53,14 @@ extra suspicion.
 - **Never search a page for bare digits.** `GnR 205` searched as "205" finds a price or a house number.
 - **A number with a space** (`HRB 794 28`) is also read as `HRB 79428`, but only a 1–3 digit tail is
   joined, and the joined number counts only if it is exactly the company's own.
+- **An Impressum not called Impressum** (#109). The link finder used to accept only a link whose
+  address contains `impressum` or `imprint`. It now tries, in order: that, then link text saying
+  Impressum, then "Legal Notice", "Site Notice", "Anbieterkennzeichnung" or "Rechtliche Hinweise". A
+  page also counts as an Impressum when it names the Vereins-, Genossenschafts- or
+  Partnerschaftsregister. Measured locally on 300 random active companies whose guessed site had no
+  Impressum (2026-11-04): 18 now get one, 2 of them print the company's own register number (newly
+  proven, e.g. START Berlin's "Legal Notice"), 2 another company's; on 100 of the #89 test set's
+  proven websites none read worse, 2 read a better page.
 - **A Berlin number with its B glued on** (`HRB 132889B`) is read as `HRB 132889` (#89). Before, such
   a page could never prove its company: 4 of the 91 stored pages with a register entry write it so.
 - **A brand before the legal form** ("3pc GmbH Neue Kommunikation") is guessed first

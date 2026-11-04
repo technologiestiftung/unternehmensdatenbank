@@ -53,3 +53,40 @@ def test_a_homepage_with_a_register_beats_a_contact_page(monkeypatch: pytest.Mon
 def test_no_impressum_anywhere_is_none(monkeypatch: pytest.MonkeyPatch) -> None:
     _site({"https://a.de": NEWS_HOMEPAGE}, monkeypatch)
     assert fetch_impressum("https://a.de") is None
+
+
+# START Berlin's footer (#109): the Impressum is linked as "Legal Notice", nowhere called Impressum.
+LEGAL_NOTICE_HOMEPAGE = (
+    '<html><body><a href="legal/privacy.html">Privacy</a>'
+    '<a class="legal-cta" href="legal/legal-notice.html">Legal Notice</a></body></html>'
+)
+LEGAL_NOTICE = "<html><body><h1>Legal Notice</h1><p>Vereinsregister: Amtsgericht Charlottenburg, VR 32262 B</p></body></html>"
+
+
+def test_a_legal_notice_link_is_followed(monkeypatch: pytest.MonkeyPatch) -> None:
+    _site({"https://s.com/": LEGAL_NOTICE_HOMEPAGE, "https://s.com/legal/legal-notice.html": LEGAL_NOTICE}, monkeypatch)
+    assert fetch_impressum("https://s.com/") == (LEGAL_NOTICE, "https://s.com/legal/legal-notice.html")
+
+
+def test_an_impressum_link_still_wins_over_a_legal_notice() -> None:
+    html = ('<a href="/legal-notice">Legal Notice</a><a href="/rechtliches">Impressum</a>'
+            '<a href="/de/impressum">Kontakt</a>')
+    assert http_client._find_impressum_link("https://a.de/", html) == "https://a.de/de/impressum"
+    assert http_client._find_impressum_link("https://a.de/", html.replace("/de/impressum", "/kontakt")) == (
+        "https://a.de/rechtliches")
+
+
+def test_an_association_register_makes_a_page_an_impressum() -> None:
+    assert _has_imprint_content("<p>Vereinsregister: VR 32262 B</p>", imprint_url=False)
+    assert _has_imprint_content("<p>Genossenschaftsregister GnR 123 B</p>", imprint_url=False)
+
+
+def test_a_bare_legal_link_is_not_taken_for_the_impressum() -> None:
+    assert http_client._find_impressum_link("https://a.de/", '<a href="/legal">Legal</a>') is None
+    assert http_client._find_impressum_link("https://a.de/", '<a href="mailto:x@a.de">Legal Notice</a>') is None
+
+
+def test_a_link_back_to_the_page_itself_is_not_the_impressum() -> None:
+    assert http_client._find_impressum_link("https://a.de/", '<a href="#">Impressum</a>') is None
+    assert http_client._find_impressum_link("https://a.de/", '<a href="#impressum">Impressum</a>') is None
+    assert http_client._find_impressum_link("https://a.de/", '<a href="">Legal Notice</a>') is None

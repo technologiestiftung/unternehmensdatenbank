@@ -5,7 +5,7 @@ import os
 import re
 import threading
 
-from urllib.parse import urljoin
+from urllib.parse import urldefrag, urljoin
 
 import requests
 from bs4 import BeautifulSoup
@@ -38,9 +38,16 @@ IMPRESSUM_PATHS = [
 # which made a homepage of news posts "the Impressum" of rustlerschriever.com, and spaCy read 16
 # names off it where the real Impressum names 2.
 _REGISTER_RE = re.compile(
-    r"handelsregister|registergericht|umsatzsteuer|ust-id|(?<![a-zäöüß])hr[ab](?![a-zäöüß])", re.I
+    r"handelsregister|vereinsregister|genossenschaftsregister|partnerschaftsregister|registergericht"
+    r"|umsatzsteuer|ust-id|(?<![a-zäöüß])hr[ab](?![a-zäöüß])", re.I
 )
 _IMPRINT_WORD_RE = re.compile(r"(?<![a-zäöüß])(?:impressum|imprint)(?![a-zäöüß])", re.I)
+#: What an Impressum link is called when it is not called Impressum: English and international sites
+#: ("Legal Notice", `legal/legal-notice.html`, #109) and the older German legal wording. Bare "legal"
+#: is left out: it is as often the privacy or terms page.
+_LEGAL_NOTICE_RE = re.compile(
+    r"legal[\s_-]*notice|site[\s_-]*notice|anbieterkennzeichnung|rechtliche[\s_-]*hinweise", re.I
+)
 
 
 def _has_imprint_content(html: str, *, imprint_url: bool = True) -> bool:
@@ -152,13 +159,34 @@ def _find_impressum_link(base_url: str, html: str) -> str | None:
     /service/impressum, the row was stored with `register_number: null` and confidence 0.65.
     `combined_discovery` never hit this because it guesses origins, which is why it holds 667
     register-number matches against the search DAGs' 20.
+
+    Links are tried in three passes, so a page with several still takes the Impressum: the address
+    says Impressum, then the link text does, then either says "Legal Notice" or a German equivalent
+    (`_LEGAL_NOTICE_RE`). START Berlin links "Legal Notice" to `legal/legal-notice.html`, which prints
+    its register number; the first pass alone never read it (#109). A link back to the page itself
+    (`href="#"`, `#impressum`) is skipped: read under its own address, the footer word Impressum
+    would make the homepage the Impressum.
     """
     try:
-        for a in _soup(html).find_all("a", href=True):
-            if "impressum" in a["href"].lower() or "imprint" in a["href"].lower():
-                return urljoin(base_url, a["href"])
+        links = [(a["href"], " ".join(a.get_text(" ").split())) for a in _soup(html).find_all("a", href=True)]
     except Exception:  # noqa: BLE001  malformed markup is not worth failing a candidate over
-        pass
+        return None
+    passes = (
+        lambda href, _text: "impressum" in href.lower() or "imprint" in href.lower(),
+        lambda _href, text: bool(_IMPRINT_WORD_RE.search(text)),
+        lambda href, text: bool(_LEGAL_NOTICE_RE.search(href) or _LEGAL_NOTICE_RE.search(text)),
+    )
+    page = urldefrag(base_url).url
+    links = [
+        (href, text)
+        for href, text in links
+        if not href.lower().startswith(("mailto:", "tel:", "javascript:"))
+        and urldefrag(urljoin(base_url, href)).url != page
+    ]
+    for matches in passes:
+        for href, text in links:
+            if matches(href, text):
+                return urljoin(base_url, href)
     return None
 
 
