@@ -56,14 +56,14 @@ The goal is one record per Berlin company with 20 columns. Counts are from the l
 
 | # | Column | `v_company_profile` | Filled by | Today |
 |---|---|---|---|---|
-| 1 | Name | `name` | OffeneRegister, `handelsregister_lookup` | 296,897 |
+| 1 | Name | `name` | OffeneRegister, `handelsregister_lookup`, `gleif` (companies with an LEI; a name differing only in case or punctuation is not written) | 296,897 |
 | 2 | Mitarbeiter | `employee_count` | no source yet | 0 |
 | 3 | Umsatz | `revenue` | no source yet | 0 |
 | 4 | Förderungen | `funding_count`, `funding_total_eur`, `fundings` | `foerderkatalog`, `berlin_zuwendungen` | 5,189 companies with a grant |
 | 5 | WZ-Nummer | `wz_code` | no source yet: OffeneRegister has none | 0 |
 | 6 | Gründungsdatum | `established_at` | no source yet | 0 |
-| 7 | Adresse | `address`, `postcode`, `city` | OffeneRegister; seat from `handelsregister_lookup` | city 296,897; street and postcode 116,527 |
-| 8 | Rechtsform | `legal_form` | OffeneRegister | 257,244 |
+| 7 | Adresse | `address`, `postcode`, `city` | OffeneRegister, `gleif` (the legal address, newer); seat from `handelsregister_lookup` | city 296,897; street and postcode 116,527 |
+| 8 | Rechtsform | `legal_form` | OffeneRegister, `gleif` (both read from the end of the name) | 257,244 |
 | 9 | Cluster (n=5) | — | removed with #47; comes back with a classifier | — |
 | 10 | Technologiefeld | `technology_field` | `branch_classifier` | 194 |
 | 11 | Website | `website` | `website_discovery`, `wikidata`, `common_crawl`, `wirtschaftsatlas` | 6,090 |
@@ -75,7 +75,7 @@ The goal is one record per Berlin company with 20 columns. Counts are from the l
 | 17 | isAI | `is_ai` | no classifier yet; corrections from the app can fill it | 0 |
 | 18 | Timestamp | `updated_at` | the coordinator | all |
 | 19 | Amazon-Effekt (optional) | — | removed with #47; meaning not defined yet | — |
-| 20 | Schließung / Liquidation (optional) | `register_status`, `register_announcement` | status from OffeneRegister and `handelsregister_lookup`; `register_announcements` adds a hint next to it, never a change of it | status 296,486; announcements 854 |
+| 20 | Schließung / Liquidation (optional) | `register_status`, `register_announcement` | status from OffeneRegister, `handelsregister_lookup` and `gleif` (`ACTIVE` active, `INACTIVE` dissolved, dated by GLEIF's last update); `register_announcements` adds a hint next to it, never a change of it | status 296,486; announcements 854 |
 
 Every column can also be corrected in the app (`user_feedback`).
 
