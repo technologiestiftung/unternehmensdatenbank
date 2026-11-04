@@ -149,7 +149,8 @@ def run_match() -> int:
             cur.execute("UPDATE public.sources SET last_synced_at = now() WHERE id = %s", (source_id,))
             finish_sync_run(cur, sync_run_id=sync_run_id, records_seen=seen, records_created=matched,
                             records_updated=0, records_failed=0)
-        log.info("%d layer entries, %d distinct companies; %d matched one of ours, %d did not;"
+        log.info("%d layer entries, %d distinct companies; %d matched one of ours and list a website,"
+                 " %d matched none or list no website;"
                  " %d websites demoted.", len(rows), seen, matched, seen - matched, demoted)
         return matched + demoted
     finally:
