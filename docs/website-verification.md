@@ -164,9 +164,8 @@ register number or a register officer on the page. Measured on the 50 hand-check
 Impressum it was 9 of 29 plus a parent and an unclear site; the narrower rule was chosen so that a
 German homepage mentioning "Export in die USA" or "Märkische Schweiz" is never refused. On 100 proven
 websites of the #89 test set 1 flagged (sourcepoint.com, kept: a register officer is on its
-Impressum). Register entries
-written with a space (`HR B 61871`) are now read, so such a page can be another company's
-(`REGISTER_MISMATCH`). Both apply when a site is read again (every 90 days), not to stored rows.
+Impressum). Register entries written with a space (`HR B 61871`) are now read, so such a page can
+be another company's (`REGISTER_MISMATCH`). Both apply when a site is read again (every 90 days), not to stored rows.
 
 ## Pages are cached, so extraction changes are cheap to try
 
