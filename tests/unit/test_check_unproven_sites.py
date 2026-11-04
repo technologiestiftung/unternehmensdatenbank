@@ -33,3 +33,10 @@ def test_a_misspelt_verdict_is_refused(tmp_path: Path) -> None:
     path.write_text(HEADER + "HRB 1,A,https://a.de,1,0,0,0,own site,\n", encoding="utf-8")
     with pytest.raises(ValueError, match="own site"):
         score(path)
+
+
+def test_a_file_without_a_verdict_column_is_refused(tmp_path: Path) -> None:
+    path = tmp_path / "sample.csv"
+    path.write_text(HEADER.replace(",", ";") + "HRB 1;A;https://a.de;1;0;0;0;own_site;\n", encoding="utf-8")
+    with pytest.raises(ValueError, match="verdict"):
+        score(path)

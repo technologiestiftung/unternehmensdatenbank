@@ -54,7 +54,8 @@ POPULATION = """
       AND e.register_status = 'active'
       AND e.website_url IS NULL
       AND e.merged_into IS NULL
-      AND e.company_name !~* '(e\\.\\s?k\\.|eingetragene[rn]? kauf|inhaber)'
+      AND e.legal_form IS DISTINCT FROM 'e. K.'
+      AND e.company_name !~* '(eingetragene[rn]? kauf|inhaber)'
     ORDER BY o.company_id, o.observed_at DESC
 """
 
@@ -95,7 +96,10 @@ def draw() -> None:
 def score(path: Path) -> dict[str, tuple[int, int]]:
     """(own sites, judged) for all rows and for each flag. Raises on a verdict not in `VERDICTS`."""
     with path.open(encoding="utf-8", newline="") as handle:
-        rows = [row for row in csv.DictReader(handle) if (row.get("verdict") or "").strip()]
+        reader = csv.DictReader(handle)
+        if "verdict" not in (reader.fieldnames or []):
+            raise ValueError(f"no 'verdict' column in {path}; save the file comma-separated")
+        rows = [row for row in reader if (row["verdict"] or "").strip()]
     unknown = sorted({row["verdict"].strip() for row in rows} - set(VERDICTS))
     if unknown:
         raise ValueError(f"unknown verdicts {unknown}; use one of {VERDICTS}")
