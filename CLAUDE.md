@@ -123,7 +123,7 @@ Read [website-verification](docs/website-verification.md) before touching `confi
 |---|---|---|---|
 | question | what field does it **work in**? | what is it **registered as**? | what was it **set up to do**? |
 | from | words the company published | its official WZ code | the register's business purpose |
-| values | one of Berlin's 77 in English (`name_en`), or `NONE` | 76 divisions in 20 sections | one of the same 77, or `NONE` |
+| values | one of Berlin's 77 in English (`name_en`), or `NONE` | 87 divisions in 22 sections | one of the same 77, or `NONE` |
 
 Details: [branch-classification](docs/branch-classification.md),
 [purpose-classification](docs/purpose-classification.md). OffeneRegister has no WZ code and no

@@ -62,7 +62,7 @@ Names, email addresses and phone numbers were replaced by [NAME], [EMAIL] and [P
 The fields: the English name you answer with, the German name, and words that typically show it.
 """
 
-_WZ_INSTRUCTIONS = """Second answer, wz_division: the two-digit WZ 2008 division (Abteilung) of the company's MAIN economic
+_WZ_INSTRUCTIONS = """Second answer, wz_division: the two-digit WZ 2025 division (Abteilung) of the company's MAIN economic
 activity as its website shows it. Unlike the technology fields, every business has a division (a
 restaurant is 56). Answer NONE only when the text does not show what the company does.
 

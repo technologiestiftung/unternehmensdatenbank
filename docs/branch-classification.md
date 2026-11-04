@@ -15,7 +15,7 @@ was the most expensive mistake made here.
 | question | which field does the company **work in**? | what is it **registered as**? |
 | decided by | Berlin's list of 77 fields | the Statistisches Bundesamt |
 | filled from | words the company published about itself | its official WZ code |
-| values | one of the 77, or `NONE` | 76 divisions in 20 sections |
+| values | one of the 77, or `NONE` | 87 divisions in 22 sections |
 | needs first | a website somebody downloaded | only the WZ code |
 | judgement involved | yes: keyword weights, thresholds | none, it is a lookup |
 
