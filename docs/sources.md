@@ -91,6 +91,7 @@ Every column can also be corrected in the app (`user_feedback`).
 | Handelsregister documents (Gegenstand, founding date) | 6, 13 | the search page alone is used, and only by hand; documents would be systematic retrieval |
 | A commercial data vendor | many | no contract; whether one comes is open |
 | TED (EU public tenders) | none of the 20 | a notice lists all winners of all lots across countries; identifiers are VAT numbers, not register numbers; winners include individuals, so personal data. 11,113 notices with a Berlin winner (2026-11-04, #104) |
+| Job ads (Bundesagentur für Arbeit, Jobsuche) | which companies are active now, some websites | the portal's terms (2a (3), Stand 08.07.2026) forbid robots and using its interfaces "zum Zweck der Datensammlung und -auswertung"; employers grant the ads' use only for job placement (6b). Only with the BA's consent (#106) |
 
 ## Adding a source
 
