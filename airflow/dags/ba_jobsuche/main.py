@@ -175,7 +175,8 @@ def _make_dag():  # noqa: ANN201
         schedule=None, start_date=datetime(2026, 11, 1, tzinfo=timezone.utc), catchup=False,
         max_active_runs=1, tags=["sources", "manual"],
     ) as dag:
-        pipeline_task("read", run_read, returns=True)
+        # retries=0: every run is started by a person; a retry would read the BA again by itself.
+        pipeline_task("read", run_read, returns=True, retries=0)
     return dag
 
 
