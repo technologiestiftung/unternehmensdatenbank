@@ -33,6 +33,7 @@ def test_other_courts_unreadable_entries_and_addresses_outside_berlin_are_left_o
     assert parse_row(row(city="Frankfurt am Main", postcode="60313")) is None
     assert parse_row(row(city="Berlin-Mitte", postcode="")).city == "Berlin"  # as OffeneRegister stores it
     assert parse_row(row(city="", postcode="13509")) is not None
+    assert parse_row(row(city="Schönefeld bei Berlin", postcode="12529")) is None  # Brandenburg, Berlin's postcode range
     assert parse_row(row(register="GsR 828")) is None  # the GbR register, which we do not hold
 
 

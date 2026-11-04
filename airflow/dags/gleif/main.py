@@ -102,9 +102,10 @@ class LeiRecord:
 
 
 def in_berlin(city: str | None, postcode: str | None) -> bool:
-    """A legal address in Berlin: the city says so, or a Berlin postcode (10115 to 14199)."""
-    if city and "berlin" in city.lower():
-        return True
+    """A legal address in Berlin: the city starts with "Berlin" ("Berlin-Mitte", not "Schönefeld bei
+    Berlin"), or, only when there is no city, a Berlin postcode (10115 to 14199; 12529 is Schönefeld too)."""
+    if city and city.strip():
+        return city.strip().lower().startswith("berlin")
     return bool(postcode and postcode.isdigit() and 10115 <= int(postcode) <= 14199)
 
 
@@ -123,9 +124,8 @@ def parse_row(row: dict[str, str]) -> LeiRecord | None:
     if not match:  # e.g. "GsR 828", the GbR register since 2024, which `company_identifiers` does not hold
         return None
     clean = lambda key: (row.get(COLUMNS[key]) or "").strip() or None  # noqa: E731
-    city = clean("city")
-    if city and "berlin" in city.lower():
-        city = "Berlin"  # "Berlin-Mitte": OffeneRegister and the name match know only "Berlin"
+    # in_berlin passed, so a city is a Berlin one: "Berlin-Mitte", but OffeneRegister and the name match know only "Berlin"
+    city = "Berlin" if clean("city") else None
     return LeiRecord(
         lei=row[COLUMNS["lei"]], name=clean("name") or "", status=STATUS.get(row.get(COLUMNS["status"]) or ""),
         registers=identifier_values(match[1].upper().replace("GNR", "GnR"), match[2]),
