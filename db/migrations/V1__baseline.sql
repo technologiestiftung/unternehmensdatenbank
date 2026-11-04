@@ -1,7 +1,7 @@
 -- Baseline: the whole schema as of 2026-11-04, in one file.
 --
 -- Squashed five times: the 24 migrations of the Osnabrück era, then V1-V9 and V10 of the Berlin
--- rebuild (2026-10-28), then V1-V10 (2026-10-31, #68), then V1-V8 (2026-11-04). They live on in git
+-- rebuild (2026-10-28), then V1-V10 (2026-10-31, #68), then V1-V9 (2026-11-04). They live on in git
 -- history; their reasoning is in the comments of the objects they created. In short:
 --
 --   identifiers and matching   company_identifiers, match columns on source records, merged_into,
@@ -26,7 +26,7 @@
 --   source details             description, terms, schedule; confidence ranges and runs per source (#102)
 --   founding year              established_year in the profile, from the register and schema.org
 --
--- Generated from the play server's database (migrated to V6; V7 and V8 changed rows only) with
+-- Generated from the play server's database (migrated to V6; V7 to V9 changed rows only) with
 -- `pg_restore --schema-only --no-owner`, privileges included, so every grant is exactly what the
 -- migrations left. Role names are Flyway placeholders (`${writer_role}`, `${reader_role}`) so the hub
 -- can use its own, and default privileges apply to whoever runs this file. The materialized views are
