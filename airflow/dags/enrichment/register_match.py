@@ -10,6 +10,8 @@ cannot drift apart:
    (`match_method = 'fuzzy'`, confidence 0.9) and gets the number as an identifier. A deleted company is
    never linked by name: a firm name must only be distinguishable at its place (§ 30 HGB, to be checked),
    so a deleted firm's name can be used again.
+   Only when the caller may create a company: an entry that may only update ours (an inactive GLEIF
+   entity) is matched by register number alone, so a deleted firm never marks a newer namesake dissolved.
 3. Otherwise the company is **created** (`match_method = 'created'`); every company that shared name and
    city becomes an open `match_candidates` row for a person to decide.
 """
@@ -43,7 +45,8 @@ def company_for(
 
     `registers` are the spellings `company_identifiers` may hold the entry under, the first being the one
     written for a company found by name or created. A created company is only its identity here; the
-    caller gives it its fields. With `create=False` an entry we cannot match returns (None, "skipped", []).
+    caller gives it its fields. With `create=False` only the register number links (no name match), and an entry it does not find
+    returns (None, "skipped", []).
     """
     cur.execute(
         "SELECT company_id FROM public.company_identifiers WHERE scheme = 'register' AND value = ANY(%s) LIMIT 1",
@@ -53,7 +56,7 @@ def company_for(
     if row:
         return row[0], "identifier", []
     method, candidates = "identifier", []
-    if city:
+    if city and create:
         # The name key is computed in SQL, by the function the name index and the grant links use.
         # Straight on the published observations, not `v_companies_enriched`: the view computes every
         # company's register fields before it filters, about 10 s per entry.

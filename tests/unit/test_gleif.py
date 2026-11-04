@@ -31,7 +31,7 @@ def test_inactive_is_dissolved_and_a_glued_b_is_read() -> None:
 def test_other_courts_unreadable_entries_and_addresses_outside_berlin_are_left_out() -> None:
     assert parse_row(row(authority="RA000234")) is None  # Düsseldorf
     assert parse_row(row(city="Frankfurt am Main", postcode="60313")) is None
-    assert parse_row(row(city="Berlin-Mitte", postcode="")) is not None
+    assert parse_row(row(city="Berlin-Mitte", postcode="")).city == "Berlin"  # as OffeneRegister stores it
     assert parse_row(row(city="", postcode="13509")) is not None
     assert parse_row(row(register="GsR 828")) is None  # the GbR register, which we do not hold
 
@@ -47,9 +47,11 @@ def test_records_are_read_line_by_line_from_the_csv() -> None:
 def test_a_run_reads_the_change_file_that_covers_the_gap() -> None:
     now = datetime(2026, 11, 4, tzinfo=timezone.utc)
     assert file_to_read(None, now) == "full"
-    assert file_to_read("2026-10-29T00:00:00+00:00", now) == "LastWeek"
-    assert file_to_read("2026-10-20T00:00:00+00:00", now) == "LastMonth"
-    assert file_to_read("2026-09-01T00:00:00+00:00", now) == "full"
+    assert file_to_read("2026-11-03T00:00:00+00:00", now) == "LastWeek"  # the daily run
+    assert file_to_read("2026-10-30T00:00:00+00:00", now) == "LastWeek"  # 5 days: inside the 7-day file
+    assert file_to_read("2026-10-29T00:00:00+00:00", now) == "LastMonth"
+    assert file_to_read("2026-10-07T00:00:00+00:00", now) == "LastMonth"  # 28 days
+    assert file_to_read("2026-10-06T00:00:00+00:00", now) == "full"
 
 
 def test_capitals_and_punctuation_do_not_make_a_new_name() -> None:

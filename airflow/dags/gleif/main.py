@@ -13,18 +13,21 @@ show `active`, GLEIF says inactive.
 
 **What a run reads.** GLEIF publishes the full file (485 MB zipped, 5 GB of CSV) and change files: every
 record changed in the last day, week or month. The first run reads the full file; later ones the change
-file that covers the time since the last good run (`pipeline_state` gleif / last_run): a week, a month,
-else the full file again. Each is streamed out of its zip, keeping only `RA000217` rows.
+file that covers the time since the last good run (`pipeline_state` gleif / last_run). The DAG runs
+daily: up to 5 days without a good run the weekly change file, up to 28 the monthly one, else the full
+file again (each change file covers 7 or about 30 days; the margin absorbs a late run). Each is streamed out of its zip, keeping only `RA000217` rows.
 
 **What a run writes**, per LEI: a source record (`external_id` = the LEI), linked by
 `enrichment.register_match` (register number, then a unique live name in the same city, else a new
-company; only an active entity is created, an inactive one only updates a company we have), the LEI as
+company; only an active entity is created or matched by name, an inactive one only updates a company
+that holds its register number), the LEI as
 an identifier, and name, legal form, address, postcode, city and register status as
 observations dated by GLEIF's last update of the record (`source_updated_at`), so they compete by age with
 OffeneRegister's values. Status: `ACTIVE` is `active`, `INACTIVE` is `dissolved` (the user's decision of
 2026-11-04). A value GLEIF no longer gives drops to confidence 0. The legal form is read from the end of
 the name, as for the other register sources (`enrichment.register_names`). A name that differs from
-ours only in case or punctuation is not written: GLEIF often writes capitals. Measured on the local copy:
+another source's only in case or punctuation is not written: GLEIF often writes capitals. Once GLEIF's
+own name has won, a re-read writes it again rather than dropping it. Measured on the local copy:
 of 8,860 names of companies we had, 7,289 identical, 338 case or punctuation only, 1,233 other words,
 mostly renames and changes of legal form ("VOSTELL Holding UG" became "VOSTELL Holding GmbH").
 """
@@ -63,7 +66,7 @@ LATEST = "https://goldencopy.gleif.org/api/v2/golden-copies/publishes/latest"
 BERLIN_REGISTER = "RA000217"
 _STATE = ("gleif", "last_run")
 #: The change file a run reads, by days since the last good run; older than all of them: the full file.
-DELTAS = ((6, "LastWeek"), (29, "LastMonth"))
+DELTAS = ((5, "LastWeek"), (28, "LastMonth"))
 TIMEOUT_S = 600
 
 _REGISTER = re.compile(r"\b(HRA|HRB|VR|GnR|PR)\s*(\d+)", re.IGNORECASE)
@@ -120,10 +123,13 @@ def parse_row(row: dict[str, str]) -> LeiRecord | None:
     if not match:  # e.g. "GsR 828", the GbR register since 2024, which `company_identifiers` does not hold
         return None
     clean = lambda key: (row.get(COLUMNS[key]) or "").strip() or None  # noqa: E731
+    city = clean("city")
+    if city and "berlin" in city.lower():
+        city = "Berlin"  # "Berlin-Mitte": OffeneRegister and the name match know only "Berlin"
     return LeiRecord(
         lei=row[COLUMNS["lei"]], name=clean("name") or "", status=STATUS.get(row.get(COLUMNS["status"]) or ""),
         registers=identifier_values(match[1].upper().replace("GNR", "GnR"), match[2]),
-        street=clean("street"), postcode=clean("postcode"), city=clean("city"), updated=row[COLUMNS["updated"]],
+        street=clean("street"), postcode=clean("postcode"), city=city, updated=row[COLUMNS["updated"]],
     )
 
 
@@ -190,8 +196,11 @@ def write_record(cur: Any, record: LeiRecord, *, source_id: str, sync_run_id: st
     )
     fields = record.fields()
     cur.execute(
-        "SELECT value_text FROM public.company_field_observations WHERE company_id = %s AND field_name = 'name' AND is_canonical",
-        (company_id,),
+        """
+        SELECT value_text FROM public.company_field_observations
+        WHERE company_id = %s AND field_name = 'name' AND is_canonical AND source_id <> %s
+        """,
+        (company_id, source_id),
     )
     current = cur.fetchone()
     if current and same_name(current[0], record.name):
@@ -271,7 +280,7 @@ def _make_dag():  # noqa: ANN201
     with DAG(
         dag_id=DAG_ID,
         description="Berlin companies with an LEI from GLEIF's open data: new firms, names, addresses, status",
-        schedule="@weekly", start_date=datetime(2026, 11, 1, tzinfo=timezone.utc), catchup=False,
+        schedule="@daily", start_date=datetime(2026, 11, 1, tzinfo=timezone.utc), catchup=False,
         max_active_runs=1, tags=["sources", "register"],
     ) as dag:
         load = pipeline_task("load", run_load)
