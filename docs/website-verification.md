@@ -112,8 +112,14 @@ Still never guessed: a reordered compound
 (`bildungsakademie-berlin.de` for "Akademie für berufliche Weiterbildung"), a brand unrelated to the
 name (`visitberlin.de`). These need a source that does not guess: Common Crawl, or a search API (#92).
 
+**Initials measured and not adopted** (2026-11-04): the first letters of three or more name words,
+alone and with the learned affixes (`hma-berlin.de` for "Humboldt Moot Association", found in the #96
+hand check). On the test set it guessed that one site and none of the other 106 misses, for 0.6 to
+1.0 more DNS lookups per company (21.8 to 22.4 on the 292 found sites). `hma-berlin.de` stays in the
+test set as a hand-found miss.
+
 **Measuring a change:** `scripts/url_discovery_test_set.csv` (register entry and host only; sole traders
-left out, because their domain can carry the owner's name) holds 106 of the 110, the websites found
+left out, because their domain can carry the owner's name) holds 106 of the 110, the 4 websites found
 by hand, and 292 of the 300 sampled hits; `scripts/measure_url_guesses.py` reports
 how many each group gets guessed. `--draw-hand-sample` draws the 200 companies for the hand search.
 
