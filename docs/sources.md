@@ -34,6 +34,7 @@ Record counts are from the local database on 2026-11-02.
 | `common_crawl` | Impressum pages in the Common Crawl that name a Berlin register number | DAG `common_crawl`: 300 index blocks a run, each website verified like a guessed domain | weekly | 0 here (pilot: 21 websites from 5,000 pages, #56) |
 | `impressum_contacts` | email and phone from the Impressum of the proven website | DAG `website_contacts` | after discovery | 150 |
 | `website_keywords` | keywords from meta tags and services/products headings | DAG `website_keywords` | after discovery | 150 |
+| `structured_data` | the founding date or year a company's own website states in its structured data (schema.org) | DAG `structured_data`: reads stored pages of the published website, no downloads | weekly | 16 (local, 2026-11-04) |
 | `branch_classifier` | Technologiefeld from the keywords on the website ([branch-classification](branch-classification.md)) | DAG `technology_field`; a spaCy text classifier may fill gaps | after discovery | 542 |
 | `spacy_ner` | Geschäftsführer names a spaCy model finds on the Impressum | DAG `manager_ner_extract` | after discovery | 72 |
 | `foerderkatalog` | grants of the federal government (Förderkatalog des Bundes) | DAG `foerderkatalog`, into `company_fundings`, linked by name and city | monthly | grants table |
@@ -61,7 +62,7 @@ The goal is one record per Berlin company with 20 columns. Counts are from the l
 | 3 | Umsatz | `revenue` | no source yet | 0 |
 | 4 | Förderungen | `funding_count`, `funding_total_eur`, `fundings` | `foerderkatalog`, `berlin_zuwendungen` | 5,189 companies with a grant |
 | 5 | WZ-Nummer | `wz_code` | no source yet: OffeneRegister has none | 0 |
-| 6 | Gründungsdatum | `established_at` | no source yet | 0 |
+| 6 | Gründungsdatum | `established_at`, `established_year` | `structured_data` (a year alone goes to `founding_year`, V6) | year 16, date 1 (local, 2026-11-04) |
 | 7 | Adresse | `address`, `postcode`, `city` | OffeneRegister, `gleif` (the legal address, newer); seat from `handelsregister_lookup` | city 296,897; street and postcode 116,527 |
 | 8 | Rechtsform | `legal_form` | OffeneRegister, `gleif` (both read from the end of the name) | 257,244 |
 | 9 | Cluster (n=5) | — | removed with #47; comes back with a classifier | — |

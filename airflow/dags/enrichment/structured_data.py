@@ -178,7 +178,8 @@ def organizations(html: str) -> list[dict[str, Any]]:
     Each entry holds only plain strings, so a caller never has to defend against the shapes JSON-LD
     allows:
 
-        name, legal_name, postcodes (list), localities (list), street, telephone, email, vat_id
+        name, legal_name, postcodes (list), localities (list), street, telephone, email, vat_id,
+        founding_date (as the page wrote it)
 
     An empty list means the page published nothing usable — which is the common case, and not an
     error.
@@ -218,6 +219,7 @@ def organizations(html: str) -> list[dict[str, Any]]:
                 "telephone": _text(node.get("telephone")),
                 "email": _text(node.get("email")),
                 "vat_id": _text(node.get("vatID")) or _text(node.get("taxID")),
+                "founding_date": _text(node.get("foundingDate")),
             }
         )
     return found

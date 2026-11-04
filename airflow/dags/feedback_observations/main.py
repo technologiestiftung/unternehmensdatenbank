@@ -69,6 +69,8 @@ FIELDS: dict[str, tuple[str, str]] = {
     "register_status": ("register_status", "register_status"),
     "wz_code": ("wz_code", "wz_code"),
     "established_at": ("established_at", "date"),
+    # The app's "Gründung" column (V6): a correction keeps its year only; the column shows a year.
+    "established_year": ("founding_year", "year"),
     "business_purpose": ("business_purpose", "text"),
     "employee_count": ("employee_count", "integer"),
     "revenue": ("revenue", "number"),
@@ -84,6 +86,8 @@ NOT_CORRECTABLE = {"fundings", "register_announcement", "registration_number"}
 #: Shown as several values at once: a vote is about one of them, and confirming one denies no other.
 LIST_FIELDS = {"management", "activity_keywords"}
 
+#: A year alone, or the year of a date ("2010", "2010-05-01", "01.05.2010").
+_YEAR = re.compile(r"^(?:\d{1,2}\.\d{1,2}\.)?(\d{4})(?:-\d{2}(?:-\d{2})?)?$")
 _WZ_CODE = re.compile(r"^\d{2}(\.\d{1,2}(\.\d{1,2})?)?$")
 _THOUSANDS = re.compile(r"^\d{1,3}(\.\d{3})+$")
 _HOST = re.compile(r"^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$")
@@ -139,6 +143,10 @@ def clean(kind: str, raw: str, technology_fields: frozenset[str] = frozenset()) 
             except ValueError:
                 pass
         return None
+    if kind == "year":
+        found = _YEAR.match(text)
+        year = int(found.group(1)) if found else 0
+        return str(year) if 1800 <= year <= date.today().year else None
     if kind in {"integer", "number"}:
         # German notation, as the app is German: "1.200" is 1200, "1.200,5" is 1200.5.
         german = "," in text or _THOUSANDS.match(text)
