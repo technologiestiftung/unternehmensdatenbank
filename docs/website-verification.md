@@ -167,6 +167,13 @@ websites of the #89 test set 1 flagged (sourcepoint.com, kept: a register office
 Impressum). Register entries written with a space (`HR B 61871`) are now read, so such a page can
 be another company's (`REGISTER_MISMATCH`). Both apply when a site is read again (every 90 days), not to stored rows.
 
+**An Impressum outside Berlin is refused too (#111).** `imprint_outside_berlin`: the Impressum gives
+German postcodes, none in Berlin (10115–14199) and none the company's own (a Charlottenburg entry can
+sit outside Berlin). Lifted by the same proof. Measured on the 50 hand-checked sites (2026-11-04): 10
+refused, all wrong (6 namesakes, 1 parent, 3 other organisations), both own sites kept; on 100 proven
+websites of the #89 test set none refused (3 outside Berlin, all kept by their register number or a
+register officer). With the rule above, 14 of the 38 wrong sites of the hand check now drop out.
+
 ## Pages are cached, so extraction changes are cheap to try
 
 `COMBINED_PAGE_CACHE_DIR` turns on a disk cache of raw HTML and status, for measurement runs. Inside
