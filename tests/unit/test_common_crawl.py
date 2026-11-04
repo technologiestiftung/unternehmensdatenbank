@@ -6,7 +6,7 @@ import json
 from enrichment import common_crawl as cc
 import pytest
 
-from common_crawl.main import next_state, own_pages, read_blocks
+from common_crawl.main import count_unknown_pages, next_state, own_pages, read_blocks
 
 
 def _cdx(url: str, status: str = "200", mime: str = "text/html") -> str:
@@ -72,3 +72,15 @@ def test_a_page_naming_more_than_two_of_our_companies_is_a_group_page() -> None:
     matches = [("group.de", "a"), ("group.de", "b"), ("group.de", "c"),
                ("kg.de", "kg"), ("kg.de", "verwaltung"), ("kg.de", "kg")]
     assert own_pages(matches) == {"kg.de"}
+
+
+def test_a_page_counts_as_unknown_only_when_none_of_its_numbers_is_ours() -> None:
+    ours = "Berlin (Charlottenburg) HRB 79428 B"
+    line = {"HRA": 60000, "HRB": 200000}
+    pages = [
+        [("HRB", "794"), ("HRB", "79428")],  # "HRB 794 28": the other reading is ours
+        [("HRB", "23"), ("HRB", "239529")],  # nobody's, and one reading above the line
+        [("HRA", "5000")],                   # nobody's, below the line
+    ]
+    assert count_unknown_pages(pages, {ours}, line) == (2, 1)
+    assert count_unknown_pages(pages, {ours}, {}) == (2, 0)
