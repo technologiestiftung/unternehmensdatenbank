@@ -1,7 +1,7 @@
 """Which of our companies a register entry from another source is: register number first, name second.
 
-Shared by every source that names a Berlin register entry (`register_announcements`, `gleif`), so they
-cannot drift apart:
+Shared by every source that names a Berlin register entry (`register_announcements`, `gleif`,
+`openregister`), so they cannot drift apart:
 
 1. **The register number**, through `company_identifiers` (scheme `register`).
 2. **The name**, when the number is unknown: a change of legal form gets a new number, so the company
