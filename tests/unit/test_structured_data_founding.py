@@ -40,7 +40,9 @@ def test_a_partner_named_by_part_of_the_company_name_does_not_count() -> None:
     key = normalize_company_name_for_search("Siemens Partner Berlin GmbH")
     assert not names_company({"name": "Siemens"}, key)
     assert names_company({"name": "Siemens Partner Berlin"}, key)
-    assert not names_company({"name": "Digital Partner"}, normalize_company_name_for_search("IT Partner GmbH"))
+    it_partner = normalize_company_name_for_search("IT Partner GmbH")
+    assert not names_company({"name": "Bit Partner"}, it_partner)  # inside a word: not the company
+    assert names_company({"name": "IT Partner GmbH Berlin"}, it_partner)
 
 
 def test_pages_that_disagree_on_the_year_give_nothing() -> None:

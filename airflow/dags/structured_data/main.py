@@ -17,8 +17,9 @@ Many sites embed a schema.org business card as JSON-LD (`enrichment.structured_d
   that state it; confidence `CONFIDENCE`, unmeasured, the same as other claims a site makes about
   itself. A value the site no longer states drops to confidence 0.
 
-Measured 2026-11-04 on the full Berlin data's local corpus: 513 companies with stored pages of their
-website, 16 of them state a founding date or year in a node naming them, 1 a full date.
+Measured 2026-11-04 on the full Berlin data's local corpus, with the whole-name rule above: 513
+companies with stored pages of their website, 12 of them state a founding year in a node naming
+them, 0 a full date.
 """
 from __future__ import annotations
 
