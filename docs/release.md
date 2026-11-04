@@ -77,6 +77,12 @@ corpus bucket). `manager_ner_train` publishes every run's metrics there and a pr
 `current.json`; `manager_ner_extract` downloads the current version into `MANAGER_NER_MODEL_DIR`, which
 is only a working copy. The hub needs the bucket and the `CORPUS_S3_*` settings for both.
 
+```bash
+docker build -f airflow/pipelines.Dockerfile -t udb-pipelines airflow
+docker run --rm -e PG_DSN="host=host.docker.internal port=5433 dbname=unternehmensdatenbank user=writer password=writer" \
+  udb-pipelines pipeline_coordinator.main:run_pipeline_coordinator
+```
+
 ### S3 on the hub (#85)
 
 - **The settings reach a pod only through `pipeline_secret`.** A pod gets that secret as its
@@ -97,17 +103,11 @@ is only a working copy. The hub needs the bucket and the `CORPUS_S3_*` settings 
   phone numbers. A privacy review comes before any of it leaves local development (#18).
 - **Check it right after deploying.** In a pod or container of the pipelines image, from the DAGs
   folder: `python -m enrichment.corpus`. It writes `healthcheck/ping` and reads it back; it prints
-  `company corpus: OK` or the S3 error (`SignatureDoesNotMatch`, `AccessDenied`, ...) and exits 1.
+  `company corpus: OK`, or the S3 error (`SignatureDoesNotMatch`, `AccessDenied`, ...) and exits 1.
 - **A wrong key is logged, once.** A store that fails behaves like an empty one, so a DAG does not
   stop over its cache. Each S3 error is logged once per task run as a warning; a wrong key, a missing
   permission or a missing bucket also switches the store off for the rest of the run. Model reads and
   writes (`model_store`) raise instead, so the model DAGs fail.
-
-```bash
-docker build -f airflow/pipelines.Dockerfile -t udb-pipelines airflow
-docker run --rm -e PG_DSN="host=host.docker.internal port=5433 dbname=unternehmensdatenbank user=writer password=writer" \
-  udb-pipelines pipeline_coordinator.main:run_pipeline_coordinator
-```
 
 ### When a task fails
 
