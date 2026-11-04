@@ -20,18 +20,11 @@ deletions and mergers name liquidators and officers. Two requests a week; the po
 allow 60 an hour.
 
 **Every announcement becomes a source record** (`external_id` = the portal's id), linked to its
-company by register number through `company_identifiers`. On 2026-10-28, 451 of the 900 matched a
-company we had, every one of them `active` in the 2017–2019 snapshot. An unknown register number can
-still be a company we have, under its old number (a change of legal form gets a new one), so the name
-comes second (`name_match`): when exactly one company that is not merged and not `dissolved` has the
-same name key (`normalize_company_name` in SQL) and city, it is linked (`match_method = 'fuzzy'`, confidence 0.9) and gets the
-register number as an identifier. A deleted company is never linked by name: a firm name must only be
-distinguishable at its place (§ 30 HGB, to be checked), so a deleted firm's name can be used again.
-Otherwise the company is **created**: its register number, and name, legal form and city as
-observations of this source (the legal form read as the OffeneRegister import reads it,
-`enrichment.register_names`), `match_method = 'created'`; every company that shared name and city (several live ones, or deleted
-ones) becomes an open `match_candidates` row for a person to decide. On 2026-10-28, 14 of the 425
-companies created without this rule shared name key and city with a company we had (11 `active`),
+company by `enrichment.register_match`: register number first, then a unique live company with the same
+name and city, else a new company (name, legal form and city as observations of this source, the legal
+form read as the OffeneRegister import reads it, `enrichment.register_names`). On 2026-10-28, 451 of the
+900 matched a company we had, every one of them `active` in the 2017–2019 snapshot; 14 of the 425
+companies created without the name rule shared name key and city with a company we had (11 `active`),
 and 66 grant links by name and city would have been lost, because those need a unique name per city.
 Only Berlin's court is read, so only Berlin companies are created.
 
@@ -50,7 +43,7 @@ from datetime import date, datetime, timezone
 from typing import Any
 from urllib.parse import urljoin
 
-from enrichment.register_names import DISSOLVED
+from enrichment.register_match import company_for, record_match
 from pipeline_coordinator.resolver import resolve_register_fields
 from source_enrichment_common import (
     ensure_source,
@@ -166,78 +159,9 @@ def fetch_berlin_page() -> str:
 # --- writing --------------------------------------------------------------------------------
 
 
-def name_match(
-    same_name_and_city: list[tuple[str, str | None]],
-) -> tuple[str | None, list[tuple[str, str | None]]]:
-    """Fuzzy second: (the company, candidates for a person) from (id, register_status) of the companies
-    sharing name key and city.
-
-    Exactly one that is not `dissolved` is the company. Otherwise all of them are candidates: the
-    announcement's company is created, and a person decides which, if any, it is. None: it is created.
-    """
-    live = [company_id for company_id, status in same_name_and_city if status != DISSOLVED]
-    if len(live) == 1:
-        return live[0], []
-    return None, same_name_and_city
-
-
 def _company_for(cur: Any, item: Announcement, source_id: str) -> tuple[str, str, list[tuple[str, str | None]]]:
-    """The company's id, how it was found ("identifier" | "fuzzy" | "created"), and candidates for a person.
-
-    A created company is only its identity here; `write_announcement` gives it its register fields.
-    """
-    cur.execute(
-        "SELECT company_id FROM public.company_identifiers WHERE scheme = 'register' AND value = %s",
-        (item.register,),
-    )
-    row = cur.fetchone()
-    if row:
-        return row[0], "identifier", []
-    method, candidates = "identifier", []
-    if item.city:
-        # The name key is computed in SQL, by the function the name index and the grant links use.
-        # Straight on the published observations, not `v_companies_enriched`: the view computes every
-        # company's register fields before it filters, about 10 s per announcement.
-        cur.execute(
-            """
-            SELECT n.company_id, st.value_text
-            FROM public.company_field_observations n
-            JOIN public.companies c ON c.id = n.company_id AND c.merged_into IS NULL
-            JOIN public.company_field_observations ci
-              ON ci.company_id = n.company_id AND ci.field_name = 'city' AND ci.is_canonical
-             AND lower(ci.value_text) = lower(%s)
-            LEFT JOIN public.company_field_observations st
-              ON st.company_id = n.company_id AND st.field_name = 'register_status' AND st.is_canonical
-            WHERE n.field_name = 'name' AND n.is_canonical
-              AND public.normalize_company_name(n.value_text) = public.normalize_company_name(%s)
-            ORDER BY n.company_id
-            """,
-            (item.city, item.name),
-        )
-        match, candidates = name_match([(r[0], r[1]) for r in cur.fetchall()])
-        if match:
-            row, method = (match,), "fuzzy"
-    if row is None:
-        method = "created"
-        cur.execute(
-            """
-            INSERT INTO public.companies (metadata)
-            VALUES (jsonb_build_object('created_by', %s::text))
-            RETURNING id
-            """,
-            (SOURCE_KEY,),
-        )
-        row = cur.fetchone()
-    company_id = row[0]
-    cur.execute(
-        """
-        INSERT INTO public.company_identifiers (company_id, scheme, value, source_id)
-        VALUES (%s, 'register', %s, %s)
-        ON CONFLICT (scheme, value) DO NOTHING
-        """,
-        (company_id, item.register, source_id),
-    )
-    return company_id, method, candidates
+    return company_for(cur, registers=[item.register], name=item.name, city=item.city, source_id=source_id,
+                       created_by=SOURCE_KEY)
 
 
 def register_fields(item: Announcement) -> dict[str, str]:
@@ -260,26 +184,7 @@ def write_announcement(cur: Any, item: Announcement, *, source_id: str, sync_run
         cur, company_id=company_id, source_id=source_id, external_id=f"rb:{item.portal_id}",
         external_url=URL, source_company_name=item.name, source_payload=payload,
     )
-    # Set once: on a re-run a created company is found by its identifier, and that must not overwrite
-    # "created" on the record that created it.
-    cur.execute(
-        """
-        UPDATE public.company_source_records
-        SET match_method = %s, match_confidence = %s, matched_at = now()
-        WHERE id = %s AND match_method IS NULL
-        """,
-        (method, 0.9 if method == "fuzzy" else 1.0, record_id),
-    )
-    for candidate_id, register_status in candidates:
-        cur.execute(
-            """
-            INSERT INTO public.match_candidates (source_record_id, company_id, score, reasons, status)
-            VALUES (%s, %s, 0.9, jsonb_build_object('normalized_name', true, 'city', true,
-                                                    'register_status', %s::text), 'open')
-            ON CONFLICT DO NOTHING
-            """,
-            (record_id, candidate_id, register_status),
-        )
+    record_match(cur, record_id=record_id, method=method, candidates=candidates)
     if method == "created":
         for field, value in register_fields(item).items():
             insert_text_observation(
