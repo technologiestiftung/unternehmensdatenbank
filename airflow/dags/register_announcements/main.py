@@ -267,8 +267,8 @@ def run_read() -> None:
 def _make_dag():  # noqa: ANN201
     try:
         from airflow import DAG
-        from airflow.providers.standard.operators.python import PythonOperator
         from airflow.providers.standard.operators.trigger_dagrun import TriggerDagRunOperator
+        from pipeline_task import pipeline_task
     except ImportError:
         return None
 
@@ -278,7 +278,7 @@ def _make_dag():  # noqa: ANN201
         schedule="@weekly", start_date=datetime(2026, 10, 1, tzinfo=timezone.utc), catchup=False,
         max_active_runs=1, tags=["sources", "register"],
     ) as dag:
-        read = PythonOperator(task_id="read_announcements", python_callable=run_read)
+        read = pipeline_task("read_announcements", run_read)
         coordinate = TriggerDagRunOperator(
             task_id="trigger_pipeline_coordinator", trigger_dag_id="pipeline_coordinator",
             wait_for_completion=False,
