@@ -29,6 +29,7 @@ Record counts are from the local database on 2026-11-02.
 | `gleif` | GLEIF, the LEI registry (open data, CC0): legal name, legal address and status of Berlin register entries that have an LEI. No officers | DAG `gleif`: GLEIF's full file once, then daily the weekly change file (up to 5 days without a good run), the monthly one (up to 28), else the full file again; only Charlottenburg entries with a Berlin address. Creates the active companies we lack (4,781 measured on 2026-11-04, most founded after 2019) | daily | 13,500 (measured on 2026-11-04, not yet loaded) |
 | `handelsregister_lookup` | the Handelsregister search on handelsregister.de: today's name, seat and status | DAG `handelsregister_lookup`: one search per company by register number, ≤50 per run. **Started by hand only**: the portal's terms forbid systematic retrievals (Nutzungsordnung, Ziffer 3) | by hand | 2 |
 | `wirtschaftsatlas` | Berlin Partner's Wirtschaftsatlas Berlin: about 7,600 companies with website, in Berlin's industry layers (AI, FinTech, Robotik, ...) | DAG `wirtschaftsatlas`: downloads the map's company layers, matches by name and postcode, verifies each website like a Wikidata proposal. **Started by hand only**: the Impressum asks for Berlin Partner's prior consent (#105) | by hand | 2,253 (2026-11-04) |
+| `register_crosslink` | discovery's own reads: a guessed site that prints another of our companies' register number | DAG `register_crosslink`: proposes the site to that company, verified like a Common Crawl proposal (#112) | weekly | 6,048 proposals (local, 2026-11-04) |
 | `website_discovery` | the company's own website | DAG `website_discovery`: guesses domains from the name, reads the Impressum, keeps a site only if the page proves it is that company ([website-verification](website-verification.md)) | hourly batches | 65,587 |
 | `wikidata` | official websites (property P856) Wikidata lists for Berlin organisations | DAG `wikidata`: one SPARQL query, each website verified like a guessed domain | daily | 0 here (531 matched in a local copy, 2026-10-30) |
 | `common_crawl` | Impressum pages in the Common Crawl that name a Berlin register number | DAG `common_crawl`: 300 index blocks a run, each website verified like a guessed domain | weekly | 0 here (pilot: 21 websites from 5,000 pages, #56) |
@@ -67,7 +68,7 @@ The goal is one record per Berlin company with 20 columns. Counts are from the l
 | 8 | Rechtsform | `legal_form` | OffeneRegister, `gleif` (both read from the end of the name) | 257,244 |
 | 9 | Cluster (n=5) | — | removed with #47; comes back with a classifier | — |
 | 10 | Technologiefeld | `technology_field` | `branch_classifier` | 194 |
-| 11 | Website | `website` | `website_discovery`, `wikidata`, `common_crawl`, `wirtschaftsatlas` | 6,090 |
+| 11 | Website | `website` | `website_discovery`, `wikidata`, `common_crawl`, `wirtschaftsatlas`, `register_crosslink` | 6,090 |
 | 12 | Geschäftsführung / Kontakt | `management` | register officers (`import_register_managers.py`), `spacy_ner`; email and phone from `impressum_contacts`, stored, not shown | names 111,374 |
 | 13 | Tätigkeitsbeschreibung | `business_purpose`, `activity_keywords` | `website_keywords` (published once 500 companies are read); OffeneRegister has no purpose | purpose 0 |
 | 14 | Kommentar | `comments` | people in the app | — |
