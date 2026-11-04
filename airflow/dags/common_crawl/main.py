@@ -97,7 +97,7 @@ def run_harvest() -> int:
             source_id = _source_id(cur)
             sync_run_id = start_sync_run(cur, source_id=source_id)
             proposed = propose(cur, found, source_id=source_id, crawl=crawl)
-            unknown, new_firms = unknown_numbers(cur, found)
+            unknown, new_firms = unknown_pages(cur, found)
             state["next"] = start + len(blocks)
             cur.execute(
                 """
@@ -109,7 +109,8 @@ def run_harvest() -> int:
             finish_sync_run(cur, sync_run_id=sync_run_id, records_seen=len(records), records_created=proposed,
                             records_updated=0, records_failed=0)
         log.info("%s blocks %d-%d of %d: %d Impressum pages, %d with a Berlin register number, %d proposals;"
-                 " %d register numbers we do not have, %d of them above the OffeneRegister range (#99).",
+                 " %d pages naming only HRA/HRB numbers we do not have, %d of them one above the OffeneRegister"
+                 " range (#99, this run only).",
                  crawl, start, state["next"], len(state["blocks"]), len(records), len(found), proposed,
                  unknown, new_firms)
         return len(blocks)
@@ -143,21 +144,30 @@ def _registers(record: cc.Record) -> list[tuple[str, str]]:
         return []
 
 
-def unknown_numbers(cur: Any, found: list[tuple[cc.Record, list[tuple[str, str]]]]) -> tuple[int, int]:
-    """(Berlin register numbers on these pages we do not have, how many of them are above the
-    OffeneRegister range). Counted only, to decide whether companies should be created from such pages
-    (#99): 1 of 14 pages in a 100-block sample of CC-MAIN-2026-43 named one."""
-    numbers = {(kind, number) for _, registers in found for kind, number in registers}
-    if not numbers:
+def unknown_pages(cur: Any, found: list[tuple[cc.Record, list[tuple[str, str]]]]) -> tuple[int, int]:
+    """(Pages whose Berlin HRA/HRB numbers are all not ours, how many of them name one above the
+    OffeneRegister range), for this run only: a page seen in two runs counts twice. Counted only, to
+    decide whether companies should be created from such pages (#99): 1 of 14 pages in a 100-block
+    sample of CC-MAIN-2026-43 named one."""
+    pages = [[(kind, number) for kind, number in registers if kind in ("HRA", "HRB")] for _, registers in found]
+    pages = [page for page in pages if page]
+    if not pages:
         return 0, 0
-    values = [value for kind, number in numbers for value in cc.identifier_values(kind, number)]
+    values = [value for page in pages for kind, number in page for value in cc.identifier_values(kind, number)]
     cur.execute("SELECT value FROM public.company_identifiers WHERE scheme = 'register' AND value = ANY(%s)",
                 (values,))
     known = {value for (value,) in cur.fetchall()}
-    unknown = [(kind, number) for kind, number in numbers
-               if not known.intersection(cc.identifier_values(kind, number))]
-    line = snapshot_line(cur) if unknown else {}
-    return len(unknown), sum(is_new_firm(f"{kind} {number}", line) for kind, number in unknown)
+    return count_unknown_pages(pages, known, snapshot_line(cur))
+
+
+def count_unknown_pages(pages: list[list[tuple[str, str]]], known: set[str],
+                        line: dict[str, int]) -> tuple[int, int]:
+    """`unknown_pages` without the database. A page with any known reading does not count, so the other
+    reading of a spaced number (`HRB 794 28`, issue #30) cannot make an own page look unknown."""
+    unknown = [page for page in pages
+               if not any(known.intersection(cc.identifier_values(kind, number)) for kind, number in page)]
+    return len(unknown), sum(any(is_new_firm(f"{kind} {number}", line) for kind, number in page)
+                             for page in unknown)
 
 
 def own_pages(matches: list[tuple[str, str]]) -> set[str]:
