@@ -228,14 +228,17 @@ def planned_observations(
         people = typed | field_confirmed.get(value, set())
         against = rejected[claim] if key in LIST_FIELDS else rejected[claim].union(
             *(authors for other, authors in field_confirmed.items() if other != value))
-        planned.append({
+        row = {
             "company_id": company, "field_name": FIELDS[key][0], "value": spelling[claim],
             "confidence": confidence(len(people), len(against),
                                      filled=filled is None or (company, FIELDS[key][0]) in filled),
             "agree": len(people), "disagree": len(against),
             "voted_at": max((voted_at[(company, key, a)] for a in people if (company, key, a) in voted_at),
                             default=None),
-        })
+        }
+        planned.append(row)
+        if key == "established_at" and (company, "established_year", value[:4]) not in agree:
+            planned.append({**row, "field_name": "founding_year", "value": value[:4]})
     return planned, dict(skipped)
 
 

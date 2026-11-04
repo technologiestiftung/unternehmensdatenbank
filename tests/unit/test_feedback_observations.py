@@ -105,6 +105,20 @@ def test_the_app_key_becomes_the_coordinators_field_name() -> None:
     assert {row["field_name"] for row in planned} == {"ceo_name_or_contact", "deeptech_class"}
 
 
+def test_a_corrected_date_also_corrects_the_shown_year() -> None:
+    planned, _ = planned_observations([vote(p, field="established_at", correction="01.03.2012", value="2010-05-01")
+                                       for p in "ab"])
+    assert {(row["field_name"], row["value"], row["confidence"]) for row in planned} == {
+        ("established_at", "2012-03-01", 0.60), ("founding_year", "2012", 0.60)}
+
+
+def test_a_year_people_typed_is_not_planned_twice_by_a_date_in_that_year() -> None:
+    planned, _ = planned_observations([vote("a", field="established_at", correction="2012-03-01", value="2010-05-01"),
+                                       vote("b", field="established_year", correction="2012", value="2010")])
+    assert sorted((row["field_name"], row["value"]) for row in planned) == [
+        ("established_at", "2012-03-01"), ("founding_year", "2012")]
+
+
 def test_invalid_and_uncorrectable_corrections_are_counted_and_skipped() -> None:
     planned, skipped = planned_observations([
         vote("b", field="technology_field", correction="Raketenbau"),
