@@ -52,6 +52,6 @@ def test_every_dag_module_can_be_imported_with_its_details() -> None:
     for module in ("ba_jobsuche", "berlin_zuwendungen", "common_crawl", "cordis", "foerderkatalog", "gleif",
                    "handelsregister_lookup", "openregister", "register_announcements", "register_crosslink",
                    "structured_data", "feedback_observations", "website_discovery", "wikidata", "wirtschaftsatlas",
-                   "technology_field", "website_contacts", "manager_ner", "website_keywords"):
+                   "technology_field", "website_contacts", "impressum_address", "manager_ner", "website_keywords"):
         details = importlib.import_module(f"{module}.main").DETAILS
         assert isinstance(details, SourceDetails) and details.description and details.schedule, module
