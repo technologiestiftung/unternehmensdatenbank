@@ -190,6 +190,7 @@ def planned_observations(
     rejected: dict[tuple[str, str, Any], set[str]] = defaultdict(set)
     skipped: dict[str, int] = defaultdict(int)
     voted_at: dict[tuple[str, str, str], Any] = {}
+    year_of: dict[tuple[str, str], tuple[str, str, Any]] = {}
     for (company, key, author, _), vote in latest.items():
         when = vote.get("updated_at")
         if when is not None and (voted_at.get((company, key, author)) is None or when > voted_at[(company, key, author)]):
@@ -222,6 +223,10 @@ def planned_observations(
             when, year_vote = vote.get("updated_at"), (company, "established_year", author)
             if when is not None and (voted_at.get(year_vote) is None or when > voted_at[year_vote]):
                 voted_at[year_vote] = when
+        if key in {"established_at", "established_year"}:
+            year_claim = claims[-1][0]
+            agree.get(year_of.get((company, author)), set()).discard(author)
+            year_of[(company, author)] = year_claim
         for claim, claimed in claims:
             agree[claim].add(author)
             rejected[claim].discard(author)

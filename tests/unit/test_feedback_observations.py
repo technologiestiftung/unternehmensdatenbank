@@ -129,6 +129,15 @@ def test_a_date_and_a_typed_year_are_two_people_behind_the_year() -> None:
     assert years(planned) == [("2012", 2)]
 
 
+def test_a_persons_newer_date_replaces_their_older_typed_year() -> None:
+    planned, _ = planned_observations([
+        {**vote("a", field="established_year", correction="2013", value="2010"), "updated_at": date(2026, 1, 1)},
+        {**vote("a", field="established_at", correction="01.03.2012", value="2010-05-01"), "updated_at": date(2026, 2, 1)},
+    ], filled=set())
+    shown = {row["value"]: (row["agree"], row["confidence"]) for row in planned if row["field_name"] == "founding_year"}
+    assert shown["2012"] == (1, 0.60) and shown.get("2013", (0, 0.0)) == (0, 0.0)
+
+
 def test_one_date_correction_does_not_override_a_year_a_website_gives() -> None:
     planned, _ = planned_observations([vote("a", field="established_at", correction="2012-03-01", value="")],
                                       filled={(COMPANY, "founding_year")})
