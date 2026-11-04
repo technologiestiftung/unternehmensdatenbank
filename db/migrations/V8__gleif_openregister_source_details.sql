@@ -1,4 +1,4 @@
--- GLEIF (#88) and OpenRegister (#88) came after V4, so the app's source page showed no origin, text or
+-- GLEIF and OpenRegister (#88) came after V4, so the app's source page showed no origin, text or
 -- terms for them (ensure_source registers a source without these columns). Filled here like V4 did.
 INSERT INTO public.sources (key, name, source_type, base_url, description, terms, terms_url, schedule) VALUES
   ('gleif', 'GLEIF (LEI records, Berlin register)', 'register', 'https://www.gleif.org',
@@ -14,3 +14,8 @@ ON CONFLICT (key) DO UPDATE SET
   terms = EXCLUDED.terms,
   terms_url = EXCLUDED.terms_url,
   schedule = EXCLUDED.schedule;
+
+-- The Wirtschaftsatlas terms no longer name the consent request (#105) on the app's page.
+UPDATE public.sources
+   SET terms = 'Laut Impressum braucht jede Verwendung die vorherige Zustimmung von Berlin Partner. Deshalb startet jeden Lauf ein Mensch.'
+ WHERE key = 'wirtschaftsatlas';
