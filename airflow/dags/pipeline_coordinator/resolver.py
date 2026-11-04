@@ -437,8 +437,8 @@ def resolve_deeptech_and_ai(cur: Any) -> int:
 
 def resolve_founding_year(cur: Any) -> int:
     """A founding year where only the year is known (V6, #101). `established_at` is a date, and a bare
-    year in it would break `v_companies_enriched`; the profile shows the year of `established_at`,
-    else this."""
+    year in it would break `v_companies_enriched`; the profile shows this, else the year of
+    `established_at`."""
     return _apply_canonical(cur, logical_field="founding_year", obs_field_names=["founding_year"],
                             value_col="value_text", min_confidence=_FIELD_MIN_CONF)
 

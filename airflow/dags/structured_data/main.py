@@ -5,17 +5,20 @@ Many sites embed a schema.org business card as JSON-LD (`enrichment.structured_d
 
 - **Which pages.** Only the stored pages (`company_documents`, the corpus) of the company's
   *published* website, so a candidate site of another company never speaks for it.
-- **Which nodes.** Only a business node that names the company (its name or legal name, without the
-  legal form, contains the company's name or the other way round), so a page about a client or a
-  partner does not give its founding date to the site's owner.
-- **What it writes.** A full date becomes `established_at` ('YYYY-MM-DD'); a year alone becomes
-  `founding_year` ('YYYY', V6), never 1 January of that year, a precision the page did not claim.
-  Pages disagreeing on the year write nothing. Dated by the page's read date; confidence
-  `CONFIDENCE`, unmeasured, the same as other claims a site makes about itself. A value the site no
-  longer states drops to confidence 0.
+- **Which nodes.** Only a business node that names the company: its name or legal name, without the
+  legal form, contains the company's whole name as whole words. "Siemens" does not name "Siemens
+  Partner Berlin", so a page about a client or a partner does not give its founding date to the
+  site's owner.
+- **What it writes.** A year becomes `founding_year` ('YYYY', V6). A full date also becomes
+  `established_at` ('YYYY-MM-DD'); a year alone never becomes 1 January, a precision the page did
+  not claim. The profile shows `established_year` = founding_year, else the year of
+  established_at; the app shows the date only when its year equals established_year. Pages
+  disagreeing on the year write nothing. Each value is dated by the newest read date of the pages
+  that state it; confidence `CONFIDENCE`, unmeasured, the same as other claims a site makes about
+  itself. A value the site no longer states drops to confidence 0.
 
-Measured 2026-11-04 on the local corpus (567 pages, 513 companies): 14 companies with a founding
-date in a node naming them, 12 of them a year only.
+Measured 2026-11-04 on the full Berlin data's local corpus: 513 companies with stored pages of their
+website, 16 of them state a founding date or year in a node naming them, 1 a full date.
 """
 from __future__ import annotations
 
@@ -75,26 +78,23 @@ def founding(raw: str | None, today: date | None = None) -> tuple[str, str] | No
 
 
 def names_company(org: dict[str, Any], company_key: str) -> bool:
-    """The node is about this company: its name or legal name contains the company's, or the reverse."""
+    """The node is about this company: its name or legal name contains the company's as whole words."""
     if len(company_key) < 3:
         return False
-    for value in (org.get("name"), org.get("legal_name")):
-        key = normalize_company_name_for_search(value or "")
-        if key and (company_key in key or key in company_key):
-            return True
-    return False
+    whole = re.compile(rf"(?<!\w){re.escape(company_key)}(?!\w)")
+    return any(whole.search(normalize_company_name_for_search(value or ""))
+               for value in (org.get("name"), org.get("legal_name")))
 
 
-def decide(values: list[tuple[str, str]]) -> tuple[str, str] | None:
-    """One value from what the pages state: the date if every value has its year, else the year if
-    they all agree on it, else nothing."""
+def decide(values: list[tuple[str, str]]) -> list[tuple[str, str]]:
+    """What to write from what the pages state: the year if they all agree on it, plus the date if
+    exactly one date is stated; nothing if the years disagree."""
     years = {value[:4] for _, value in values}
     if len(years) != 1:
-        return None
-    dates = sorted({value for field, value in values if field == "established_at"})
-    if len(dates) == 1:
-        return ("established_at", dates[0])
-    return ("founding_year", years.pop()) if not dates else None
+        return []
+    decided = [("founding_year", years.pop())]
+    dates = {value for field, value in values if field == "established_at"}
+    return decided + [("established_at", dates.pop())] if len(dates) == 1 else decided
 
 
 def _pages(cur: Any) -> dict[str, dict[str, Any]]:
@@ -122,18 +122,23 @@ def _html(s3_key: str) -> str:
     return (json.loads(gzip.decompress(raw)).get("html") or "") if raw else ""
 
 
-def read_company(name: str, pages: list[tuple[str, str, Any]]) -> tuple[tuple[str, str] | None, dict[str, Any]]:
-    """The value the company's pages state about its founding, and the evidence for the record."""
+def read_company(name: str, pages: list[tuple[str, str, Any]]) -> tuple[list[tuple[str, str, Any]], dict[str, Any]]:
+    """The values the company's pages state about its founding, each with the newest read date of the
+    pages stating it, and the evidence for the record."""
     key = normalize_company_name_for_search(name or "")
     found: list[tuple[str, str]] = []
+    read: list[Any] = []
     evidence: list[dict[str, Any]] = []
     for url, s3_key, read_at in pages:
         for org in sd.organizations(_html(s3_key)):
             parsed = founding(org.get("founding_date"))
             if parsed and names_company(org, key):
                 found.append(parsed)
+                read.append(read_at)
                 evidence.append({"url": url, "stated": org.get("founding_date"), "read_at": read_at.isoformat()})
-    return decide(found), {"evidence": evidence}
+    values = [(field, text, max(at for (_, stated), at in zip(found, read) if stated.startswith(text)))
+              for field, text in decide(found)]
+    return values, {"evidence": evidence}
 
 
 def run_read() -> int:
@@ -150,14 +155,14 @@ def run_read() -> int:
         changed = written = 0
         for company_id, company in companies.items():
             try:
-                value, payload = read_company(company["name"], company["pages"])
+                values, payload = read_company(company["name"], company["pages"])
             except Exception:  # noqa: BLE001  one unreadable page must not stop the rest
                 log.exception("Reading the stored pages of %s failed; tried again next run", company_id)
                 continue
             with connection, connection.cursor() as cur:
-                changed += write(cur, company_id=company_id, company=company, value=value, payload=payload,
+                changed += write(cur, company_id=company_id, company=company, values=values, payload=payload,
                                  source_id=source_id, sync_run_id=sync_run_id)
-                written += value is not None
+                written += bool(values)
         with connection, connection.cursor() as cur:
             finish_sync_run(cur, sync_run_id=sync_run_id, records_seen=len(companies), records_created=written,
                             records_updated=changed, records_failed=0)
@@ -168,25 +173,24 @@ def run_read() -> int:
         connection.close()
 
 
-def write(cur: Any, *, company_id: str, company: dict[str, Any], value: tuple[str, str] | None,
+def write(cur: Any, *, company_id: str, company: dict[str, Any], values: list[tuple[str, str, Any]],
           payload: dict[str, Any], source_id: str, sync_run_id: str) -> int:
-    """Write the value and drop any other this source stated before to 0. Returns 1 if anything changed."""
+    """Write the values and drop any other this source stated before to 0. Returns 1 if anything changed."""
     cur.execute(
         "SELECT field_name, value_text FROM public.company_field_observations"
         " WHERE company_id = %s AND source_id = %s AND field_name = ANY(%s) AND confidence > 0",
         (company_id, source_id, list(FIELDS)),
     )
     before = set(cur.fetchall())
-    if value is None and not before:
+    stated = {(field, text) for field, text, _ in values}
+    if not stated and not before:
         return 0
     record_id, _ = upsert_source_record(
         cur, company_id=company_id, source_id=source_id, external_id=company_id,
         external_url=company["pages"][0][0], source_company_name=company["name"],
-        source_payload={**payload, "value": list(value) if value else None},
+        source_payload={**payload, "values": sorted(stated)},
     )
-    if value:
-        field, text = value
-        read_at = max(read_at for _, _, read_at in company["pages"])
+    for field, text, read_at in values:
         insert_text_observation(
             cur, company_id=company_id, source_record_id=record_id, source_id=source_id,
             sync_run_id=sync_run_id, field_name=field, value_text=text, confidence=CONFIDENCE,
@@ -195,10 +199,10 @@ def write(cur: Any, *, company_id: str, company: dict[str, Any], value: tuple[st
     cur.execute(
         "UPDATE public.company_field_observations SET confidence = 0, updated_at = now()"
         " WHERE company_id = %s AND source_id = %s AND field_name = ANY(%s) AND confidence > 0"
-        " AND (field_name, value_text) IS DISTINCT FROM (%s, %s)",
-        (company_id, source_id, list(FIELDS), value[0] if value else None, value[1] if value else None),
+        " AND field_name || '=' || value_text <> ALL(%s::text[])",
+        (company_id, source_id, list(FIELDS), [f"{field}={text}" for field, text in stated]),
     )
-    return int(before != ({value} if value else set()))
+    return int(before != stated)
 
 
 def _make_dag():  # noqa: ANN201

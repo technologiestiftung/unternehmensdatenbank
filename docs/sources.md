@@ -62,7 +62,7 @@ The goal is one record per Berlin company with 20 columns. Counts are from the l
 | 3 | Umsatz | `revenue` | no source yet | 0 |
 | 4 | Förderungen | `funding_count`, `funding_total_eur`, `fundings` | `foerderkatalog`, `berlin_zuwendungen` | 5,189 companies with a grant |
 | 5 | WZ-Nummer | `wz_code` | no source yet: OffeneRegister has none | 0 |
-| 6 | Gründungsdatum | `established_at`, `established_year` | `structured_data` (a year alone goes to `founding_year`, V6) | year 16, date 1 (local, 2026-11-04) |
+| 6 | Gründungsdatum | `established_at`, `established_year` | `structured_data` (the year goes to `founding_year`, V6; a full date also to `established_at`) | year 16, date 1 (local, 2026-11-04) |
 | 7 | Adresse | `address`, `postcode`, `city` | OffeneRegister, `gleif` (the legal address, newer); seat from `handelsregister_lookup` | city 296,897; street and postcode 116,527 |
 | 8 | Rechtsform | `legal_form` | OffeneRegister, `gleif` (both read from the end of the name) | 257,244 |
 | 9 | Cluster (n=5) | — | removed with #47; comes back with a classifier | — |

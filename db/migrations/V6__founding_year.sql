@@ -5,9 +5,11 @@
 -- 1 January would claim a precision nobody stated. So a year gets its own observation field,
 -- `founding_year` ('YYYY' as text), and the profile shows one value for both:
 --
---   established_year = the year of established_at, else founding_year
+--   established_year = founding_year, else the year of established_at
 --
--- The app shows one column ("Gründung"): the date when it is known, else the year.
+-- founding_year comes first, so a person's correction of the year (user_feedback, priority 50) wins
+-- over a website's date; a source that states a full date writes its year as founding_year too.
+-- The app shows one column ("Gründung"): the date when its year equals established_year, else the year.
 -- People vote on that column under the key `established_year`; a correction becomes a
 -- `founding_year` observation (feedback_observations).
 
@@ -62,8 +64,8 @@ CREATE OR REPLACE VIEW public.v_company_profile_live AS
     obs_keywords.value_text AS activity_keywords,
     obs_announce.value_text AS register_announcement,
     ((obs_announce.metadata ->> 'published_on'::text))::date AS register_announcement_date,
-    COALESCE((EXTRACT(year FROM e.established_at))::integer,
-             CASE WHEN obs_year.value_text ~ '^\d{4}$' THEN (obs_year.value_text)::integer END) AS established_year
+    COALESCE(CASE WHEN obs_year.value_text ~ '^\d{4}$' THEN (obs_year.value_text)::integer END,
+             (EXTRACT(year FROM e.established_at))::integer) AS established_year
    FROM (((((((((((((public.v_companies_enriched e
      LEFT JOIN LATERAL ( SELECT count(*) AS funding_count,
             sum(f.amount_eur) AS funding_total_eur
@@ -120,7 +122,7 @@ CREATE VIEW public.v_company_profile AS
     established_year
    FROM public.company_profile_mv;
 COMMENT ON VIEW public.v_company_profile IS
-  'The target record per company, as of the last refresh_company_profile(). The live definition is v_company_profile_live. established_year is the year of established_at, else the founding_year a source gave (V6).';
+  'The target record per company, as of the last refresh_company_profile(). The live definition is v_company_profile_live. established_year is the canonical founding_year, else the year of established_at (V6).';
 
 -- v_review_results as before, plus the new key.
 CREATE VIEW public.v_review_results AS
@@ -191,7 +193,100 @@ CREATE OR REPLACE VIEW public.v_company_claims AS
      JOIN public.sources s ON ((s.id = o.source_id)))
   WHERE (o.field_name = ANY (ARRAY['name'::text, 'legal_form'::text, 'address'::text, 'postcode'::text, 'city'::text, 'register_status'::text, 'established_at'::text, 'business_purpose'::text, 'wz_code'::text, 'website'::text, 'candidate_url'::text, 'technology_field'::text, 'purpose_field'::text, 'activity_keywords'::text, 'register_announcement'::text, 'ceo_name_or_contact'::text, 'employee_count'::text, 'revenue'::text, 'deeptech_class'::text, 'is_ai'::text, 'founding_year'::text]));
 
--- 5. The new source, described for its page in the app (V4).
+-- 5. Provenance and history of the shown year under the app's key.
+CREATE OR REPLACE VIEW public.v_company_history AS
+ SELECT h.id,
+    h.company_id,
+        CASE h.field_name
+            WHEN 'deeptech_class'::text THEN 'deeptech'::text
+            WHEN 'founding_year'::text THEN 'established_year'::text
+            ELSE h.field_name
+        END AS field_key,
+    h.event,
+    h.value,
+    h.previous_value,
+    h.confidence,
+    h.previous_confidence,
+    s.key AS source_key,
+    s.name AS source_name,
+    h.changed_at
+   FROM (public.company_field_history h
+     LEFT JOIN public.sources s ON ((s.id = h.source_id)));
+
+CREATE OR REPLACE VIEW public.v_field_provenance AS
+ SELECT cfs.company_id,
+        CASE cfs.field_name
+            WHEN 'founding_year'::text THEN 'established_year'::text
+            ELSE cfs.field_name
+        END AS field_name,
+    COALESCE(o.value_text, (o.value_number)::text, (o.value_date)::text) AS value,
+    s.key AS source_key,
+    s.name AS source_name,
+    COALESCE((o.metadata ->> 'verified_by'::text), (o.metadata ->> 'decided_by'::text), s.source_type) AS method,
+    o.confidence,
+    COALESCE((o.metadata -> 'evidence'::text), (o.metadata -> 'keywords'::text)) AS evidence,
+    COALESCE((o.metadata ->> 'imprint_url'::text), (o.metadata ->> 'matched_url'::text)) AS link,
+    COALESCE(o.source_updated_at, o.observed_at) AS observed_at,
+    cfs.selected_at
+   FROM ((public.company_canonical_field_sources cfs
+     JOIN public.company_field_observations o ON ((o.id = cfs.company_field_observation_id)))
+     JOIN public.sources s ON ((s.id = cfs.source_id)))
+UNION ALL
+ SELECT m.company_id,
+    'management'::text AS field_name,
+    m.full_name AS value,
+    s.key AS source_key,
+    s.name AS source_name,
+    COALESCE((o.metadata ->> 'model_version'::text), s.source_type) AS method,
+    o.confidence,
+    (o.metadata -> 'evidence'::text) AS evidence,
+    (o.metadata ->> 'imprint_url'::text) AS link,
+    COALESCE(o.source_updated_at, o.observed_at) AS observed_at,
+    m.updated_at AS selected_at
+   FROM ((public.company_managers m
+     LEFT JOIN public.company_field_observations o ON ((o.id = m.company_field_observation_id)))
+     LEFT JOIN public.sources s ON ((s.id = m.source_id)))
+  WHERE m.is_current
+UNION ALL
+ SELECT l.company_id,
+    'fundings'::text AS field_name,
+    f.fkz AS value,
+    f.source AS source_key,
+    COALESCE(s.name, f.source) AS source_name,
+        CASE l.match_method
+            WHEN 'register_number'::text THEN 'linked by register number'::text
+            ELSE 'linked by recipient name and city'::text
+        END AS method,
+    NULL::numeric AS confidence,
+    NULL::jsonb AS evidence,
+    NULL::text AS link,
+    f.first_seen_at AS observed_at,
+    f.last_seen_at AS selected_at
+   FROM ((public.company_funding_links l
+     JOIN public.company_fundings f ON ((f.fkz = l.fkz)))
+     LEFT JOIN public.sources s ON ((s.key = f.source)))
+UNION ALL
+ SELECT r.company_id,
+    'registration_number'::text AS field_name,
+    ('Amtsgericht '::text || r.value) AS value,
+    s.key AS source_key,
+    s.name AS source_name,
+    'register'::text AS method,
+    NULL::numeric AS confidence,
+    NULL::jsonb AS evidence,
+    NULL::text AS link,
+    r.created_at AS observed_at,
+    r.created_at AS selected_at
+   FROM (( SELECT DISTINCT ON (i.company_id) i.company_id,
+            i.value,
+            i.source_id,
+            i.created_at
+           FROM public.company_identifiers i
+          WHERE (i.scheme = 'register'::text)
+          ORDER BY i.company_id, i.created_at DESC, ("substring"(i.value, '(\d+)\D*$'::text))::bigint DESC NULLS LAST, i.id DESC) r
+     LEFT JOIN public.sources s ON ((s.id = r.source_id)));
+
+-- 6. The new source, described for its page in the app (V4).
 INSERT INTO public.sources (key, name, source_type, description, terms, terms_url, schedule) VALUES
   ('structured_data', 'Structured data on the company website (schema.org)', 'website',
    'Das Gründungsdatum oder -jahr, das die belegte Website einer Firma in ihren strukturierten Daten (schema.org, JSON-LD) über sich selbst angibt. Nur Angaben, die die Firma beim Namen nennen; keine Downloads, nur gespeicherte Seiten.',

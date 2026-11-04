@@ -1,12 +1,15 @@
 """`structured_data.main`: which founding values a page may give, and which node may give them."""
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, datetime
+
+import pytest
 
 from enrichment.structured_data import organizations
 from feedback_observations.main import clean
 from source_enrichment_common import normalize_company_name_for_search
-from structured_data.main import decide, founding, names_company
+import structured_data.main as structured_data
+from structured_data.main import decide, founding, names_company, read_company
 
 TODAY = date(2026, 11, 4)
 
@@ -33,12 +36,38 @@ def test_only_a_node_that_names_the_company_counts() -> None:
     assert not names_company({"name": "Beispiel Technologies"}, "ab")  # too short to compare
 
 
+def test_a_partner_named_by_part_of_the_company_name_does_not_count() -> None:
+    key = normalize_company_name_for_search("Siemens Partner Berlin GmbH")
+    assert not names_company({"name": "Siemens"}, key)
+    assert names_company({"name": "Siemens Partner Berlin"}, key)
+    assert not names_company({"name": "Digital Partner"}, normalize_company_name_for_search("IT Partner GmbH"))
+
+
 def test_pages_that_disagree_on_the_year_give_nothing() -> None:
-    assert decide([("founding_year", "2010"), ("founding_year", "2010")]) == ("founding_year", "2010")
-    assert decide([("founding_year", "2010"), ("established_at", "2010-05-01")]) == ("established_at", "2010-05-01")
-    assert decide([("founding_year", "2010"), ("founding_year", "2012")]) is None
-    assert decide([("established_at", "2010-05-01"), ("established_at", "2010-06-01")]) is None
-    assert decide([]) is None
+    assert decide([("founding_year", "2010"), ("founding_year", "2010")]) == [("founding_year", "2010")]
+    assert decide([("founding_year", "2010"), ("founding_year", "2012")]) == []
+    assert decide([("established_at", "2010-05-01"), ("established_at", "2012-05-01")]) == []
+    assert decide([]) == []
+
+
+def test_a_full_date_also_gives_its_year_so_a_year_correction_can_win() -> None:
+    assert decide([("founding_year", "2010"), ("established_at", "2010-05-01")]) == [
+        ("founding_year", "2010"), ("established_at", "2010-05-01")]
+    # Two dates in the same year: the year stands, the date does not.
+    assert decide([("established_at", "2010-05-01"), ("established_at", "2010-06-01")]) == [("founding_year", "2010")]
+
+
+def test_each_value_is_dated_by_the_pages_that_state_it(monkeypatch: pytest.MonkeyPatch) -> None:
+    def page(stated: str, name: str = "Beispiel Technologies") -> str:
+        return f'<script type="application/ld+json">{{"@type": "Organization", "name": "{name}", "foundingDate": "{stated}"}}</script>'
+    html = {"a": page("2010"), "b": page("2010-05-01"), "c": page("2010"), "d": page("1990", "Kunde AG")}
+    monkeypatch.setattr(structured_data, "_html", html.__getitem__)
+    pages = [("https://beispiel.de/a", "a", datetime(2026, 3, 1)), ("https://beispiel.de/b", "b", datetime(2026, 1, 1)),
+             ("https://beispiel.de/c", "c", datetime(2026, 2, 1)), ("https://beispiel.de/d", "d", datetime(2026, 9, 1))]
+    values, payload = read_company("Beispiel Technologies GmbH", pages)
+    assert values == [("founding_year", "2010", datetime(2026, 3, 1)),
+                      ("established_at", "2010-05-01", datetime(2026, 1, 1))]
+    assert [e["url"] for e in payload["evidence"]] == ["https://beispiel.de/a", "https://beispiel.de/b", "https://beispiel.de/c"]
 
 
 def test_the_founding_date_comes_out_of_json_ld_as_the_page_wrote_it() -> None:

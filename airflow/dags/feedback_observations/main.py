@@ -270,7 +270,9 @@ def filled_fields(cur: Any, votes: list[dict[str, Any]]) -> set[tuple[str, str]]
         (SOURCE_KEY, companies, [f for f, _ in FIELDS.values()] + ["candidate_url"],
          _WEBSITE_MIN_CONF, _FIELD_MIN_CONF),
     )
-    return {(row[0], row[1]) for row in cur.fetchall()}
+    filled = {(row[0], row[1]) for row in cur.fetchall()}
+    # The shown year (V6) is founding_year, else the year of established_at.
+    return filled | {(company, "founding_year") for company, field in filled if field == "established_at"}
 
 
 def run_publish() -> int:
