@@ -96,7 +96,7 @@ python scripts/import_register_managers.py
 
 `V1__baseline.sql` is the whole schema as of 2026-10-31, squashed four times: the first example data set,
 V1-V9 and V10 on 2026-10-28, V1-V10 on 2026-10-31 (#68). Forward-only from here: never edit a
-migration that has run anywhere shared, add new ones as `V{N}__description.sql` (the next is V8), and
+migration that has run anywhere shared, add new ones as `V{N}__description.sql` (the next is V9), and
 run Flyway before Airflow touches the changed schema.
 The headings below and comments in the code keep the pre-squash migration numbers ("V3", "V10") so
 git history finds the reasoning.
@@ -303,7 +303,8 @@ page take 71 s; now 0.65 s.
   'register_number'`); one matching none of our companies stays unlinked.
 - Otherwise by normalised name and city, when exactly one company matches.
 
-`company_fundings` has two sources (`source`): `foerderkatalog` and `berlin_zuwendungen`. Berlin
+`company_fundings` has three sources (`source`): `foerderkatalog`, `berlin_zuwendungen` and `cordis`
+(EU research grants, linked by name and city like the Förderkatalog; [sources](sources.md)). Berlin
 grants keep `recipient_register` and the policy area; only grants to an HRA/HRB entry are loaded
 (22,354 of 55,454). Measured 2026-10-28: 18,427 Berlin grants linked to 3,861 companies, 3,927
 unlinked (most likely companies registered after the snapshot; `berlin_zuwendungen` now creates
