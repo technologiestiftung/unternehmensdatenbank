@@ -137,8 +137,9 @@ verdicts first; a person checked every row, and only the person's verdicts are c
 
 **Decision: these sites are never shown as the website, as today.** They stay listed in the app's
 "all claims" toggle (`v_company_claims`), like every other claim, and nothing more. Instead, the
-signals against a site get sharper: #111 (Impressum abroad, unread register numbers) marks most of the
-wrong ones as wrong, so they drop out of the 0.34 pool; #112 and #113 follow up the rest. The signals:
+signals against a site get sharper: #111 (Impressum abroad, unread register numbers) targets the
+largest group, about 16 of the 38 wrong sites with an Impressum abroad; how many it drops out of the
+0.34 pool is not measured yet. #112 and #113 follow up the rest. The signals:
 an Impressum abroad, register numbers we cannot read yet (`HR B 61871`, Swiss `CH-…`), a page that
 proves another company in our database, and register numbers we do not have at all. Two right sites
 the guesses missed: `hma-berlin.de` (abbreviation plus "berlin", #89) and a "Legal Notice" link
