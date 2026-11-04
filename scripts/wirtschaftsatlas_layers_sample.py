@@ -36,7 +36,7 @@ QUERY = """
     SELECT r.company_id::text, p.name, p.website, array_agg(DISTINCT tf.name_en ORDER BY tf.name_en),
            p.technology_field
     FROM public.company_source_records r
-    JOIN public.sources s ON s.id = r.source_id AND s.key = %s
+    JOIN public.sources s ON s.id = r.source_id AND s.key = %s AND r.is_active
     CROSS JOIN LATERAL jsonb_array_elements_text(r.source_payload -> 'layers') AS layer(path)
     JOIN public.wirtschaftsatlas_layer_fields m ON m.layer = layer.path
     JOIN public.technology_fields tf ON tf.name = m.technology_field
