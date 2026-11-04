@@ -125,5 +125,15 @@ def test_a_total_sent_as_text_is_read_as_a_number(monkeypatch) -> None:
     assert (len(ads), total) == (2, 2)
 
 
+def test_an_answer_with_no_ads_fails_the_run(monkeypatch) -> None:
+    _serve(monkeypatch, _Response(200, {"maxErgebnisse": 0, "ergebnisliste": []}))
+    with pytest.raises(RuntimeError, match="no Berlin ads"):
+        main.read_ads()
+
+
+def test_a_read_with_no_ads_sets_no_record_inactive(monkeypatch) -> None:
+    assert _run(monkeypatch, [], total=0) == []
+
+
 def test_a_full_read_sets_unseen_records_inactive(monkeypatch) -> None:
     assert len(_run(monkeypatch, [_ad("A GmbH", "h1", "10115")], total=1)) == 1
