@@ -216,6 +216,13 @@ Impressum pages carry managing-director names.
   more than 2 of our companies is a group page and proposes nothing: in that run, pages naming 1
   company gave 106 proposals (47 proven), 2 gave 12 (3 proven: a GmbH & Co. KG and its
   Verwaltungs-GmbH, e.g. abion-hotel.de), and one page naming 26 gave 26 (0 proven).
+- **Register crosslink** (DAG `register_crosslink`, #112) reuses what discovery already read: a
+  guessed site that printed another company's register number is proposed to that company. The
+  number on the page has no court (a Hamburg HRB 12345 looks like a Berlin HRB 12345), so each host
+  starts from the URL-pattern base (method `register_crosslink`) and only the page, read again for
+  that company, proves it. A host naming more than 2 of our companies proposes nothing, the Common
+  Crawl rule. Local run on 2026-11-04: 6,048 proposals; of the first 100 checked, 7 proven (all by
+  the own register number), 3 for companies without a website. No result was hand-checked.
 - **Wirtschaftsatlas** (DAG `wirtschaftsatlas`, #105) proposes the website Berlin Partner's map lists
   for a company matched by name and postcode (or by a name only one live company has). A name is not
   an identifier, so each URL starts from the URL-pattern base (method `wirtschaftsatlas`) and only

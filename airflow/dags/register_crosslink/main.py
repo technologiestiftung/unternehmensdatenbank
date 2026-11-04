@@ -88,7 +88,7 @@ def run_harvest() -> int:
                 FROM seen
                 JOIN public.company_identifiers ci
                   ON ci.scheme = 'register' AND ci.company_id <> seen.company_id
-                 AND substring(ci.value from '(?:HRA|HRB|VR|GnR|PR) \d+$') = seen.entry
+                 AND substring(ci.value from '((?:HRA|HRB|VR|GnR|PR|GsR) \d+)(?: B)?$') = seen.entry
                 """,
                 (conf.REGISTER_MISMATCH,),
             )
