@@ -112,11 +112,27 @@ def test_a_corrected_date_also_corrects_the_shown_year() -> None:
         ("established_at", "2012-03-01", 0.60), ("founding_year", "2012", 0.60)}
 
 
-def test_a_year_people_typed_is_not_planned_twice_by_a_date_in_that_year() -> None:
+def years(planned: list[dict]) -> list[tuple[str, int]]:
+    return [(row["value"], row["agree"]) for row in planned if row["field_name"] == "founding_year"]
+
+
+def test_two_dates_in_the_same_year_back_one_year() -> None:
+    planned, _ = planned_observations([vote("a", field="established_at", correction="01.03.2012", value="2010-05-01"),
+                                       vote("b", field="established_at", correction="15.04.2012", value="2010-05-01")])
+    assert years(planned) == [("2012", 2)]
+
+
+def test_a_date_and_a_typed_year_are_two_people_behind_the_year() -> None:
     planned, _ = planned_observations([vote("a", field="established_at", correction="2012-03-01", value="2010-05-01"),
-                                       vote("b", field="established_year", correction="2012", value="2010")])
-    assert sorted((row["field_name"], row["value"]) for row in planned) == [
-        ("established_at", "2012-03-01"), ("founding_year", "2012")]
+                                       vote("b", field="established_year", correction="2012", value="2010"),
+                                       vote("b", field="established_at", correction="2012-03-01", value="2010-05-01")])
+    assert years(planned) == [("2012", 2)]
+
+
+def test_one_date_correction_does_not_override_a_year_a_website_gives() -> None:
+    planned, _ = planned_observations([vote("a", field="established_at", correction="2012-03-01", value="")],
+                                      filled={(COMPANY, "founding_year")})
+    assert {row["field_name"]: row["confidence"] for row in planned} == {"established_at": 0.60, "founding_year": 0.30}
 
 
 def test_invalid_and_uncorrectable_corrections_are_counted_and_skipped() -> None:

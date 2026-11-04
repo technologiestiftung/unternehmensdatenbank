@@ -216,10 +216,16 @@ def planned_observations(
         if value is None:
             skipped[f"invalid {key}"] += 1
             continue
-        claim = (company, key, claim_key(value))
-        agree[claim].add(author)
-        rejected[claim].discard(author)
-        spelling.setdefault(claim, value)
+        claims = [((company, key, claim_key(value)), value)]
+        if key == "established_at":
+            claims.append(((company, "established_year", value[:4]), value[:4]))
+            when, year_vote = vote.get("updated_at"), (company, "established_year", author)
+            if when is not None and (voted_at.get(year_vote) is None or when > voted_at[year_vote]):
+                voted_at[year_vote] = when
+        for claim, claimed in claims:
+            agree[claim].add(author)
+            rejected[claim].discard(author)
+            spelling.setdefault(claim, claimed)
 
     planned = []
     for claim, typed in sorted(agree.items(), key=lambda item: str(item[0])):
@@ -228,17 +234,14 @@ def planned_observations(
         people = typed | field_confirmed.get(value, set())
         against = rejected[claim] if key in LIST_FIELDS else rejected[claim].union(
             *(authors for other, authors in field_confirmed.items() if other != value))
-        row = {
+        planned.append({
             "company_id": company, "field_name": FIELDS[key][0], "value": spelling[claim],
             "confidence": confidence(len(people), len(against),
                                      filled=filled is None or (company, FIELDS[key][0]) in filled),
             "agree": len(people), "disagree": len(against),
             "voted_at": max((voted_at[(company, key, a)] for a in people if (company, key, a) in voted_at),
                             default=None),
-        }
-        planned.append(row)
-        if key == "established_at" and (company, "established_year", value[:4]) not in agree:
-            planned.append({**row, "field_name": "founding_year", "value": value[:4]})
+        })
     return planned, dict(skipped)
 
 
