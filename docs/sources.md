@@ -22,6 +22,7 @@ Record counts are from the local database on 2026-11-02.
 | `offeneregister` | OffeneRegister: a snapshot of the Handelsregister, read 2017–2019. Name, legal form, address, status, register number, officers | bulk file, imported by scripts ([data-model](data-model.md), "Loading the OffeneRegister Berlin set") | once | 296,486 |
 | `registerbekanntmachungen` | register announcements on handelsregister.de (deletions, liquidations, insolvencies) | DAG `register_announcements`: 2 requests, the result list only, never a detail page | weekly | 900 |
 | `handelsregister_lookup` | the Handelsregister search on handelsregister.de: today's name, seat and status | DAG `handelsregister_lookup`: one search per company by register number, ≤50 per run. **Started by hand only**: the portal's terms forbid systematic retrievals (Nutzungsordnung, Ziffer 3) | by hand | 2 |
+| `wirtschaftsatlas` | Berlin Partner's Wirtschaftsatlas Berlin: about 7,600 companies with website, in Berlin's industry layers (AI, FinTech, Robotik, ...) | DAG `wirtschaftsatlas`: downloads the map's company layers, matches by name and postcode, verifies each website like a Wikidata proposal. **Started by hand only**: the Impressum asks for Berlin Partner's prior consent (#105) | by hand | 2,253 (2026-11-04) |
 | `website_discovery` | the company's own website | DAG `website_discovery`: guesses domains from the name, reads the Impressum, keeps a site only if the page proves it is that company ([website-verification](website-verification.md)) | hourly batches | 65,587 |
 | `wikidata` | official websites (property P856) Wikidata lists for Berlin organisations | DAG `wikidata`: one SPARQL query, each website verified like a guessed domain | daily | 0 here (531 matched in a local copy, 2026-10-30) |
 | `common_crawl` | Impressum pages in the Common Crawl that name a Berlin register number | DAG `common_crawl`: 300 index blocks a run, each website verified like a guessed domain | weekly | 0 here (pilot: 21 websites from 5,000 pages, #56) |
@@ -59,7 +60,7 @@ The goal is one record per Berlin company with 20 columns. Counts are from the l
 | 8 | Rechtsform | `legal_form` | OffeneRegister | 257,244 |
 | 9 | Cluster (n=5) | — | removed with #47; comes back with a classifier | — |
 | 10 | Technologiefeld | `technology_field` | `branch_classifier` | 194 |
-| 11 | Website | `website` | `website_discovery`, `wikidata`, `common_crawl` | 6,090 |
+| 11 | Website | `website` | `website_discovery`, `wikidata`, `common_crawl`, `wirtschaftsatlas` | 6,090 |
 | 12 | Geschäftsführung / Kontakt | `management` | register officers (`import_register_managers.py`), `spacy_ner`; email and phone from `impressum_contacts`, stored, not shown | names 111,374 |
 | 13 | Tätigkeitsbeschreibung | `business_purpose`, `activity_keywords` | `website_keywords` (published once 500 companies are read); OffeneRegister has no purpose | purpose 0 |
 | 14 | Kommentar | `comments` | people in the app | — |

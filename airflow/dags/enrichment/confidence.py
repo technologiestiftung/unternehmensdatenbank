@@ -126,6 +126,9 @@ METHOD_WIKIDATA = "wikidata"
 #: curated record, so it starts like a guessed domain: a register number proves a page is ABOUT the
 #: company, and only the page read again can prove it is the company's own.
 METHOD_COMMON_CRAWL = "common_crawl"
+#: A website Berlin Partner's Wirtschaftsatlas lists for a company matched by name (#105). The match is
+#: by name, not by an identifier, so it starts like a guessed domain: only the page can prove it.
+METHOD_WIRTSCHAFTSATLAS = "wirtschaftsatlas"
 
 # ---------------------------------------------------------------------------------------
 # The weights. Every one of these is a judgement call, not a measurement. They are grouped so
@@ -420,7 +423,8 @@ def score(
     """
     evidence_set = set(evidence)
     ordered_methods = [
-        m for m in (METHOD_URL_PATTERN, METHOD_OSM, METHOD_WIKIDATA, METHOD_COMMON_CRAWL) if m in methods
+        m for m in (METHOD_URL_PATTERN, METHOD_OSM, METHOD_WIKIDATA, METHOD_COMMON_CRAWL,
+                  METHOD_WIRTSCHAFTSATLAS) if m in methods
     ]
 
     for name, reason in _DISQUALIFIERS.items():
