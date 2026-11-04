@@ -21,6 +21,15 @@ Airflow worker's own PG_DSN and DAG settings (`pipeline_environment`), handed ov
 DOCKER_HOST, on the play server a socket proxy.
 
 A pod shares no disk with anything, so a task's state belongs in Postgres (see CLAUDE.md).
+
+**API keys are Airflow variables**, not environment variables: set one in Airflow's UI (Admin →
+Variables, the name the DAG asks for, e.g. `OPENREGISTER_API_KEY`) and the next run uses it, with no
+compose change and no restart. Airflow stores it encrypted with its Fernet key and shows a value whose
+name contains `api_key`, `secret`, `token` or `password` as `***` in the UI and in task logs. A DAG
+names the keys it needs (`pipeline_task(..., secrets=(...))`); they are read when the task starts and
+handed to the task as environment variables, so the task code reads them with `os.getenv`. Never in a
+DAG file: the DAGs come from the public git repository. An environment variable of the same name still
+works where no variable is set. On the hub (kubernetes) the keys come from the pod's secret, as before.
 """
 from __future__ import annotations
 
@@ -28,7 +37,8 @@ import json
 import os
 from datetime import timedelta
 from pathlib import Path
-from typing import Any, Callable, Mapping
+import functools
+from typing import Any, Callable, Mapping, Optional
 
 DAGS = Path(__file__).resolve().parent
 
@@ -70,7 +80,37 @@ def pipeline_environment(environ: Mapping[str, str]) -> dict[str, str]:
     return {k: v for k, v in environ.items() if k.startswith(PIPELINE_ENV_PREFIXES)}
 
 
-def pipeline_task(task_id: str, run: Callable[[], Any], *, returns: bool = False, retries: int = RETRIES) -> Any:
+def secret_environment(names: tuple[str, ...], variable: Callable[[str], Optional[str]],
+                       environ: Mapping[str, str] = os.environ) -> dict[str, str]:
+    """The API keys `names` as environment variables: the Airflow variable, else the environment.
+
+    A key set nowhere is left out, so the task fails with its own clear message, not with an empty key.
+    """
+    found = {name: variable(name) or environ.get(name, "") for name in names}
+    return {name: value for name, value in found.items() if value}
+
+
+def _variable(name: str) -> Optional[str]:
+    from airflow.sdk import Variable
+
+    return Variable.get(name, default=None)
+
+
+def _with_secrets(run: Callable[[], Any], names: tuple[str, ...]) -> Callable[[], Any]:
+    """`run`, with the keys set in this worker's environment first (the local "python" runner)."""
+    if not names:
+        return run
+
+    @functools.wraps(run)
+    def call() -> Any:
+        os.environ.update(secret_environment(names, _variable))
+        return run()
+
+    return call
+
+
+def pipeline_task(task_id: str, run: Callable[[], Any], *, returns: bool = False, retries: int = RETRIES,
+                  secrets: tuple[str, ...] = ()) -> Any:
     """A `PythonOperator` calling `run`, or a pod running the same function from the pipelines image.
 
     `returns=True` makes `run`'s return value the task's XCom on the hub too: the pod writes it to
@@ -78,15 +118,17 @@ def pipeline_task(task_id: str, run: Callable[[], Any], *, returns: bool = False
     pushes its return value anyway.
 
     `retries=0` for a task that must not run again by itself, such as one under a request limit.
+
+    `secrets`: the API keys the task needs, by Airflow variable name (see the module docstring).
     """
     retry = {"retries": retries, "retry_delay": RETRY_DELAY}
     runner = _setting("pipeline_runner", "python")
     if runner == "docker":
-        return _docker_task(task_id, run, returns, retry)
+        return _docker_task(task_id, run, returns, retry, secrets)
     if runner != "kubernetes":
         from airflow.providers.standard.operators.python import PythonOperator
 
-        return PythonOperator(task_id=task_id, python_callable=run, **retry)
+        return PythonOperator(task_id=task_id, python_callable=_with_secrets(run, secrets), **retry)
 
     from airflow.providers.cncf.kubernetes.operators.pod import KubernetesPodOperator
     from kubernetes.client import models as k8s
@@ -106,7 +148,8 @@ def pipeline_task(task_id: str, run: Callable[[], Any], *, returns: bool = False
     )
 
 
-def _docker_task(task_id: str, run: Callable[[], Any], returns: bool, retry: dict[str, Any]) -> Any:
+def _docker_task(task_id: str, run: Callable[[], Any], returns: bool, retry: dict[str, Any],
+                 secrets: tuple[str, ...]) -> Any:
     from airflow.providers.docker.operators.docker import DockerOperator
 
     class PipelineDockerOperator(DockerOperator):
@@ -115,7 +158,7 @@ def _docker_task(task_id: str, run: Callable[[], Any], returns: bool, retry: dic
 
         def execute(self, context: Any) -> Any:
             # Read on the worker when the task runs, so the secrets never enter the parsed DAG.
-            self._private_environment = pipeline_environment(os.environ)
+            self._private_environment = pipeline_environment(os.environ) | secret_environment(secrets, _variable)
             return super().execute(context)
 
     return PipelineDockerOperator(

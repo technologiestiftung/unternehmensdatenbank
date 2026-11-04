@@ -20,8 +20,9 @@ persons in its detail view; the list read here does not, and nothing but the emp
 is written as an observation yet: the counts are a signal of activity and size, never
 an employee count, and showing them needs a decision first.
 
-`BA_JOBSUCHE_API_KEY` is the public client id the job search web app sends (see bund.dev); read from
-the environment, never from code.
+The API key is the public client id the job search web app sends to every browser (`PUBLIC_CLIENT_ID`,
+documented on bund.dev), so it is no secret and lives here; `BA_JOBSUCHE_API_KEY` overrides it should the
+agency change it.
 """
 from __future__ import annotations
 
@@ -68,6 +69,8 @@ DETAILS = SourceDetails(
 )
 URL = "https://rest.arbeitsagentur.de/jobboerse/jobsuche-service/pc/v6/jobs"
 USER_AGENT = "unternehmensdatenbank/1.0 (Technologiestiftung Berlin)"
+#: Not a secret: the job search web app sends it with every search (X-API-Key; bund.dev).
+PUBLIC_CLIENT_ID = "jobboerse-jobsuche"
 PAGE_SIZE = 100
 #: Seconds between two requests: about 340 pages for 33,514 ads (2026-11-04) take about 6 minutes.
 PAUSE_S = float(os.getenv("BA_JOBSUCHE_PAUSE_S", "1.0"))
@@ -83,9 +86,7 @@ def _source_id(cur: Any) -> str:
 
 def read_ads() -> tuple[list[dict[str, Any]], int]:
     """Every Berlin job ad of the list view, and how many the agency says there are."""
-    key = os.getenv("BA_JOBSUCHE_API_KEY", "")
-    if not key:
-        raise RuntimeError("BA_JOBSUCHE_API_KEY is not set.")
+    key = os.getenv("BA_JOBSUCHE_API_KEY") or PUBLIC_CLIENT_ID
     session = requests.Session()
     session.headers.update({"X-API-Key": key, "User-Agent": USER_AGENT})
     ads: list[dict[str, Any]] = []

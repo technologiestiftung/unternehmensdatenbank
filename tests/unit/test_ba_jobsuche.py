@@ -47,11 +47,13 @@ def _serve(monkeypatch, *responses: _Response) -> None:
     monkeypatch.setattr(main, "PAUSE_S", 0)
 
 
-def test_an_empty_key_fails_before_any_request(monkeypatch) -> None:
-    monkeypatch.setenv("BA_JOBSUCHE_API_KEY", "")
-    monkeypatch.setattr(main.requests, "Session", lambda: pytest.fail("no request without a key"))
-    with pytest.raises(RuntimeError, match="BA_JOBSUCHE_API_KEY"):
+def test_without_a_setting_the_public_client_id_is_sent(monkeypatch) -> None:
+    monkeypatch.delenv("BA_JOBSUCHE_API_KEY", raising=False)
+    session = _Session([_Response(403)])
+    monkeypatch.setattr(main.requests, "Session", lambda: session)
+    with pytest.raises(RuntimeError, match="403"):
         main.read_ads()
+    assert session.headers["X-API-Key"] == "jobboerse-jobsuche"
 
 
 def test_a_refused_first_page_fails_the_run(monkeypatch) -> None:

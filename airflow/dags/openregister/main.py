@@ -23,7 +23,7 @@ record (`external_id` = OpenRegister's company id), linked by register number, t
 the same city, else a new company (only when active); name, legal form (read from the end of the name),
 address, postcode, city, status and business purpose as observations dated by the run.
 
-Needs `OPENREGISTER_API_KEY` (a secret). No personal data is requested: the search does not return
+Needs `OPENREGISTER_API_KEY`, an Airflow variable (Admin → Variables; `pipeline_task`, "API keys"). No personal data is requested: the search does not return
 officers.
 """
 from __future__ import annotations
@@ -138,7 +138,7 @@ def _session():  # noqa: ANN202
 
     key = os.getenv("OPENREGISTER_API_KEY", "")
     if not key:
-        raise RuntimeError("OPENREGISTER_API_KEY is not set.")
+        raise RuntimeError("OPENREGISTER_API_KEY is not set: add it as an Airflow variable (Admin → Variables).")
     session = requests.Session()
     session.headers.update({"Authorization": f"Bearer {key}", "User-Agent": "unternehmensdatenbank (Technologiestiftung Berlin)"})
     return session
@@ -234,7 +234,7 @@ def _make_dag():  # noqa: ANN201
         max_active_runs=1, tags=["sources", "register"],
     ) as dag:
         # retries=0: a retry would spend credits again.
-        search = pipeline_task("search", run_search, retries=0)
+        search = pipeline_task("search", run_search, retries=0, secrets=("OPENREGISTER_API_KEY",))
         coordinate = TriggerDagRunOperator(
             task_id="trigger_pipeline_coordinator", trigger_dag_id="pipeline_coordinator",
             wait_for_completion=False,
