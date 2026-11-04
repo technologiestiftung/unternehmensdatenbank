@@ -1,11 +1,10 @@
 """`enrichment.wikidata`: SPARQL rows become one item per Wikidata id; only commercial register digits.
-`wikidata.main`: which companies lose what an item proved for them, and which URLs drop to 0."""
+`enrichment.proposals`: which companies lose what an item proved for them, and which URLs drop to 0."""
 from __future__ import annotations
 
 from enrichment.confidence import METHOD_WIKIDATA, UNVERIFIED_CAP, WEBSITE_MIN_CONFIDENCE, score
 from enrichment.wikidata import parse, register_digits
-from enrichment.proposals import unproven
-from wikidata.main import moved_from
+from enrichment.proposals import moved_from, unproven
 
 
 def row(qid: str, website: str, label: str | None = None, register: str | None = None) -> dict:

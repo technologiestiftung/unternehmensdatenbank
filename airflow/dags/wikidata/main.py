@@ -125,7 +125,7 @@ def match_items(cur: Any, items: list[wikidata.Item], *, source_id: str) -> tupl
     item_by_qid = {row[0]: row for row in cur.fetchall()}
     cur.execute("SELECT external_id, company_id::text FROM public.company_source_records WHERE source_id = %s",
                 (source_id,))
-    left = moved_from(dict(cur.fetchall()), {qid: str(company_id) for qid, company_id, _, _ in matches})
+    left = proposals.moved_from(dict(cur.fetchall()), {qid: str(company_id) for qid, company_id, _, _ in matches})
     texts = {i.qid: (i.wikipedia_url, i.description) for i in items}
     rows = []
     for qid, company_id, method, confidence in matches:
@@ -162,11 +162,6 @@ def match_items(cur: Any, items: list[wikidata.Item], *, source_id: str) -> tupl
                 " WHERE source_id = %s AND is_active AND NOT (external_id = ANY(%s))",
                 (source_id, [m[0] for m in matches]))
     return len(matches), proposals.demote_unproven(cur, source_id=source_id, company_ids=sorted(left))
-
-
-def moved_from(previous: dict[str, str], current: dict[str, str]) -> set[str]:
-    """Companies an item matched before and now matches another company instead."""
-    return {company_id for qid, company_id in previous.items() if current.get(qid, company_id) != company_id}
 
 
 # --- verify ---------------------------------------------------------------------------------

@@ -42,6 +42,12 @@ def unproven(observations: list[tuple[str, str, str]], proven: set[tuple[str, st
             if obs_id not in written and (company_id, url) not in proven]
 
 
+def moved_from(previous: dict[str, str], current: dict[str, str]) -> set[str]:
+    """Companies a record (external id -> company id) named before and now names another company
+    instead. A record that no longer matches at all keeps what its page proved."""
+    return {company_id for key, company_id in previous.items() if current.get(key, company_id) != company_id}
+
+
 def demote_unproven(cur: Any, *, source_id: str, company_ids: list[str],
                     written: frozenset[str] = frozenset()) -> int:
     """Set these companies' URLs from this source to 0, except those just written and those a record

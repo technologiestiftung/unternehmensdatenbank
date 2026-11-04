@@ -130,8 +130,9 @@ def download() -> list[dict[str, Any]]:
 
 
 def run_match() -> int:
-    """Download the layers and link their entries to companies. Returns how many records it wrote;
-    skipped (0) when the last download is less than `REFRESH_HOURS` old."""
+    """Download the layers and link their entries to companies. Returns how many records it wrote
+    plus how many websites it demoted, so the coordinator runs; skipped (0) when the last download
+    is less than `REFRESH_HOURS` old."""
     connection = get_connection()
     try:
         with connection, connection.cursor() as cur:
@@ -144,20 +145,21 @@ def run_match() -> int:
         rows = download()
         with connection, connection.cursor() as cur:
             sync_run_id = start_sync_run(cur, source_id=source_id)
-            seen, matched = match_entries(cur, rows, source_id=source_id)
+            seen, matched, demoted = match_entries(cur, rows, source_id=source_id)
             cur.execute("UPDATE public.sources SET last_synced_at = now() WHERE id = %s", (source_id,))
             finish_sync_run(cur, sync_run_id=sync_run_id, records_seen=seen, records_created=matched,
                             records_updated=0, records_failed=0)
-        log.info("%d layer entries, %d distinct companies; %d matched one of ours, %d did not.",
-                 len(rows), seen, matched, seen - matched)
-        return matched
+        log.info("%d layer entries, %d distinct companies; %d matched one of ours, %d did not;"
+                 " %d websites demoted.", len(rows), seen, matched, seen - matched, demoted)
+        return matched + demoted
     finally:
         connection.close()
 
 
-def match_entries(cur: Any, rows: list[dict[str, Any]], *, source_id: str) -> tuple[int, int]:
+def match_entries(cur: Any, rows: list[dict[str, Any]], *, source_id: str) -> tuple[int, int, int]:
     """Group entries by name key and postcode, match them (module docstring), keep each match as a
-    source record. Returns (distinct entries, matched)."""
+    source record. A company an entry now leaves for another loses the websites only that entry
+    proved. Returns (distinct entries, matched, websites demoted)."""
     cur.execute("CREATE TEMP TABLE _atlas (name text, street text, postcode text, city text, website text,"
                 " layer text) ON COMMIT DROP")
     execute_values(cur, "INSERT INTO _atlas VALUES %s",
@@ -201,6 +203,9 @@ def match_entries(cur: Any, rows: list[dict[str, Any]], *, source_id: str) -> tu
     matches = cur.fetchall()
     cur.execute("SELECT count(*) FROM _entry")
     seen = cur.fetchone()[0]
+    cur.execute("SELECT external_id, company_id::text FROM public.company_source_records WHERE source_id = %s",
+                (source_id,))
+    left = proposals.moved_from(dict(cur.fetchall()), {m[0]: str(m[1]) for m in matches})
     records = [
         (company_id, source_id, key, BASE_URL, name,
          Json({"name": name, "street": street, "postcode": postcode, "city": city,
@@ -231,7 +236,7 @@ def match_entries(cur: Any, rows: list[dict[str, Any]], *, source_id: str) -> tu
     cur.execute("UPDATE public.company_source_records SET is_active = false"
                 " WHERE source_id = %s AND is_active AND NOT (external_id = ANY(%s))",
                 (source_id, [m[0] for m in matches]))
-    return seen, len(matches)
+    return seen, len(matches), proposals.demote_unproven(cur, source_id=source_id, company_ids=sorted(left))
 
 
 # --- verify ---------------------------------------------------------------------------------
