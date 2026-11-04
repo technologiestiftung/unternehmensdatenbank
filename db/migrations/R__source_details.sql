@@ -66,7 +66,11 @@ INSERT INTO public.sources (key, name, source_type, base_url, description, terms
   ('openregister', 'OpenRegister (Handelsregister API)', 'register_api', 'https://openregister.de',
    'Das Handelsregister als API: Berliner Firmen, die seit 2019 eingetragen wurden, mit Adresse und Unternehmensgegenstand. Über die Registernummer zugeordnet; fehlt die Firma bei uns, wird sie angelegt.',
    'Ob OpenRegister das Speichern und regelmäßige Abrufen erlaubt, ist angefragt und noch nicht beantwortet. Deshalb startet jeden Lauf ein Mensch.',
-   NULL, 'nur von Hand')
+   NULL, 'nur von Hand'),
+  ('cordis', 'CORDIS (EU research projects)', 'fundings', 'https://cordis.europa.eu',
+   'Förderungen der EU-Forschungsprogramme Horizon Europe und Horizon 2020 an Firmen in Berlin, über Name und Ort einer Firma zugeordnet.',
+   'Weiterverwendung nach dem Reuse Notice der Europäischen Kommission; die genauen Bedingungen sind noch nicht geprüft.', 'https://data.europa.eu/data/datasets/cordis-eu-research-projects-under-horizon-europe-2021-2027',
+   'monatlich')
 ON CONFLICT (key) DO UPDATE SET
   base_url = EXCLUDED.base_url,
   description = EXCLUDED.description,
