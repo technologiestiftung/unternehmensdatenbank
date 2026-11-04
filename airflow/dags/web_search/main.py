@@ -26,11 +26,12 @@ from datetime import datetime, timezone
 from typing import Any, Iterable
 from urllib.parse import urlparse
 
-from psycopg2.extras import Json, execute_values
+from psycopg2.extras import Json
 
 from enrichment import confidence as conf
 from enrichment import proposals
 from enrichment.own_site import is_directory_host
+from enrichment.register_names import SOLE_TRADER_NAME_SQL
 from source_enrichment_common import SourceDetails, ensure_source, get_connection, schedule_label
 
 log = logging.getLogger(__name__)
@@ -65,16 +66,22 @@ def _source_id(cur: Any) -> str:
 
 def hosts(results: Iterable[dict[str, Any]], limit: int = MAX_RESULTS) -> list[str]:
     """The first `limit` distinct result hosts that are not a directory, as `https://host`."""
-    found: list[str] = []
+    found: dict[str, str] = {}
     for result in results:
         url = result.get("url") or ""
         host = (urlparse(url).hostname or "").lower()
-        if not host or is_directory_host(url) or f"https://{host}" in found:
+        if not host or is_directory_host(url) or host.removeprefix("www.") in found:
             continue
-        found.append(f"https://{host}")
+        found[host.removeprefix("www.")] = f"https://{host}"
         if len(found) >= limit:
             break
-    return found
+    return list(found.values())
+
+
+def search_query(name: str) -> str:
+    """The company's name as one quoted phrase, then "Berlin"; a quote inside the name would end the phrase."""
+    phrase = name.replace('"', "")
+    return f'"{phrase}" Berlin'
 
 
 def _companies_to_search(cur: Any, source_id: str) -> list[tuple[str, str]]:
@@ -84,7 +91,7 @@ def _companies_to_search(cur: Any, source_id: str) -> list[tuple[str, str]]:
         FROM public.v_companies_enriched e
         WHERE e.register_status = 'active' AND e.website_url IS NULL AND e.merged_into IS NULL
           AND e.legal_form IS DISTINCT FROM 'e. K.'
-          AND e.company_name !~* '(\me\.\s*k(fm|fr)?\M|eingetragene[rn]? kauf|inhaber|\minh\.)'
+          AND e.company_name !~* %s
           AND NOT EXISTS (
             SELECT 1 FROM public.company_source_records r
             WHERE r.source_id = %s AND r.company_id = e.id
@@ -92,7 +99,7 @@ def _companies_to_search(cur: Any, source_id: str) -> list[tuple[str, str]]:
         ORDER BY md5(e.id::text)
         LIMIT %s
         """,
-        (source_id, RECHECK_AFTER_DAYS, MAX_SEARCHES),
+        (SOLE_TRADER_NAME_SQL, source_id, RECHECK_AFTER_DAYS, MAX_SEARCHES),
     )
     return cur.fetchall()
 
@@ -111,33 +118,33 @@ def run_search() -> int:
         with connection, connection.cursor() as cur:
             source_id = _source_id(cur)
             companies = _companies_to_search(cur, source_id)
-        rows, with_hits = [], 0
+        searched, with_hits = 0, 0
         for company_id, name in companies:
-            query = f'"{name}" Berlin'
+            query = search_query(name)
             response = session.get(API, params={"q": query, "country": "DE", "search_lang": "de", "count": 10},
                                    timeout=20)
             response.raise_for_status()
             proposed = hosts(((response.json().get("web") or {}).get("results") or []))
             with_hits += bool(proposed)
-            # A company with no usable hit is recorded too, so it is not searched again for RECHECK_AFTER_DAYS.
-            rows.append((company_id, source_id, company_id, name,
-                         Json({"query": query, "websites": proposed,
-                               **({} if proposed else {"verified_at": datetime.now(timezone.utc).isoformat()})})))
-            time.sleep(PAUSE_S)
-        if rows:
+            # Written at once, so a later failure does not throw away searches already paid for. A company
+            # with no usable hit is recorded too, so it is not searched again for RECHECK_AFTER_DAYS.
             with connection, connection.cursor() as cur:
-                execute_values(cur, """
+                cur.execute("""
                     INSERT INTO public.company_source_records
                       (company_id, source_id, external_id, source_company_name, source_payload,
                        match_method, match_confidence, matched_at, is_active)
-                    VALUES %s
+                    VALUES (%s, %s, %s, %s, %s, 'identifier', 1.0, now(), true)
                     ON CONFLICT (source_id, external_id) DO UPDATE SET
                       source_payload = EXCLUDED.source_payload, last_seen_at = now(), last_synced_at = now(),
                       is_active = true
-                """, rows, template="(%s, %s, %s, %s, %s, 'identifier', 1.0, now(), true)")
+                """, (company_id, source_id, company_id, name,
+                      Json({"query": query, "websites": proposed,
+                            **({} if proposed else {"verified_at": datetime.now(timezone.utc).isoformat()})})))
+            searched += 1
+            time.sleep(PAUSE_S)
     finally:
         connection.close()
-    log.info("Searched %d companies; %d got at least one proposal.", len(rows), with_hits)
+    log.info("Searched %d companies; %d got at least one proposal.", searched, with_hits)
     return with_hits
 
 

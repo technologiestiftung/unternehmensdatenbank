@@ -27,6 +27,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "airflow" / "dags"))
 
 from enrichment import confidence as conf  # noqa: E402
+from enrichment.register_names import SOLE_TRADER_NAME_SQL  # noqa: E402
 
 SAMPLE_SIZE = 50
 #: own_site: the company's own website. The others are the wrong answers the issue names;
@@ -55,13 +56,14 @@ POPULATION = """
       AND e.website_url IS NULL
       AND e.merged_into IS NULL
       AND e.legal_form IS DISTINCT FROM 'e. K.'
-      AND e.company_name !~* '(\\me\\.\\s*k(fm|ffr|fr)?\\M|eingetragene[rn]? kauf|inhaber|\\minh\\.)'
+      AND e.company_name !~* %(sole_trader)s
     ORDER BY o.company_id, o.observed_at DESC
 """
 
 
 def _rows(cur) -> list[tuple]:  # noqa: ANN001
-    cur.execute(POPULATION, {"cap": conf.UNVERIFIED_CAP, "name_on_page": conf.NAME_ON_PAGE})
+    cur.execute(POPULATION, {"cap": conf.UNVERIFIED_CAP, "name_on_page": conf.NAME_ON_PAGE,
+                             "sole_trader": SOLE_TRADER_NAME_SQL})
     return cur.fetchall()
 
 

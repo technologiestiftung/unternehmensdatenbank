@@ -36,6 +36,8 @@ LEGAL_FORMS = [
     ("KG", r"\bk\.?\s*g|kommanditgesellschaft"),
     ("PartG", r"partg|partnerschaft"),
 ]
+#: A sole trader's name in a Postgres `~*` regex: it is a person's name, never sent to a third party (#89).
+SOLE_TRADER_NAME_SQL = r"(\me\.\s*k(fm|ffr|fr)?\M|eingetragene[rn]? kauf|inhaber|\minh\.)"
 _LEGAL_FORM_RES = [(form, re.compile(rf"(?:{pattern})$", re.IGNORECASE)) for form, pattern in LEGAL_FORMS]
 # Words that often follow the legal form: "Beispiel GmbH Berlin", "… GmbH Steuerberatungsgesellschaft".
 _TRAILING_WORDS = re.compile(
