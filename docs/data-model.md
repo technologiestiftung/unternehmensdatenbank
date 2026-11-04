@@ -94,21 +94,32 @@ python scripts/import_register_managers.py
 
 ## Migration strategy
 
-`V1__baseline.sql` is the whole schema as of 2026-10-31, squashed four times: the first example data set,
-V1-V9 and V10 on 2026-10-28, V1-V10 on 2026-10-31 (#68). Forward-only from here: never edit a
-migration that has run anywhere shared, add new ones as `V{N}__description.sql` (the next is V10), and
-run Flyway before Airflow touches the changed schema.
+`V1__baseline.sql` is the whole schema as of 2026-11-04, squashed five times: the first example data set,
+V1-V9 and V10 on 2026-10-28, V1-V10 on 2026-10-31 (#68), V1-V9 on 2026-11-04. The last one was
+generated from the play server's database, so play and the file agree by construction; a database
+built from it and one built from the old V1-V9 dump to the same schema and grants. The reference rows
+(Technologiefelder, keywords, WZ divisions) are in their own file, `V1.1__reference_data.sql`.
+Forward-only from here: never edit a migration that has run anywhere shared, add new ones as
+`V{N}__description.sql` (the next is V2), and run Flyway before Airflow touches the changed schema.
 The headings below and comments in the code keep the pre-squash migration numbers ("V3", "V10") so
 git history finds the reasoning.
 
+**Sources are code, not migrations.** A `sources` row, its priority and what the app says about it
+(origin, terms, schedule) are written by the code that registers the source (`ensure_source` with
+`SourceDetails` and `priority`, in each DAG), on every run. A fresh database has no source until its
+DAG has run once. A wording fix is a code change.
+
 **A database migrated before the squash** (local, play) still has the old files in its Flyway
 history, and Flyway refuses to run until that is reset. No data moves. Only for a database with
-every pre-squash migration up to V10 applied (`flyway info`, the last one `review sample`); migrate
-an older one to V10 with the pre-squash files first (git history), or build it fresh:
+every pre-squash migration up to V6 applied (`flyway info`, the last one `founding year`; V7 to V9
+changed `sources` rows only, which the DAGs now write); migrate an older one to V6 with the pre-squash
+files first (git history), or build it fresh. `migrate` then runs V1.1, which finds its rows there and
+changes nothing:
 
 ```bash
 docker compose exec -T postgres psql -U app -d unternehmensdatenbank -c "DROP TABLE flyway_schema_history"
 docker compose --profile tools run --rm flyway baseline -baselineVersion=1 -baselineDescription=baseline
+docker compose --profile tools run --rm flyway migrate
 ```
 
 **Copying the database to a server** (play, 2026-10-31): dump only `public`, restore into an empty
@@ -121,10 +132,17 @@ dump creates `public` itself; and it carries neither database-level nor PUBLIC r
 pg_dump -U app -Fc -n public --exclude-table=public.spatial_ref_sys -f udb.dump unternehmensdatenbank
 # on the server, as postgres, into a new database owned by app:
 psql -d unternehmensdatenbank -c "DROP SCHEMA public"
-pg_restore -d unternehmensdatenbank --exit-on-error udb.dump
+pg_restore -l udb.dump | grep -v "MATERIALIZED VIEW DATA" > udb.list   # refreshed below, after ANALYZE
+pg_restore -d unternehmensdatenbank --exit-on-error -L udb.list udb.dump
 psql -d unternehmensdatenbank -c "GRANT TEMPORARY ON DATABASE unternehmensdatenbank TO writer" \
-  -c "GRANT USAGE ON SCHEMA public TO PUBLIC"
+  -c "GRANT USAGE ON SCHEMA public TO PUBLIC" -c "ANALYZE" \
+  -c "REFRESH MATERIALIZED VIEW company_profile_mv" -c "REFRESH MATERIALIZED VIEW source_field_stats_mv" \
+  -c "REFRESH MATERIALIZED VIEW source_stats_mv" -c "ANALYZE company_profile_mv"
 ```
+
+A restore does not ANALYZE, and its own refresh of `company_profile_mv` ran for more than 20 minutes on
+a database without statistics (2026-11-04, 302k companies); after `ANALYZE` it took seconds. Hence the
+list without the views' data.
 
 The dump holds the personal data in `company_source_records`, `company_managers` and
 `company_documents`: a server outside local development needs the privacy review first (#18).
@@ -259,7 +277,7 @@ once. Tags are not a source field: no vote, no observation, no coordinator.
 A vote on an empty field has `value = ''` and must be `wrong`, with the missing value as its
 correction.
 
-**Corrections are a source** (`user_feedback`, priority 50, V4; DAG `feedback_observations`). Per
+**Corrections are a source** (`user_feedback`, priority 50, set by its DAG `feedback_observations`). Per
 company, field and corrected value, the people who typed it or voted that value `correct` count
 for it; the people who voted another value `correct`, or this one `wrong` (with or without a
 correction of their own), count against it. Nobody counts both ways: only a person's latest vote
@@ -384,8 +402,8 @@ court keeps each up for 8 weeks, so a weekly run misses none. It reads only the 
 What each source has collected, for the app's `/sources` page. **Counts only, never a value**, so
 `email` and `phone` can be counted (stored, but 0 shown).
 
-- `v_source_overview`: per source, its description, terms, `terms_url` and schedule (German, filled
-  by migration `V4__source_details.sql`; `terms` NULL means nobody checked them), records, companies
+- `v_source_overview`: per source, its description, terms, `terms_url` and schedule (German, written
+  by each source's DAG through `ensure_source`; `terms` NULL means nobody checked them), records, companies
   covered (records and linked grants), companies created, records matched by identifier, by name
   (`fuzzy`) and by hand, the average match confidence, and the latest run read live from
   `source_sync_runs`. `runs_interrupted` counts runs left `running` although a newer one started (a

@@ -37,12 +37,35 @@ from psycopg2.extras import Json, execute_values
 
 from enrichment.imprint_extractor import is_berlin_postcode
 from enrichment.name_match import match_by_name
-from source_enrichment_common import ensure_source, finish_sync_run, get_connection, start_sync_run
+from source_enrichment_common import (
+    SourceDetails,
+    ensure_source,
+    finish_sync_run,
+    get_connection,
+    schedule_label,
+    start_sync_run,
+)
 
 log = logging.getLogger(__name__)
 
 DAG_ID = "ba_jobsuche"
 SOURCE_KEY = "ba_jobsuche"
+SCHEDULE = None
+#: What the app's source page says about this source (German).
+DETAILS = SourceDetails(
+    description=(
+        "Arbeitgeber mit offenen Stellen in Berlin aus der Jobsuche der Bundesagentur für Arbeit, über "
+        "Name und Postleitzahl einer Firma zugeordnet. Gespeichert werden nur zugeordnete Arbeitgeber "
+        "und die Zahl ihrer Anzeigen, nie Ansprechpersonen."
+    ),
+    schedule=schedule_label(SCHEDULE),
+    base_url="https://www.arbeitsagentur.de/jobsuche/",
+    terms=(
+        "Die Nutzungsbedingungen (2a Abs. 3) untersagen das automatisierte Auslesen zur Datensammlung; "
+        "gelesen auf Entscheidung des Entwicklers vom 04.11.2026, nur von Hand gestartet."
+    ),
+    terms_url="https://www.arbeitsagentur.de/nutzungsbedingungen",
+)
 URL = "https://rest.arbeitsagentur.de/jobboerse/jobsuche-service/pc/v6/jobs"
 USER_AGENT = "unternehmensdatenbank/1.0 (Technologiestiftung Berlin)"
 PAGE_SIZE = 100
@@ -54,7 +77,8 @@ MAX_PAGES = int(os.getenv("BA_JOBSUCHE_MAX_PAGES", "500"))
 def _source_id(cur: Any) -> str:
     return ensure_source(cur, key=SOURCE_KEY, name="Bundesagentur für Arbeit, Jobsuche (Berlin employers)",
                          source_type="job_board",
-                         metadata={"dag_id": DAG_ID, "terms": "https://www.arbeitsagentur.de/nutzungsbedingungen"})
+                         metadata={"dag_id": DAG_ID, "terms": "https://www.arbeitsagentur.de/nutzungsbedingungen"},
+                         details=DETAILS)
 
 
 def read_ads() -> tuple[list[dict[str, Any]], int]:
@@ -172,7 +196,7 @@ def _make_dag():  # noqa: ANN201
     with DAG(
         dag_id=DAG_ID,
         description="Berlin employers from the BA job search; started by hand only (against the portal's terms, #106)",
-        schedule=None, start_date=datetime(2026, 11, 1, tzinfo=timezone.utc), catchup=False,
+        schedule=SCHEDULE, start_date=datetime(2026, 11, 1, tzinfo=timezone.utc), catchup=False,
         max_active_runs=1, tags=["sources", "manual"],
     ) as dag:
         # retries=0: every run is started by a person; a retry would read the BA again by itself.

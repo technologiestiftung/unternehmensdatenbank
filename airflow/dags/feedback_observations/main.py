@@ -17,7 +17,7 @@ value: their latest vote on it wins. The difference sets the confidence (`confid
     2               0.60         yes
     3 or more       0.75         yes
 
-The source has priority 50, ahead of every other source (V4), so a shown correction replaces the
+The source has priority 50 (`PRIORITY`, written by `ensure_source`), ahead of every other source, so a shown correction replaces the
 register's or a website's value; that value stays stored and wins again when people withdraw their
 votes, or when a source delivers a value it read after the newest vote (#49, `resolver`). Nothing is ever deleted: a correction nobody stands behind any more drops to confidence 0.
 
@@ -48,9 +48,11 @@ from enrichment.url_patterns import to_ascii_host
 from pipeline_coordinator.resolver import PEOPLE_SOURCE
 from enrichment.register_names import REGISTER_STATUSES
 from source_enrichment_common import (
+    SourceDetails,
     ensure_source,
     finish_sync_run,
     get_connection,
+    schedule_label,
     start_sync_run,
     upsert_source_record,
 )
@@ -59,6 +61,17 @@ log = logging.getLogger(__name__)
 
 DAG_ID = "feedback_observations"
 SOURCE_KEY = PEOPLE_SOURCE
+#: Ahead of every other source (100): a shown correction replaces the value it corrects.
+PRIORITY = 50
+SCHEDULE = "@hourly"
+#: What the app's source page says about this source (German).
+DETAILS = SourceDetails(
+    description=(
+        "Korrekturen, die Menschen in der App eingeben. Angezeigt erst, wenn zwei Personen "
+        "übereinstimmen; nie, wer es war."
+    ),
+    schedule=schedule_label(SCHEDULE),
+)
 
 #: App field key -> (observation field name, kind of value). The app votes under its column keys;
 #: the observation names are the coordinator's.
@@ -297,7 +310,7 @@ def run_publish() -> int:
     try:
         with connection, connection.cursor() as cur:
             source_id = ensure_source(cur, key=SOURCE_KEY, name="Corrections from the app",
-                                      source_type="user_feedback", metadata={"dag_id": DAG_ID})
+                                      source_type="user_feedback", metadata={"dag_id": DAG_ID}, details=DETAILS, priority=PRIORITY)
             sync_run_id = start_sync_run(cur, source_id=source_id)
             cur.execute("SELECT company_id, field_name, value, verdict, correction, author_id, updated_at"
                         " FROM public.extraction_feedback ORDER BY updated_at, created_at, id")
@@ -391,7 +404,7 @@ def _make_dag():  # noqa: ANN201
     with DAG(
         dag_id=DAG_ID,
         description="People's corrections from the app as observations of the source user_feedback",
-        schedule="@hourly", start_date=datetime(2026, 10, 1, tzinfo=timezone.utc), catchup=False,
+        schedule=SCHEDULE, start_date=datetime(2026, 10, 1, tzinfo=timezone.utc), catchup=False,
         max_active_runs=1, tags=["sources", "feedback"],
     ) as dag:
         # Returns how many observations changed, as XCom (see website_discovery): 0 skips the coordinator.

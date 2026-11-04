@@ -16,9 +16,9 @@ each fills. How each pipeline runs: [dags](dags.md). How a value is stored: [dat
 ## The sources
 
 The app shows each source on its own page (`/sources/<key>`): the description, link, terms and
-schedule stored in `sources` (`V4__source_details.sql`), its values per confidence range and its
-last 20 runs. A new source needs those four columns filled by a migration, or its page stays
-without them.
+schedule stored in `sources`, its values per confidence range and its last 20 runs. The text is
+the `DETAILS` (`SourceDetails`) in the DAG that registers the source, written by `ensure_source` on
+every run; a source's page shows it after that DAG's first run.
 
 Record counts are from the local database on 2026-11-02.
 

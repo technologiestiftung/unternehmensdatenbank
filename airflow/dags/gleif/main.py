@@ -55,9 +55,11 @@ from enrichment.imprint_extractor import is_berlin_postcode
 from enrichment.register_match import RegisterEntry, write_entry
 from enrichment.register_names import ACTIVE, DISSOLVED, legal_form
 from source_enrichment_common import (
+    SourceDetails,
     ensure_source,
     finish_sync_run,
     get_connection,
+    schedule_label,
     start_sync_run,
 )
 
@@ -65,6 +67,18 @@ log = logging.getLogger(__name__)
 
 DAG_ID = "gleif"
 SOURCE_KEY = "gleif"
+SCHEDULE = "@daily"
+#: What the app's source page says about this source (German).
+DETAILS = SourceDetails(
+    description=(
+        "Die offenen Daten der Global Legal Entity Identifier Foundation: jede Firma mit einer LEI-"
+        "Kennung am Amtsgericht Charlottenburg, mit Name, Rechtsform, Adresse und Status. Über die "
+        "Registernummer zugeordnet; fehlt die Firma bei uns, wird sie angelegt."
+    ),
+    schedule=schedule_label(SCHEDULE),
+    base_url="https://www.gleif.org",
+    terms="GLEIF veröffentlicht die LEI-Daten unter CC0.",
+)
 LATEST = "https://goldencopy.gleif.org/api/v2/golden-copies/publishes/latest"
 #: GLEIF's id for the Handelsregister at Amtsgericht Berlin (Charlottenburg).
 BERLIN_REGISTER = "RA000217"
@@ -200,7 +214,7 @@ def run_load() -> int:
 
         with connection, connection.cursor() as cur:
             source_id = ensure_source(cur, key=SOURCE_KEY, name="GLEIF (LEI records, Berlin register)",
-                                      source_type="lei", metadata={"dag_id": DAG_ID, "base_url": LATEST})
+                                      source_type="lei", metadata={"dag_id": DAG_ID, "base_url": LATEST}, details=DETAILS)
             sync_run_id = start_sync_run(cur, source_id=source_id)
             methods: dict[str, int] = {}
             for record in _download(kind):
@@ -241,7 +255,7 @@ def _make_dag():  # noqa: ANN201
     with DAG(
         dag_id=DAG_ID,
         description="Berlin companies with an LEI from GLEIF's open data: new firms, names, addresses, status",
-        schedule="@daily", start_date=datetime(2026, 11, 1, tzinfo=timezone.utc), catchup=False,
+        schedule=SCHEDULE, start_date=datetime(2026, 11, 1, tzinfo=timezone.utc), catchup=False,
         max_active_runs=1, tags=["sources", "register"],
     ) as dag:
         load = pipeline_task("load", run_load)

@@ -40,16 +40,28 @@ from enrichment.officers import load_officers
 from enrichment.register_names import load_former_names
 from enrichment.observations import SOURCE_KEY, SOURCE_NAME, WEBSITE_SOURCE_KEYS, write_company_result
 from source_enrichment_common import (
+    SourceDetails,
+    ensure_source,
     fetch_companies_without_source,
     finish_sync_run,
     get_connection,
-    ensure_source,
+    schedule_label,
     start_sync_run,
 )
 
 log = logging.getLogger(__name__)
 
 DAG_ID = "website_discovery"
+SCHEDULE = "@hourly"
+#: What the app's source page says about this source (German).
+DETAILS = SourceDetails(
+    description=(
+        "Rät Domains aus dem Firmennamen und liest das Impressum. Eine Website zählt nur, wenn die "
+        "Seite die Firma belegt: eigene Registernummer, ein Geschäftsführer aus dem Register oder "
+        "Name und Postleitzahl."
+    ),
+    schedule=f"{schedule_label(SCHEDULE)} in Paketen",
+)
 BATCH_SIZE = int(os.getenv("WEBSITE_DISCOVERY_BATCH_SIZE", "50"))
 #: Companies checked at once. One company is ~11 s, almost all of it waiting on other servers, so
 #: threads help; each company's domains are different hosts, so no one server sees more traffic.
@@ -143,7 +155,7 @@ def run_discover() -> int:
     try:
         with connection, connection.cursor() as cur:
             source_id = ensure_source(cur, key=SOURCE_KEY, name=SOURCE_NAME, source_type="discovery",
-                                      metadata={"dag_id": DAG_ID, "rule": RULE})
+                                      metadata={"dag_id": DAG_ID, "rule": RULE}, details=DETAILS)
             sync_run_id = start_sync_run(cur, source_id=source_id)
             officers = load_officers(cur, [c.id for c in companies])
             former_names = load_former_names(cur, [c.id for c in companies])
@@ -208,7 +220,7 @@ def _make_dag():  # noqa: ANN201
     with DAG(
         dag_id=DAG_ID,
         description="Find company websites and keep only those the Impressum proves",
-        schedule="@hourly", start_date=datetime(2026, 10, 1, tzinfo=timezone.utc), catchup=False,
+        schedule=SCHEDULE, start_date=datetime(2026, 10, 1, tzinfo=timezone.utc), catchup=False,
         max_active_runs=1, tags=["sources", "websites"],
     ) as dag:
         rescore = pipeline_task("rescore_websites", run_rescore)

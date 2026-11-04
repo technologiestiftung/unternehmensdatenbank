@@ -38,10 +38,12 @@ from typing import Any
 
 from enrichment.register_names import ACTIVE, DISSOLVED
 from source_enrichment_common import (
+    SourceDetails,
     ensure_source,
     finish_sync_run,
     get_connection,
     insert_text_observation,
+    schedule_label,
     start_sync_run,
     upsert_source_record,
 )
@@ -50,6 +52,20 @@ log = logging.getLogger(__name__)
 
 DAG_ID = "handelsregister_lookup"
 SOURCE_KEY = "handelsregister_lookup"
+SCHEDULE = None
+#: What the app's source page says about this source (German).
+DETAILS = SourceDetails(
+    description=(
+        "Die Suche des Registerportals, eine Abfrage je Firma nach Registernummer: heutiger Name, "
+        "Sitz und Status, höchstens 50 Firmen je Lauf."
+    ),
+    schedule=schedule_label(SCHEDULE),
+    base_url="https://www.handelsregister.de/rp_web/erweitertesuche/welcome.xhtml",
+    terms=(
+        "Die Nutzungsordnung des Portals erlaubt einzelne Abrufe und höchstens 60 je Stunde; "
+        "systematische Abrufe sind unzulässig (Ziffer 3). Deshalb startet jeden Lauf ein Mensch."
+    ),
+)
 URL = "https://www.handelsregister.de/rp_web/erweitertesuche/welcome.xhtml"
 #: Says who we are. Never a browser's user agent.
 USER_AGENT = "unternehmensdatenbank (Technologiestiftung Berlin; single register lookups, started by hand)"
@@ -219,8 +235,7 @@ def run_lookups() -> int:
         with connection, connection.cursor() as cur:
             source_id = ensure_source(
                 cur, key=SOURCE_KEY, name="Registerportal lookups (handelsregister.de)",
-                source_type="register", metadata={"dag_id": DAG_ID, "base_url": URL},
-            )
+                source_type="register", metadata={"dag_id": DAG_ID, "base_url": URL}, details=DETAILS)
             sync_run_id = start_sync_run(cur, source_id=source_id)
             companies = companies_to_look_up(cur, source_id, MAX_LOOKUPS)
 
@@ -270,7 +285,7 @@ def _make_dag():  # noqa: ANN201
         dag_id=DAG_ID,
         description="Name, seat and status of up to 50 companies from handelsregister.de; started by hand only",
         # Never a schedule and never a self-trigger: see the module docstring (Nutzungsordnung, Ziffer 3).
-        schedule=None, start_date=datetime(2026, 10, 1, tzinfo=timezone.utc), catchup=False,
+        schedule=SCHEDULE, start_date=datetime(2026, 10, 1, tzinfo=timezone.utc), catchup=False,
         max_active_runs=1, tags=["sources", "register"],
     ) as dag:
         lookups = pipeline_task("look_up_companies", run_lookups, returns=True,

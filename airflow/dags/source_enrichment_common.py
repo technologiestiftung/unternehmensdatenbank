@@ -203,27 +203,60 @@ def _rank_company_candidates(companies: list[CompanyCandidate], limit: int) -> l
     return ranked[:limit]
 
 
-def ensure_source(cur: Any, *, key: str, name: str, source_type: str, metadata: dict[str, Any]) -> str:
+#: A DAG's Airflow schedule in the words the app shows. `None` is a DAG a person starts.
+SCHEDULE_LABELS: dict[str | None, str] = {
+    "@hourly": "stündlich", "@daily": "täglich", "@weekly": "wöchentlich", "@monthly": "monatlich",
+    None: "nur von Hand",
+}
+
+
+def schedule_label(schedule: str | None) -> str:
+    """The app's word for an Airflow schedule; a KeyError for one nobody named yet, never a guess."""
+    return SCHEDULE_LABELS[schedule]
+
+
+@dataclass(frozen=True)
+class SourceDetails:
+    """What the app's source page says about a source (German): what it is, where it comes from,
+    under which terms (None: nobody has checked them) and how often it runs. Owned by the code that
+    registers the source, so a new source cannot arrive without it."""
+
+    description: str
+    schedule: str
+    base_url: str | None = None
+    terms: str | None = None
+    terms_url: str | None = None
+
+
+#: Every source's rank unless it says otherwise; a lower one wins before any confidence counts.
+DEFAULT_PRIORITY = 100
+
+
+def ensure_source(cur: Any, *, key: str, name: str, source_type: str, metadata: dict[str, Any],
+                  details: SourceDetails, priority: int = DEFAULT_PRIORITY) -> str:
     cur.execute(
         """
         INSERT INTO public.sources (
-          key,
-          name,
-          source_type,
-          metadata,
-          created_at,
-          updated_at
+          key, name, source_type, metadata, priority, base_url, description, terms, terms_url, schedule,
+          created_at, updated_at
         )
-        VALUES (%s, %s, %s, %s, now(), now())
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, now(), now())
         ON CONFLICT (key)
         DO UPDATE SET
           name = EXCLUDED.name,
           source_type = EXCLUDED.source_type,
           metadata = public.sources.metadata || EXCLUDED.metadata,
+          priority = EXCLUDED.priority,
+          base_url = EXCLUDED.base_url,
+          description = EXCLUDED.description,
+          terms = EXCLUDED.terms,
+          terms_url = EXCLUDED.terms_url,
+          schedule = EXCLUDED.schedule,
           updated_at = now()
         RETURNING id
         """,
-        (key, name, source_type, Json(metadata)),
+        (key, name, source_type, Json(metadata), priority, details.base_url, details.description, details.terms,
+         details.terms_url, details.schedule),
     )
     return cur.fetchone()[0]
 

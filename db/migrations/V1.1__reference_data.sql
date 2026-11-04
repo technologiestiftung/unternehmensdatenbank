@@ -1,61 +1,15 @@
--- Berlin's 77 Technologiefelder with their keywords, and the WZ divisions, as tables (#84).
+-- Reference rows: Berlin's 77 Technologiefelder with their keywords, and the WZ divisions (#84).
 --
--- Until now they lived in two YAML files next to the code (branch_taxonomy.yaml, wz_titles.yaml).
--- From here on these tables are the only source: the classifier reads them, the app shows them.
--- Generated once from those files, which are deleted in the same commit; git keeps them.
+-- Their own file, so V1 stays schema only. ON CONFLICT DO NOTHING: a database whose Flyway history
+-- was reset to the V1 baseline (play, local; docs/data-model.md) already holds these rows and runs
+-- this file without changing one.
 --
--- A change is a migration: adding a keyword is an INSERT, removing one is an UPDATE that sets
+-- A change is a new migration: adding a keyword is an INSERT, removing one is an UPDATE that sets
 -- `removed_at` and `removed_reason` with the measurement that justified it. Rows are never deleted,
 -- so "never add this back" stays known.
 --
 -- `berlin_partner` is a person's name (the field's contact, from Berlin's sheet). It is stored but
 -- not exposed through Hasura; showing it in the app is a separate decision.
-
-CREATE TABLE public.technology_fields (
-    name text PRIMARY KEY,
-    name_en text NOT NULL UNIQUE,
-    senweb_unit text,
-    berlin_partner text,
-    related text[] NOT NULL DEFAULT '{}'
-);
-
-COMMENT ON TABLE public.technology_fields IS 'Berlin''s 77 Technologie- und Anwendungsfelder (#84). The classifier answers with `name`; the database stores and the app shows `name_en`.';
-COMMENT ON COLUMN public.technology_fields.name IS 'Berlin''s official German name; the key the keywords and the classifier use.';
-COMMENT ON COLUMN public.technology_fields.name_en IS 'Our English translation (Berlin publishes none). What technology_field and purpose_field store.';
-COMMENT ON COLUMN public.technology_fields.senweb_unit IS 'The Senate department unit that owns the field, as in Berlin''s sheet.';
-COMMENT ON COLUMN public.technology_fields.berlin_partner IS 'The field''s contact person(s) as named in Berlin''s sheet, comma-separated (67 of 77 fields); NULL where the sheet said "nicht bekannt" or "?" or gave nothing. A person''s name: not exposed through Hasura.';
-COMMENT ON COLUMN public.technology_fields.related IS 'Related fields or WZ codes, as in Berlin''s sheet. Never used to classify.';
-
-CREATE TABLE public.technology_field_keywords (
-    field text NOT NULL REFERENCES public.technology_fields (name) ON UPDATE CASCADE,
-    keyword text NOT NULL,
-    removed_at date,
-    removed_reason text,
-    PRIMARY KEY (field, keyword),
-    CONSTRAINT technology_field_keywords_removed_check
-        CHECK ((removed_at IS NULL) = (removed_reason IS NULL))
-);
-
-COMMENT ON TABLE public.technology_field_keywords IS 'Words on a company''s pages that suggest a Technologiefeld; one row per (field, keyword). Matched case-insensitively, as whole words only.';
-COMMENT ON COLUMN public.technology_field_keywords.keyword IS 'As Berlin wrote it; the classifier normalises it (lower case, NFKC).';
-COMMENT ON COLUMN public.technology_field_keywords.removed_at IS 'Set when the keyword was found wrong for its field. The classifier skips such rows; they are never deleted.';
-COMMENT ON COLUMN public.technology_field_keywords.removed_reason IS 'Why it was removed, with the measurement (texts it fired on, companies it decided).';
-
-CREATE TABLE public.wz_divisions (
-    division text PRIMARY KEY CHECK (division ~ '^[0-9]{2}$'),
-    title text NOT NULL,
-    section text NOT NULL CHECK (section ~ '^[A-Z]$'),
-    section_title text NOT NULL
-);
-
-COMMENT ON TABLE public.wz_divisions IS 'The 87 divisions (Abteilungen) of WZ 2025 in their 22 sections, Statistisches Bundesamt. A company''s WZ cluster is its code''s first two digits looked up here. Never a Technologiefeld.';
-
--- Read-only for the DAGs and the app. The default privileges would give the writer INSERT, UPDATE
--- and DELETE; a change to these lists is a migration, not a pipeline run.
-REVOKE INSERT, UPDATE, DELETE ON public.technology_fields, public.technology_field_keywords,
-    public.wz_divisions FROM ${writer_role};
-GRANT SELECT ON public.technology_fields, public.technology_field_keywords, public.wz_divisions
-    TO ${writer_role}, ${reader_role};
 
 INSERT INTO public.technology_fields (name, name_en, senweb_unit, berlin_partner, related) VALUES
     ('5G- bzw. 6G Anwendungen', '5G/6G Applications', 'IIIB4', 'Juliane Haupt', ARRAY['62.10.3']::text[]),
@@ -134,7 +88,8 @@ INSERT INTO public.technology_fields (name, name_en, senweb_unit, berlin_partner
     ('Wassertechnologien', 'Water Technologies', 'IIIA4', 'Wolfgang Korek', '{}'::text[]),
     ('Web3, Blockchain, DLT', 'Web3, Blockchain, DLT', 'IIIB1', 'Juliane Haupt', ARRAY['FinTech']::text[]),
     ('Werbemarkt', 'Advertising Market', 'IIB4', 'Justina Siegmund-Born', '{}'::text[]),
-    ('Windenergie', 'Wind Energy', 'IIIA4', 'Wolfgang Korek', '{}'::text[]);
+    ('Windenergie', 'Wind Energy', 'IIIA4', 'Wolfgang Korek', '{}'::text[])
+ON CONFLICT DO NOTHING;
 
 INSERT INTO public.technology_field_keywords (field, keyword) VALUES
     ('5G- bzw. 6G Anwendungen', 'Campusnetze'),
@@ -680,11 +635,13 @@ INSERT INTO public.technology_field_keywords (field, keyword) VALUES
     ('Windenergie', 'Windenergieanlagen'),
     ('Windenergie', 'Steuerung'),
     ('Windenergie', 'Turbinen'),
-    ('Windenergie', 'Rotorblätter End-of-life');
+    ('Windenergie', 'Rotorblätter End-of-life')
+ON CONFLICT DO NOTHING;
 
 -- Deleted by hand from the YAML, each with the measurement that justified it. Never add one back
 -- without a new measurement. Handwerk's fifth keyword, a sentence about apprenticeships, was not kept
 -- in the YAML's comment and so is not here either.
+
 INSERT INTO public.technology_field_keywords (field, keyword, removed_at, removed_reason) VALUES
     ('Automobilwirtschaft', 'Transformation', DATE '2026-08-24', '"Transformation" removed 2026-08-24. It fired on 53 texts and decided 6 companies for this branch, every one a consultancy with the word in its OWN NAME — zeitgeist Transformations, TransformIT Europe, Transferagentur Niedersachsen, "Transformation in Healthcare Services". None sells cars. Worth knowing generally: the page text we read includes the company''s own name in its header, so a generic word in a company name assigns that company to itself.'),
     ('Bahnindustrie', 'Instandhaltung', DATE '2026-08-24', '"Instandhaltung" removed 2026-08-24. Measured: it fired on 60 of 7,739 texts and produced 26 of this branch''s 29 assignments on its own. Maintenance is what every workshop, facility manager, machine shop and building service does; it is a chore, not an industry, and none of the 26 was a railway company. Closing the hyphen hole does not help here — the word stands alone on those pages, so the count was 26 with the rule on as well. The branch keeps 28 keywords that do name the railway industry, down to "European Train Control System".'),
@@ -712,7 +669,8 @@ INSERT INTO public.technology_field_keywords (field, keyword, removed_at, remove
     ('Soziale Unternehmen', 'Fair', DATE '2026-08-24', '"Fair" removed 2026-08-24. It fired on 44 texts, and in German it is an adjective every business applies to itself — "faire Preise", "ein fairer Partner". In English it is also a trade fair, which is a different branch entirely. "Impact" and "Gemeinwohl" stay: those are terms of art, and a company writing them has chosen to.'),
     ('Wasserstoff', 'Netz', DATE '2026-08-24', '"Netz" and "Speicher" removed 2026-08-24, and they were 19 of this branch''s 22 assignments. "Im Netz finden Sie uns" is how a German company says "we are online", so `netz` decided: Terre des Hommes (a children''s charity), a car-parts dealer, a vehicle-valuation firm, an office-supplies wholesaler, a theatre-education workshop. `speicher` is any storage — data, water, a warehouse — and decided a crypto UG, a body-care UG and the same theatre workshop. Hydrogen storage is a real thing, and these words are not how a company says it. "Elektrolyseur" stays: nobody writes it by accident, and it is the one word here that only this industry uses.'),
     ('Wasserstoff', 'Speicher', DATE '2026-08-24', '"Netz" and "Speicher" removed 2026-08-24, and they were 19 of this branch''s 22 assignments. "Im Netz finden Sie uns" is how a German company says "we are online", so `netz` decided: Terre des Hommes (a children''s charity), a car-parts dealer, a vehicle-valuation firm, an office-supplies wholesaler, a theatre-education workshop. `speicher` is any storage — data, water, a warehouse — and decided a crypto UG, a body-care UG and the same theatre workshop. Hydrogen storage is a real thing, and these words are not how a company says it. "Elektrolyseur" stays: nobody writes it by accident, and it is the one word here that only this industry uses.'),
-    ('Werbemarkt', 'Social Media', DATE '2026-08-24', '"Social Media" removed 2026-08-24. It fired on 132 of 7,739 texts — the second most common keyword we have — and decided 24 companies for this branch on its own. Read those 24: a sports club, a firm of solicitors, a Caritas care service, a circus association, a landscape gardener, a furniture shop. Exactly one was an advertising business. Every German company links its Instagram in the footer, so the words say nothing about what the company sells. This costs the genuine agencies too — it also supported 29 assignments in other branches — and it is still worth it at 1 right in 12. The branch keeps four words only the trade uses.');
+    ('Werbemarkt', 'Social Media', DATE '2026-08-24', '"Social Media" removed 2026-08-24. It fired on 132 of 7,739 texts — the second most common keyword we have — and decided 24 companies for this branch on its own. Read those 24: a sports club, a firm of solicitors, a Caritas care service, a circus association, a landscape gardener, a furniture shop. Exactly one was an advertising business. Every German company links its Instagram in the footer, so the words say nothing about what the company sells. This costs the genuine agencies too — it also supported 29 assignments in other branches — and it is still worth it at 1 right in 12. The branch keeps four words only the trade uses.')
+ON CONFLICT DO NOTHING;
 
 INSERT INTO public.wz_divisions (division, title, section, section_title) VALUES
     ('01', 'Landwirtschaft, Jagd und damit verbundene Tätigkeiten', 'A', 'LAND- UND FORSTWIRTSCHAFT, FISCHEREI'),
@@ -801,4 +759,5 @@ INSERT INTO public.wz_divisions (division, title, section, section_title) VALUES
     ('96', 'Erbringung von überwiegend persönlichen Dienstleistungen', 'T', 'ERBRINGUNG VON SONSTIGEN DIENSTLEISTUNGEN'),
     ('97', 'Private Haushalte mit Hauspersonal', 'U', 'PRIVATE HAUSHALTE MIT HAUSPERSONAL SOWIE HERSTELLUNG VON WAREN UND ERBRINGUNG VON DIENSTLEISTUNGEN DURCH PRIVATE HAUSHALTE FÜR DEN EIGENBEDARF OHNE AUSGEPRÄGTEN SCHWERPUNKT'),
     ('98', 'Herstellung von Waren und Erbringung von Dienstleistungen durch private Haushalte für den Eigenbedarf ohne ausgeprägten Schwerpunkt', 'U', 'PRIVATE HAUSHALTE MIT HAUSPERSONAL SOWIE HERSTELLUNG VON WAREN UND ERBRINGUNG VON DIENSTLEISTUNGEN DURCH PRIVATE HAUSHALTE FÜR DEN EIGENBEDARF OHNE AUSGEPRÄGTEN SCHWERPUNKT'),
-    ('99', 'Exterritoriale Organisationen und Körperschaften', 'V', 'EXTERRITORIALE ORGANISATIONEN UND KÖRPERSCHAFTEN');
+    ('99', 'Exterritoriale Organisationen und Körperschaften', 'V', 'EXTERRITORIALE ORGANISATIONEN UND KÖRPERSCHAFTEN')
+ON CONFLICT DO NOTHING;

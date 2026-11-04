@@ -13,11 +13,20 @@ from __future__ import annotations
 import logging
 from datetime import date, datetime, timezone
 
-from source_enrichment_common import get_connection
+from source_enrichment_common import SourceDetails, ensure_source, get_connection, schedule_label
 
 log = logging.getLogger(__name__)
 
 DAG_ID = "foerderkatalog"
+SCHEDULE = "@monthly"
+#: What the app's source page says about this source (German).
+DETAILS = SourceDetails(
+    description=(
+        "Jede Förderung des Bundes an Empfänger in Berlin, über Name und Ort einer Firma zugeordnet."
+    ),
+    schedule=schedule_label(SCHEDULE),
+    base_url="https://foerderportal.bund.de/foekat/",
+)
 
 _UPSERT_SQL = """
     INSERT INTO public.company_fundings
@@ -82,6 +91,8 @@ def run_foerderkatalog() -> None:
     connection = get_connection()
     try:
         with connection, connection.cursor() as cur:
+            ensure_source(cur, key="foerderkatalog", name="Förderkatalog des Bundes", source_type="fundings",
+                          metadata={"dag_id": DAG_ID}, details=DETAILS)
             execute_values(cur, _UPSERT_SQL, rows, page_size=1000)
             # Grants are linked to companies once here, not on every read (`company_funding_links`).
             cur.execute("SELECT public.refresh_company_funding_links()")
@@ -103,7 +114,7 @@ def _make_dag():  # noqa: ANN201
     with DAG(
         dag_id=DAG_ID,
         description="Monthly grants for Berlin recipients from the Förderkatalog des Bundes",
-        schedule="@monthly",
+        schedule=SCHEDULE,
         start_date=datetime(2026, 10, 1, tzinfo=timezone.utc),
         catchup=False,
         max_active_runs=1,

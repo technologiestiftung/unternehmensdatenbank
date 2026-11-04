@@ -8,12 +8,13 @@ The hub does not run Flyway for us; it runs an **image** we build, before the ap
 | kind | example | goes where |
 |---|---|---|
 | schema | a new table or column | a migration |
-| reference data the code needs | `sources` rows with their priority | a migration |
+| reference data the code needs | Technologiefelder, their keywords, WZ divisions | a migration |
+| a source | its `sources` row, priority and text | **never**: its DAG writes them with `ensure_source` (`priority`, `SourceDetails`) on every run |
 | a one-off data fix | deduplicating rows a bug wrote twice | a migration |
 | business data | OffeneRegister, Förderkatalog, enrichment, votes | **never**: the DAGs and the app write it |
 
-The test: if an empty database needs it to work, it is a migration. If it changes every quarter, it
-is a pipeline.
+The test: if an empty database needs it to work and no DAG writes it, it is a migration. If it
+changes every quarter, it is a pipeline.
 
 ## The migration image
 

@@ -57,6 +57,7 @@ from manager_ner.ner import (
 )
 from enrichment import corpus, model_store
 from source_enrichment_common import (
+    SourceDetails,
     ensure_source,
     finish_sync_run,
     get_connection,
@@ -68,6 +69,14 @@ from source_enrichment_common import (
 log = logging.getLogger(__name__)
 
 SOURCE_KEY = "spacy_ner"
+#: What the app's source page says about this source (German).
+DETAILS = SourceDetails(
+    description=(
+        "Namen der Geschäftsführung, die ein spaCy-Modell im Impressum findet. Das Modell wird mit "
+        "den Bewertungen aus der App weiter trainiert."
+    ),
+    schedule="nach der Website-Suche",
+)
 MODEL_NAME = "manager_ner"
 MODEL_DIR = Path(os.getenv("MANAGER_NER_MODEL_DIR", "/opt/airflow/data/models/manager_ner"))
 BASE_MODEL = os.getenv("MANAGER_NER_BASE_MODEL", "de_core_news_md")
@@ -172,8 +181,7 @@ def run_extract() -> None:
         with connection, connection.cursor() as cur:
             source_id = ensure_source(
                 cur, key=SOURCE_KEY, name="spaCy manager names", source_type="ner_model",
-                metadata={"dag_id": "manager_ner_extract"},
-            )
+                metadata={"dag_id": "manager_ner_extract"}, details=DETAILS)
             sync_run_id = start_sync_run(cur, source_id=source_id)
             forgotten = _forget_reads_of_old_websites(cur)
             companies = _companies_to_read(cur)

@@ -61,9 +61,19 @@ import psycopg2  # noqa: E402
 from psycopg2.extras import Json, execute_values  # noqa: E402
 from enrichment.register_names import ACTIVE, DISSOLVED, legal_form  # noqa: E402
 from pipeline_coordinator.resolver import REGISTER_FIELDS, resolve_register_fields  # noqa: E402
-from source_enrichment_common import ensure_source  # noqa: E402
+from source_enrichment_common import SourceDetails, ensure_source  # noqa: E402
 
 SOURCE_KEY = "offeneregister"
+#: What the app's source page says about this source (German).
+DETAILS = SourceDetails(
+    description=(
+        "Ein Abzug des Handelsregisters, gelesen von Juni 2017 bis Januar 2019: Name, Rechtsform, "
+        "Adresse, Status und Registernummer jeder Firma am Amtsgericht Charlottenburg. Die Grundlage "
+        "aller anderen Quellen."
+    ),
+    schedule="einmal importiert",
+    base_url="https://offeneregister.de",
+)
 FLAGS = {"AD": "register_flag_AD", "CD": "register_flag_CD", "DK": "register_flag_DK",
          "HD": "register_flag_HD", "SI": "register_flag_SI", "UT": "register_flag_UT",
          "VÖ": "register_flag_VOE"}
@@ -199,6 +209,7 @@ def main() -> int:
         source_id = ensure_source(
             cur, key=SOURCE_KEY, name="OffeneRegister (Handelsregister snapshot 2017–2019)",
             source_type="register", metadata={"file": Path(sys.argv[1]).name, "federal_state": FEDERAL_STATE},
+            details=DETAILS,
         )
         cur.execute("SELECT 'Amtsgericht ' || value, company_id FROM public.company_identifiers WHERE scheme = 'register'")
         company_ids = dict(cur.fetchall())

@@ -34,6 +34,7 @@ from psycopg2.extras import Json
 from enrichment import activity_keywords as ak
 from enrichment import corpus
 from source_enrichment_common import (
+    SourceDetails,
     companies_with_website_to_read,
     ensure_source,
     failed_read_payload,
@@ -48,6 +49,14 @@ log = logging.getLogger(__name__)
 
 DAG_ID = "website_keywords"
 SOURCE_KEY = "website_keywords"
+#: What the app's source page says about this source (German).
+DETAILS = SourceDetails(
+    description=(
+        "Stichworte aus Meta-Tags und Überschriften der Leistungs- und Produktseiten der belegten "
+        "Website. Zu häufige Wörter werden über alle Firmen herausgerechnet."
+    ),
+    schedule="nach der Website-Suche",
+)
 FIELD_NAME = "activity_keywords"
 BATCH_SIZE = int(os.getenv("WEBSITE_KEYWORDS_BATCH_SIZE", "50"))
 CONFIDENCE = 0.6
@@ -55,7 +64,7 @@ CONFIDENCE = 0.6
 
 def _source_id(cur: Any) -> str:
     return ensure_source(cur, key=SOURCE_KEY, name="Website keywords", source_type="website",
-                         metadata={"dag_id": DAG_ID})
+                         metadata={"dag_id": DAG_ID}, details=DETAILS)
 
 
 # --- read -----------------------------------------------------------------------------------
