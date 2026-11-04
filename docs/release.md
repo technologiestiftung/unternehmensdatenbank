@@ -77,6 +77,31 @@ corpus bucket). `manager_ner_train` publishes every run's metrics there and a pr
 `current.json`; `manager_ner_extract` downloads the current version into `MANAGER_NER_MODEL_DIR`, which
 is only a working copy. The hub needs the bucket and the `CORPUS_S3_*` settings for both.
 
+### S3 on the hub (#85)
+
+- **The settings reach a pod only through `pipeline_secret`.** A pod gets that secret as its
+  environment, not the worker's settings. Put these keys next to `PG_DSN`:
+
+  | key | value |
+  |---|---|
+  | `CORPUS_S3_ENDPOINT` | `host:port`, without `https://` |
+  | `CORPUS_S3_ACCESS_KEY`, `CORPUS_S3_SECRET_KEY` | the key for the bucket |
+  | `CORPUS_S3_BUCKET` | default `company-corpus` |
+  | `CORPUS_S3_SECURE` | `true` when the endpoint uses TLS |
+
+- **Create the bucket before the first run.** The code creates it only when it is missing, which a key
+  scoped to one bucket usually may not do. The key needs, on that bucket only: HeadBucket, GetObject,
+  PutObject and HEAD on objects (StatObject). The code never lists or deletes.
+- **Private, no public read.** The bucket holds Impressum pages in full, with names, emails and
+  phone numbers. A privacy review comes before any of it leaves local development (#18).
+- **Check it right after deploying.** In a pod or container of the pipelines image, from the DAGs
+  folder: `python -m enrichment.corpus`. It writes `healthcheck/ping` and reads it back; it prints
+  `company corpus: OK` or the S3 error (`SignatureDoesNotMatch`, `AccessDenied`, ...) and exits 1.
+- **A wrong key is logged, once.** A store that fails behaves like an empty one, so a DAG does not
+  stop over its cache. Each S3 error is logged once per task run as a warning; a wrong key, a missing
+  permission or a missing bucket also switches the store off for the rest of the run. Model reads and
+  writes (`model_store`) raise instead, so the model DAGs fail.
+
 ```bash
 docker build -f airflow/pipelines.Dockerfile -t udb-pipelines airflow
 docker run --rm -e PG_DSN="host=host.docker.internal port=5433 dbname=unternehmensdatenbank user=writer password=writer" \
@@ -126,6 +151,10 @@ No `:latest`, and tags are never overwritten: a hotfix is a new patch release.
 - **One-time repo settings:** required reviewers on the `production` environment; protect `main`.
 
 ## Open
+
+- **S3 on the hub** (#85), questions for the hub team (datahub@ts.berlin): who creates the bucket and
+  the key? Is the store MinIO, at which endpoint, with TLS? Is there encryption at rest, a backup, a
+  retention or deletion policy? Can pods reach it from our namespace?
 
 - **Hasura metadata** (`hasura/metadata/`): applied by the Hasura image on start locally. Whether the
   hub applies it, or we do with `hasura metadata apply`, is open.

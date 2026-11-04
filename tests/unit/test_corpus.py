@@ -40,6 +40,41 @@ def test_an_unreachable_store_is_switched_off_for_the_run(s3, monkeypatch) -> No
     assert not corpus.enabled()  # no timeout per page for the rest of the run
 
 
+def test_a_wrong_key_is_logged_once_and_switches_the_store_off(s3, monkeypatch, caplog) -> None:  # noqa: ANN001
+    from tests.unit.conftest import S3Error
+
+    def deny(*_args, **_kwargs):  # noqa: ANN002, ANN003, ANN202
+        raise S3Error("AccessDenied")
+
+    monkeypatch.setattr(s3, "stat_object", deny)
+    monkeypatch.setattr(s3, "put_object", deny)
+    corpus.put("page", "https://a.de", {"html": "<p>A</p>"})
+    corpus.get("page", "https://a.de")
+    assert not corpus.enabled()
+    assert [r.levelname for r in caplog.records if "AccessDenied" in r.getMessage()] == ["WARNING"]
+
+
+def test_another_s3_error_is_logged_once_and_keeps_the_store_on(s3, monkeypatch, caplog) -> None:  # noqa: ANN001
+    from tests.unit.conftest import S3Error
+
+    def fail(*_args, **_kwargs):  # noqa: ANN002, ANN003, ANN202
+        raise S3Error("InternalError")
+
+    monkeypatch.setattr(s3, "stat_object", fail)
+    for url in ("https://a.de", "https://b.de"):
+        assert corpus.get("page", url) is None
+    assert corpus.enabled()
+    assert len([r for r in caplog.records if "InternalError" in r.getMessage()]) == 1
+
+
+def test_the_deployment_check_writes_and_reads_back(s3, monkeypatch) -> None:  # noqa: ANN001
+    corpus.check()
+    assert "healthcheck/ping" in s3.objects
+    monkeypatch.delenv("CORPUS_S3_ENDPOINT")
+    with pytest.raises(RuntimeError, match="CORPUS_S3_ENDPOINT"):
+        corpus.check()
+
+
 def test_the_page_cache_uses_the_corpus_when_no_directory_is_set(s3) -> None:  # noqa: ANN001
     page_cache.put("probe", "https://b.de", {"html": "<p>B</p>", "status_code": 200})
     assert page_cache.get("probe", "https://b.de")["html"] == "<p>B</p>"
