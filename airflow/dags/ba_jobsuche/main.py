@@ -11,11 +11,13 @@ a schedule or let it trigger itself without a new decision.
 
 **What a run does.** Reads every open job ad in Berlin (`wo=Berlin`, no radius), `PAGE_SIZE` per
 request, `PAUSE_S` apart. Groups the ads by employer (`arbeitgeberKundennummerHash`, the agency's
-pseudonymous employer id): name, Berlin postcodes of the ads, number of ads. Matches each employer to
-one of our companies by name and postcode (`enrichment.name_match`). Only a match is stored, as a
-source record of that company; an employer matching none is counted in the log, never stored. A job ad
-names contact persons in its detail view; the list read here does not, and nothing but the employer
-is kept. Nothing is written as an observation yet: the counts are a signal of activity and size, never
+pseudonymous employer id; an ad without one is skipped): name, Berlin postcodes of the ads, number of
+ads. Matches each employer to one of our companies by name and postcode (`enrichment.name_match`). Only
+a match is stored, as a source record of that company; an employer matching none is counted in the log,
+never stored. A record whose employer has no ads now goes inactive, but only after a full read: a read
+that stops early sets none inactive, and a refused first page fails the run. A job ad names contact
+persons in its detail view; the list read here does not, and nothing but the employer is kept. Nothing
+is written as an observation yet: the counts are a signal of activity and size, never
 an employee count, and showing them needs a decision first.
 
 `BA_JOBSUCHE_API_KEY` is the public client id the job search web app sends (see bund.dev); read from
@@ -57,7 +59,9 @@ def _source_id(cur: Any) -> str:
 
 def read_ads() -> tuple[list[dict[str, Any]], int]:
     """Every Berlin job ad of the list view, and how many the agency says there are."""
-    key = os.environ["BA_JOBSUCHE_API_KEY"]
+    key = os.getenv("BA_JOBSUCHE_API_KEY", "")
+    if not key:
+        raise RuntimeError("BA_JOBSUCHE_API_KEY is not set.")
     session = requests.Session()
     session.headers.update({"X-API-Key": key, "User-Agent": USER_AGENT})
     ads: list[dict[str, Any]] = []
@@ -66,6 +70,8 @@ def read_ads() -> tuple[list[dict[str, Any]], int]:
         response = session.get(URL, params={"wo": "Berlin", "umkreis": 0, "angebotsart": 1,
                                             "size": PAGE_SIZE, "page": page}, timeout=30)
         if response.status_code != 200:
+            if page == 1:
+                raise RuntimeError(f"The job search answered HTTP {response.status_code} on page 1.")
             # The interface may cap how deep one can page; what was read is kept and the gap logged.
             log.warning("Page %d answered HTTP %d; stopping with %d ads read.", page, response.status_code, len(ads))
             break
@@ -80,14 +86,18 @@ def read_ads() -> tuple[list[dict[str, Any]], int]:
 
 
 def employers(ads: Iterable[dict[str, Any]]) -> dict[str, dict[str, Any]]:
-    """Ads grouped by employer: {employer id: {name, postcodes, ads}}. The name is the one most ads use."""
+    """Ads grouped by employer: {employer id: {name, postcodes, ads}}. The name is the one most ads use.
+
+    An ad without an employer id or a name is skipped and counted in the log."""
     names: dict[str, Counter] = {}
     postcodes: dict[str, set[str]] = {}
     counts: Counter = Counter()
+    skipped = 0
     for ad in ads:
         name = (ad.get("firma") or "").strip()
-        employer = ad.get("arbeitgeberKundennummerHash") or name
+        employer = ad.get("arbeitgeberKundennummerHash")
         if not employer or not name:
+            skipped += 1
             continue
         names.setdefault(employer, Counter())[name] += 1
         counts[employer] += 1
@@ -95,6 +105,8 @@ def employers(ads: Iterable[dict[str, Any]]) -> dict[str, dict[str, Any]]:
             postcode = (place.get("adresse") or {}).get("plz")
             if is_berlin_postcode(postcode):
                 postcodes.setdefault(employer, set()).add(postcode)
+    if skipped:
+        log.info("%d ads without an employer id or a name skipped.", skipped)
     return {employer: {"name": names[employer].most_common(1)[0][0],
                        "postcodes": sorted(postcodes.get(employer, set())), "ads": counts[employer]}
             for employer in counts}
@@ -125,10 +137,13 @@ def run_read() -> int:
                        found[employer]["name"], Json({**found[employer], "read_on": today}), "fuzzy", confidence)
                       for employer, (company_id, confidence) in matches.items()],
                     template="(%s, %s, %s, %s, %s, %s, %s, %s, now(), true)", page_size=1000)
-            # An employer without ads now keeps its record, inactive: never deleted.
-            cur.execute("UPDATE public.company_source_records SET is_active = false"
-                        " WHERE source_id = %s AND is_active AND NOT (external_id = ANY(%s))",
-                        (source_id, list(matches)))
+            # An employer without ads now keeps its record, inactive: never deleted. Only after a full read.
+            if len(ads) >= total:
+                cur.execute("UPDATE public.company_source_records SET is_active = false"
+                            " WHERE source_id = %s AND is_active AND NOT (external_id = ANY(%s))",
+                            (source_id, list(matches)))
+            else:
+                log.warning("Only %d of %d ads read; no record set inactive.", len(ads), total)
             cur.execute("UPDATE public.sources SET last_synced_at = now() WHERE id = %s", (source_id,))
             finish_sync_run(cur, sync_run_id=sync_run_id, records_seen=len(found), records_created=len(matches),
                             records_updated=0, records_failed=0)
