@@ -35,6 +35,7 @@ Record counts are from the local database on 2026-11-02.
 | `wikidata` | official websites (property P856) Wikidata lists for Berlin organisations | DAG `wikidata`: one SPARQL query, each website verified like a guessed domain | daily | 0 here (531 matched in a local copy, 2026-10-30) |
 | `common_crawl` | Impressum pages in the Common Crawl that name a Berlin register number | DAG `common_crawl`: 300 index blocks a run, each website verified like a guessed domain | weekly | 0 here (pilot: 21 websites from 5,000 pages, #56) |
 | `impressum_contacts` | email and phone from the Impressum of the proven website | DAG `website_contacts` | after discovery | 150 |
+| `impressum` | the company's current address, as its own Impressum states it, when the page names its register number and no other | DAG `impressum_address`: the page's first address, only when it is in Berlin; confidence 0.8, so it wins against OffeneRegister's 2017–2019 address but not against one a register read this year (#141) | daily | not run yet |
 | `website_keywords` | keywords from meta tags and services/products headings | DAG `website_keywords` | after discovery | 150 |
 | `structured_data` | the founding date or year a company's own website states in its structured data (schema.org) | DAG `structured_data`: reads stored pages of the published website, no downloads | weekly | 12 (local, 2026-11-04, whole-name rule) |
 | `branch_classifier` | Technologiefeld from the keywords on the website ([branch-classification](branch-classification.md)) | DAG `technology_field`; a spaCy text classifier may fill gaps | after discovery | 542 |
@@ -69,7 +70,7 @@ The goal is one record per Berlin company with 20 columns. Counts are from the l
 | 4 | Förderungen | `funding_count`, `funding_total_eur`, `fundings` | `foerderkatalog`, `berlin_zuwendungen`, `cordis` | 5,189 companies with a grant |
 | 5 | WZ-Nummer | `wz_code` | no source yet: OffeneRegister has none | 0 |
 | 6 | Gründungsdatum | `established_at`, `established_year` | `structured_data` (the year goes to `founding_year`, V6; a full date also to `established_at`) | year 12, date 0 (local, 2026-11-04, whole-name rule) |
-| 7 | Adresse | `address`, `postcode`, `city` | OffeneRegister, `gleif` (the legal address, newer); seat from `handelsregister_lookup` | city 296,897; street and postcode 116,527 |
+| 7 | Adresse | `address`, `postcode`, `city` | OffeneRegister, `gleif` (the legal address, newer), `impressum` (the address on the company's own Impressum); seat from `handelsregister_lookup` | city 296,897; street and postcode 116,527 |
 | 8 | Rechtsform | `legal_form` | OffeneRegister, `gleif` (both read from the end of the name) | 257,244 |
 | 9 | Cluster (n=5) | — | removed with #47; comes back with a classifier | — |
 | 10 | Technologiefeld | `technology_field` | `branch_classifier` | 194 |
