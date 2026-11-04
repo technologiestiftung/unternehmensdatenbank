@@ -153,6 +153,19 @@ proves another company in our database, and register numbers we do not have at a
 the guesses missed: `hma-berlin.de` (abbreviation plus "berlin", #89) and a "Legal Notice" link
 that was never followed (#109).
 
+**A site run from abroad is refused (#111).** `imprint_abroad`: the Impressum (or, without one, the
+page) gives a foreign VAT or company number (`ATU…`, `CHE-…`, `CH-…`, Danish CVR) or a US-style address
+before the first German postcode, or, in an Impressum only, a foreign phone number or country and no
+German postcode (on a homepage "Export in die USA" or "Märkische Schweiz" is sales text);
+"Deutschland", "Germany" or +49 anywhere means not abroad. A US address later on the page is a
+service provider in the privacy text and does not count. Only proof lifts it: the company's own
+register number or a register officer on the page. Measured on the 50 hand-checked sites, before
+weak signs were limited to the Impressum and the phone number to 7 digits: 9 of 29 namesakes, 1
+parent and 1 unclear site refused, both own sites kept; on 100 proven websites of the #89 test set 1
+flagged (sourcepoint.com, kept: a register officer is on its Impressum). Register entries
+written with a space (`HR B 61871`) are now read, so such a page can be another company's
+(`REGISTER_MISMATCH`). Both apply when a site is read again (every 90 days), not to stored rows.
+
 ## Pages are cached, so extraction changes are cheap to try
 
 `COMBINED_PAGE_CACHE_DIR` turns on a disk cache of raw HTML and status, for measurement runs. Inside
