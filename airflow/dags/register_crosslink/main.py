@@ -70,6 +70,17 @@ def proposals_from(rows: Iterable[tuple[str, str, str]]) -> dict[str, tuple[str,
     }
 
 
+def crowded_hosts(rows: Iterable[tuple[str, str, str]]) -> set[str]:
+    """Hosts of (page url, register entry, company id) rows that name more than `MAX_COMPANIES_PER_HOST`
+    of our companies: proposed for nobody, and their earlier records retired (#125)."""
+    by_host: dict[str, set[str]] = {}
+    for url, _, company_id in rows:
+        host = host_of(url)
+        if host:
+            by_host.setdefault(host, set()).add(company_id)
+    return {host for host, named in by_host.items() if len(named) > MAX_COMPANIES_PER_HOST}
+
+
 def run_harvest() -> int:
     """Turn discovery's mismatches into proposals. Returns how many (site, company) proposals exist."""
     connection = get_connection()
@@ -92,34 +103,37 @@ def run_harvest() -> int:
                 """,
                 (conf.REGISTER_MISMATCH,),
             )
-            found = proposals_from(cur.fetchall())
-            if not found:
-                return 0
-            execute_values(cur, """
-                INSERT INTO public.company_source_records
-                  (company_id, source_id, external_id, external_url, source_company_name, source_payload,
-                   match_method, match_confidence, matched_at, is_active)
-                VALUES %s
-                ON CONFLICT (source_id, external_id) DO UPDATE SET
-                  -- Found again: what it proved and when it was verified stay.
-                  source_payload = EXCLUDED.source_payload || jsonb_build_object(
-                    'verified_at', public.company_source_records.source_payload -> 'verified_at',
-                    'proven_urls', public.company_source_records.source_payload -> 'proven_urls'),
-                  last_seen_at = now(), last_synced_at = now(), is_active = true
-            """, [(company_id, source_id, external_id, f"https://{host}", host,
-                   Json({"register": entry, "websites": [f"https://{host}"]}))
-                  for external_id, (company_id, host, entry) in found.items()],
-                template="(%s, %s, %s, %s, %s, %s, 'identifier', 1.0, now(), true)", page_size=1000)
+            rows = cur.fetchall()
+            found = proposals_from(rows)
+            if found:
+                execute_values(cur, """
+                    INSERT INTO public.company_source_records
+                      (company_id, source_id, external_id, external_url, source_company_name, source_payload,
+                       match_method, match_confidence, matched_at, is_active)
+                    VALUES %s
+                    ON CONFLICT (source_id, external_id) DO UPDATE SET
+                      -- Found again: what it proved and when it was verified stay.
+                      source_payload = EXCLUDED.source_payload || jsonb_build_object(
+                        'verified_at', public.company_source_records.source_payload -> 'verified_at',
+                        'proven_urls', public.company_source_records.source_payload -> 'proven_urls'),
+                      last_seen_at = now(), last_synced_at = now(), is_active = true
+                """, [(company_id, source_id, external_id, f"https://{host}", host,
+                       Json({"register": entry, "websites": [f"https://{host}"]}))
+                      for external_id, (company_id, host, entry) in found.items()],
+                    template="(%s, %s, %s, %s, %s, %s, 'identifier', 1.0, now(), true)", page_size=1000)
+            retired = proposals.retire_group_hosts(cur, source_id=source_id, max_companies=MAX_COMPANIES_PER_HOST,
+                                                   also=crowded_hosts(rows))
     finally:
         connection.close()
-    log.info("%d proposals from discovery pages that print one of our companies' register numbers.", len(found))
-    return len(found)
+    log.info("%d proposals from discovery pages that print one of our companies' register numbers;"
+             " %d websites of group hosts dropped.", len(found), retired)
+    return len(found) + retired
 
 
 def run_verify() -> int:
     return proposals.verify_batch(
         source_id_of=_source_id, provider=SOURCE_KEY, method=conf.METHOD_REGISTER_CROSSLINK,
-        batch_size=BATCH_SIZE, recheck_after_days=RECHECK_AFTER_DAYS, workers=WORKERS,
+        batch_size=BATCH_SIZE, recheck_after_days=RECHECK_AFTER_DAYS, workers=WORKERS, active_only=True,
     )
 
 

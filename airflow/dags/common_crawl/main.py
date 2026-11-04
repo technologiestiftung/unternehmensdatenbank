@@ -97,6 +97,9 @@ def run_harvest() -> int:
             source_id = _source_id(cur)
             sync_run_id = start_sync_run(cur, source_id=source_id)
             proposed = propose(cur, found, source_id=source_id, crawl=crawl)
+            # A host found for a third company in a later batch: its earlier records go too (#125).
+            retired = proposals.retire_group_hosts(cur, source_id=source_id, max_companies=MAX_COMPANIES_PER_PAGE,
+                                                   also=crowded_hosts(cur, found))
             unknown, new_firms = unknown_pages(cur, found)
             state["next"] = start + len(blocks)
             cur.execute(
@@ -108,11 +111,11 @@ def run_harvest() -> int:
             )
             finish_sync_run(cur, sync_run_id=sync_run_id, records_seen=len(records), records_created=proposed,
                             records_updated=0, records_failed=0)
-        log.info("%s blocks %d-%d of %d: %d Impressum pages, %d with a Berlin register number, %d proposals;"
-                 " %d pages naming only HRA/HRB numbers we do not have, %d of them one above the OffeneRegister"
+        log.info("%s blocks %d-%d of %d: %d Impressum pages, %d with a Berlin register number, %d proposals, %d websites"
+                 " of group hosts dropped (#125); %d pages naming only HRA/HRB numbers we do not have, %d of them one above the OffeneRegister"
                  " range (#99, this run only).",
                  crawl, start, state["next"], len(state["blocks"]), len(records), len(found), proposed,
-                 unknown, new_firms)
+                 retired, unknown, new_firms)
         return len(blocks)
     finally:
         connection.close()
@@ -168,6 +171,21 @@ def count_unknown_pages(pages: list[list[tuple[str, str]]], known: set[str],
                if not any(known.intersection(cc.identifier_values(kind, number)) for kind, number in page)]
     return len(unknown), sum(any(is_new_firm(f"{kind} {number}", line) for kind, number in page)
                              for page in unknown)
+
+
+def crowded_hosts(cur: Any, found: list[tuple[cc.Record, list[tuple[str, str]]]]) -> set[str]:
+    """Hosts in this batch whose pages name more than `MAX_COMPANIES_PER_PAGE` of our companies."""
+    hosts_of: dict[str, set[str]] = {}
+    for record, registers in found:
+        for register in registers:
+            for value in cc.identifier_values(*register):
+                hosts_of.setdefault(value, set()).add(record.host)
+    if not hosts_of:
+        return set()
+    cur.execute("SELECT value, company_id FROM public.company_identifiers WHERE scheme = 'register' AND value = ANY(%s)",
+                (list(hosts_of),))
+    matches = [(host, company_id) for value, company_id in cur.fetchall() for host in hosts_of[value]]
+    return {host for host, _ in matches} - own_pages(matches)
 
 
 def own_pages(matches: list[tuple[str, str]]) -> set[str]:
