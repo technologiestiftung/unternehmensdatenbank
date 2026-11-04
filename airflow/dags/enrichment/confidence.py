@@ -73,6 +73,9 @@ from dataclasses import dataclass, field
 
 REGISTER_MATCH = "register_number_match"
 REGISTER_MISMATCH = "register_number_mismatch"
+#: The Impressum (or, without one, the page) is a business abroad: a foreign VAT or company number,
+#: a US-style address, or a foreign phone or country and no German postcode (#111).
+IMPRINT_ABROAD = "imprint_abroad"
 #: A Geschäftsführer named on the page's Impressum is one of this company's officers in the register.
 #: Identity evidence of the same kind as the register number: a fact about THIS company that a
 #: directory or another company's site has no reason to carry on its own Impressum.
@@ -294,6 +297,7 @@ def register_number_is_on_page(digits: str, text: str) -> bool:
 #: Evidence that ends the discussion.
 _DISQUALIFIERS = {
     REGISTER_MISMATCH: "the page prints a different company's register number",
+    IMPRINT_ABROAD: "the page is a business abroad",
     DIRECTORY_HOST: "the host is a business directory, not a company",
     HOST_NAME_MISMATCH: "the domain does not carry the company's name",
     GENERIC_HOST: "the domain names an industry, which cannot identify one company",
@@ -324,12 +328,17 @@ _DISQUALIFIERS = {
 #:    emit this evidence for a page whose PATH looks like a directory listing, since a listing's
 #:    structured data names the company it is listing.
 #:
+#: 4. **A page abroad** (#111) is refused because in the hand check (#96) such pages were another
+#:    business with the same name. Only proof answers that: our register number or officer on it.
+#:
 #: `DIRECTORY_HOST` and `REGISTER_MISMATCH` appear in neither list and never will. A register
 #: number on a directory page proves the page is ABOUT the company, never that it IS its site, and
 #: a business whose mapped email sits at a directory is a mapping error rather than a website.
 _LIFTED_BY: dict[str, frozenset[str]] = {
     GENERIC_HOST: frozenset({REGISTER_MATCH}),
     HOST_NAME_MISMATCH: frozenset({OSM_EMAIL_DOMAIN, JSONLD_NAME_MATCH}),
+    # A group's site abroad that prints our own register entry or names our Geschäftsführer is ours.
+    IMPRINT_ABROAD: frozenset({REGISTER_MATCH, OFFICER_MATCH}),
 }
 
 BANDS = (

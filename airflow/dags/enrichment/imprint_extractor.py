@@ -28,7 +28,8 @@ from bs4 import BeautifulSoup
 #: branch fails there and the plain `\d+` branch correctly returns `12345`. Groups must be exactly
 #: three digits, so only real thousands separators join.
 REGISTER_RE = re.compile(
-    r"\b(HRA|HRB|VR|GnR|PR)\s*(?:-?\s*Nr\.?)?\s*[.:\s]?\s*"
+    # "HR B 61871" with a space is common too (HmcS, Hannover; #111): read as HRB.
+    r"\b(HRA|HRB|HR[ \u00a0][AB]\b|VR|GnR|PR)\s*(?:-?\s*Nr\.?)?\s*[.:\s]?\s*"
     # A Berlin entry is often printed with its "B" glued on, "HRB 132889B" (#89): the B ends the
     # number as a word boundary would, or such a page could never prove its company.
     r"(\d{1,3}(?:[ .  ]\d{3})+|\d+)(?:B\b|\b)",
@@ -184,7 +185,8 @@ def extract_register_numbers(text: str) -> list[str]:
     """
     found: list[str] = []
     for match in REGISTER_RE.finditer(text):
-        prefix = _REGISTER_CASE.get(match.group(1).upper(), match.group(1).upper())
+        raw = re.sub(r"\s", "", match.group(1)).upper()
+        prefix = _REGISTER_CASE.get(raw, raw)
         # Normalised here, at the one place an entry is assembled, so no caller ever has to know
         # that "HRB 222 442" and "HRB 222442" are the same entry. `confidence.register_digits` and
         # `scorer._reg_digits` both strip non-digits anyway; this keeps the stored string clean too.
@@ -233,6 +235,62 @@ def extract_postcodes(text: str) -> list[str]:
             continue
         seen.append(code)
     return seen
+
+
+#: Signs that a page belongs to a business abroad (#111). In the hand check of 50 unproven sites
+#: (#96) about 16 of 38 wrong ones were run from the US, Canada, Denmark, Austria, Vietnam, Dubai or
+#: Puerto Rico, and said so: a foreign VAT or company number, a US-style address, a foreign phone
+#: number, or the country. Each is weak alone; `is_abroad` also requires no German postcode.
+_FOREIGN = (
+    ("vat", re.compile(r"\b(?:ATU\s?\d{8}|CHE[-‐–\s]?\d{3}[.\s]?\d{3}[.\s]?\d{3})\b")),
+    ("register", re.compile(r"\bCVR[-\s.]*(?:nr|no)\b|\bCH[-‐–]\d{3}\.\d\.\d{3}\.\d{3}-\d\b", re.I)),
+    ("us_address", re.compile(r",\s*[A-Z]{2},?\s+\d{5}(?:-\d{4})?\b")),
+    ("phone", re.compile(r"(?<![\w+])\+\s?(?:1|7|20|31|32|33|34|39|41|43|44|45|46|47|48|84|90|971|974)"
+                         r"[\s()./-]*\d{2,}")),
+    ("country", re.compile(r"\b(?:USA|U\.S\.A\.|United States|Österreich|Austria|Schweiz|Switzerland|"
+                           r"Danmark|Denmark|Canada|United Kingdom|Viet ?Nam|United Arab Emirates|UAE|Qatar)\b")),
+)
+
+
+def foreign_signals(text: str) -> list[str]:
+    """Which kinds of foreign sign the text carries: `["phone", "us_address"]`."""
+    return [kind for kind, pattern in _FOREIGN if pattern.search(text or "")]
+
+
+#: A sign that the page is (also) German: then a foreign sign is a branch or a partner, not the owner.
+_GERMAN = re.compile(r"\b(?:Deutschland|Germany)\b|(?<![\w+])\+\s?49\b|\b0049\b")
+#: A foreign tax, company or address number is strong; a phone number or a country name alone is not.
+_STRONG = frozenset({"vat", "register", "us_address"})
+
+
+#: How close a foreign sign must follow a German-looking postcode to be the same address: a US house
+#: number (`14755 Preston Rd, Suite 400 Dallas, TX 75254`) reads like a German postcode.
+_SAME_ADDRESS = 60
+
+
+def is_abroad(text: str) -> bool:
+    """A page run from abroad (#111).
+
+    An Impressum names its owner first. So a strong sign (foreign VAT or company number, US-style
+    address) counts only before the first German postcode, or within `_SAME_ADDRESS` characters
+    after it; later on the page it is a service provider in the privacy text ("Google LLC, Mountain
+    View, CA 94043, USA"). A weak sign (foreign phone, country name) counts only on a page with no
+    German postcode at all. "Deutschland", "Germany" or a +49 number anywhere means not abroad.
+    """
+    text = text or ""
+    if _GERMAN.search(text):
+        return False
+    first_postcode = next((m.start() for m in POSTCODE_RE.finditer(text)
+                           if m.group(1) in extract_postcodes(m.group(0))), None)
+    for kind, pattern in _FOREIGN:
+        match = pattern.search(text)
+        if not match:
+            continue
+        if first_postcode is None:
+            return True
+        if kind in _STRONG and match.start() < first_postcode + _SAME_ADDRESS:
+            return True
+    return False
 
 
 def extract_postcode(text: str) -> str | None:
@@ -456,4 +514,5 @@ def extract_from_html(html: str) -> dict[str, Any]:
         "email":           extract_email(text),
         "ceo_names":       extract_ceo_names(text),
         "text_snippet":    text[:500],
+        "abroad":          is_abroad(text),
     }

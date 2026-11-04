@@ -21,7 +21,7 @@ from urllib.parse import urlparse
 
 from enrichment.imprint_probe import best_imprint
 from enrichment.own_site import origin_url, own_site_verdict
-from enrichment.imprint_extractor import extract_from_html, extract_register_numbers, person_key
+from enrichment.imprint_extractor import extract_from_html, extract_register_numbers, is_abroad, person_key
 from enrichment.url_scorer import name_uniqueness
 
 from enrichment import confidence as conf
@@ -247,6 +247,10 @@ def _page_evidence(
             evidence.add(conf.OFFICER_MATCH)
     else:
         evidence.add(conf.NO_IMPRINT)
+    # A business abroad says so in its Impressum; a site without one (most sites abroad have none)
+    # says it on the page itself. Decided in `confidence.py`, where proof can lift it.
+    if extracted.get("abroad") if extracted else is_abroad(page_text[:20000]):
+        evidence.add(conf.IMPRINT_ABROAD)
 
     # A page can print its register number and still have no Impressum this code can find — the
     # link is an image, or the number sits in the footer of every page. The number is right there
