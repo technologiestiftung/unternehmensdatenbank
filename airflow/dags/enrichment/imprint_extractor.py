@@ -244,21 +244,16 @@ def extract_postcodes(text: str) -> list[str]:
 _FOREIGN = (
     ("vat", re.compile(r"\b(?:ATU\s?\d{8}|CHE[-‐–\s]?\d{3}[.\s]?\d{3}[.\s]?\d{3})\b")),
     ("register", re.compile(r"\bCVR[-\s.]*(?:nr|no)\b|\bCH[-‐–]\d{3}\.\d\.\d{3}\.\d{3}-\d\b", re.I)),
-    ("us_address", re.compile(r",\s*[A-Z]{2},?\s+\d{5}(?:-\d{4})?\b")),
+    ("us_address", re.compile(r",\s*(?!DE\b)[A-Z]{2},?\s+\d{5}(?:-\d{4})?\b")),
     ("phone", re.compile(r"(?<![\w+])\+\s?(?:1|7|20|31|32|33|34|39|41|43|44|45|46|47|48|84|90|971|974)"
-                         r"[\s()./-]*\d{2,}")),
+                         r"[\s()./-]*\d(?:[\s()./-]*\d){5,}")),
     ("country", re.compile(r"\b(?:USA|U\.S\.A\.|United States|Österreich|Austria|Schweiz|Switzerland|"
                            r"Danmark|Denmark|Canada|United Kingdom|Viet ?Nam|United Arab Emirates|UAE|Qatar)\b")),
 )
 
 
-def foreign_signals(text: str) -> list[str]:
-    """Which kinds of foreign sign the text carries: `["phone", "us_address"]`."""
-    return [kind for kind, pattern in _FOREIGN if pattern.search(text or "")]
-
-
 #: A sign that the page is (also) German: then a foreign sign is a branch or a partner, not the owner.
-_GERMAN = re.compile(r"\b(?:Deutschland|Germany)\b|(?<![\w+])\+\s?49\b|\b0049\b")
+_GERMAN = re.compile(r"\b(?:Deutschland|Germany)\b|(?<![\w+])\+\s?49|\b0049")
 #: A foreign tax, company or address number is strong; a phone number or a country name alone is not.
 _STRONG = frozenset({"vat", "register", "us_address"})
 

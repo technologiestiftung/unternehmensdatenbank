@@ -24,6 +24,10 @@ def test_a_business_abroad_is_recognised(text: str) -> None:
     "Kolonnenstr. 8, 10827 Berlin, Büro London +44 20 7946 0000",       # a German postcode wins over a phone
     "NobleProg Limited, Telefon +49 30 7543 6104",                       # +49 means a German presence
     "Preis: +1 Monat gratis",                                            # not a phone number
+    "Über +100 zufriedene Kunden und +750 Projekte, +1.000 Kunden",      # counts, not phone numbers
+    "Hotline +4930 1234567, London +44 20 7946 0000",                    # unspaced +49 is German
+    "Fax 004930 1234567, Austria",                                       # unspaced 0049 is German
+    "Musterstr. 1, DE 10115 Berlin",                                     # DE prefix, not a US state
 ])
 def test_a_german_page_is_not_abroad(text: str) -> None:
     assert not is_abroad(text)
