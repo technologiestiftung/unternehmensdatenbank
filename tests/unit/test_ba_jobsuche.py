@@ -131,8 +131,11 @@ def test_an_answer_with_no_ads_fails_the_run(monkeypatch) -> None:
         main.read_ads()
 
 
-def test_a_read_with_no_ads_sets_no_record_inactive(monkeypatch) -> None:
-    assert _run(monkeypatch, [], total=0) == []
+def test_a_read_without_employers_fails_before_touching_the_database(monkeypatch) -> None:
+    monkeypatch.setattr(main, "read_ads", lambda: ([_ad("A GmbH", None, "10115")], 1))
+    monkeypatch.setattr(main, "get_connection", lambda: pytest.fail("no database without employers"))
+    with pytest.raises(RuntimeError, match="No employer"):
+        main.run_read()
 
 
 def test_a_full_read_sets_unseen_records_inactive(monkeypatch) -> None:

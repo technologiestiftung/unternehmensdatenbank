@@ -15,7 +15,7 @@ pseudonymous employer id; an ad without one is skipped): name, Berlin postcodes 
 ads. Matches each employer to one of our companies by name and postcode (`enrichment.name_match`). Only
 a match is stored, as a source record of that company; an employer matching none is counted in the log,
 never stored. A record whose employer has no ads now goes inactive, but only after a full read: a read
-that stops early sets none inactive, and a refused first page or an answer with no ads fails the run. A job ad names contact
+that stops early sets none inactive, and a refused first page or an answer with no ads or no employer fails the run. A job ad names contact
 persons in its detail view; the list read here does not, and nothing but the employer is kept. Nothing
 is written as an observation yet: the counts are a signal of activity and size, never
 an employee count, and showing them needs a decision first.
@@ -118,6 +118,8 @@ def run_read() -> int:
     """Read the ads, match the employers, store the matches. Returns how many employers matched."""
     ads, total = read_ads()
     found = employers(ads)
+    if not found:
+        raise RuntimeError(f"No employer in {len(ads)} Berlin ads; the answer's shape may have changed.")
     connection = get_connection()
     try:
         with connection, connection.cursor() as cur:
@@ -140,7 +142,7 @@ def run_read() -> int:
                       for employer, (company_id, confidence) in matches.items()],
                     template="(%s, %s, %s, %s, %s, %s, %s, %s, now(), true)", page_size=1000)
             # An employer without ads now keeps its record, inactive: never deleted. Only after a full read.
-            if ads and total and len(ads) >= total:
+            if total and len(ads) >= total:
                 cur.execute("UPDATE public.company_source_records SET is_active = false"
                             " WHERE source_id = %s AND is_active AND NOT (external_id = ANY(%s))",
                             (source_id, list(matches)))
