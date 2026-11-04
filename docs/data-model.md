@@ -154,11 +154,11 @@ and two hand checks found none.
 
 - **The 17 groups with two active companies:** 6 are an association (VR) and a company of the same
   name ("UFA-Fabrik Berlin" e. V. and the GmbH); 6 are a change of legal form or related firms
-  (areontec AG and areontec GmbH at the same address; a sole trader and his GmbH of the same name);
-  3 have the same name and form at the same court (CIO Solutions GmbH, HRB 87414 and 118376);
+  (areontec AG and areontec GmbH at the same address; a sole trader and a GmbH of the same name);
   2 are different names the normalization makes equal ("SE-MA Trading" and "MA Trading": `SE` is
-  read as a legal form; "in takt" and "IN.Takt"). The register forbids that today (§ 30 HGB, § 57 BGB), so
-  one of each is probably gone. **"Both active" is an artifact of the snapshot:** OffeneRegister
+  read as a legal form; "in takt" and "IN.Takt"); 3 have the same name and form at the same court
+  (CIO Solutions GmbH, HRB 87414 and 118376). The register forbids that today (§ 30 HGB, § 57 BGB),
+  so one of each is probably gone. **"Both active" is an artifact of the snapshot:** OffeneRegister
   read each entry on its own day between July 2017 and January 2019, so an AG read in 2017 still
   shows active after it became the GmbH read in 2019. Only current register data (#88) settles it.
 - **50 other groups**, drawn with seed 93: 18 a change of legal form (Leuchte KG became Leuchte
