@@ -37,13 +37,17 @@ def test_no_dag_file_imports_another_dag_file_at_the_top() -> None:
     assert offending == []
 
 
-def test_every_task_that_runs_our_code_is_a_pipeline_task() -> None:
+def test_no_dag_file_builds_a_bare_python_operator() -> None:
     """A bare `PythonOperator` runs in Airflow's own Python, which on the hub holds none of our packages:
-    `register_announcements` was one until #88's follow-up. `pipeline_task` makes it a pod there."""
+    `register_announcements` was one until #88's follow-up. `pipeline_task` makes it a pod there.
+
+    Catches `PythonOperator(...)` and `python.PythonOperator(...)`. Out of scope: `ShortCircuitOperator`
+    conditions, small checks that stay in Airflow on purpose, and `@task` functions (none exist here)."""
     offending = [
         _module(path)
         for path in DAGS.glob("*/*.py")
         for node in ast.walk(ast.parse(path.read_text(encoding="utf-8")))
-        if isinstance(node, ast.Call) and getattr(node.func, "id", None) == "PythonOperator"
+        if isinstance(node, ast.Call)
+        and "PythonOperator" in (getattr(node.func, "id", None), getattr(node.func, "attr", None))
     ]
     assert offending == []
