@@ -19,7 +19,7 @@ HOW (Claude API)
 
 - Message Batches: asynchronous, half the price; a run waits for its batch.
 - Structured output: a JSON object whose one field is an enum of the 77 English names plus `NONE`, so
-  every answer parses. A second field, `wz_division`, is an enum of the WZ 2008 divisions in
+  every answer parses. A second field, `wz_division`, is an enum of the WZ 2025 divisions in
   `wz_divisions` plus `NONE` (#140): an **estimate** of what the company does, never its official
   WZ code, kept in the same source record and not shown until a hand check measured it.
 - The system prompt (fields and their keywords) is identical for every request and cached.
