@@ -73,7 +73,7 @@ SCHEDULE = "@daily"
 #: What the app's source page says about this source (German).
 DETAILS = SourceDetails(
     description=(
-        "Name und Anschrift, wie die Firma sie selbst im Impressum ihrer Website angibt. Nur wenn das "
+        "Anschrift, wie die Firma sie selbst im Impressum ihrer Website angibt. Nur wenn das "
         "Impressum ihre Registernummer nennt und keine andere. Eine neuere Angabe eines Registers geht vor."
     ),
     schedule=schedule_label(SCHEDULE),
@@ -112,7 +112,7 @@ def address_on(text: str) -> dict[str, str] | None:
             continue  # not an address: the same filter as `extract_postcodes`
         # Only the first address counts. A company that moved to Hamburg names the Berlin office that
         # licensed it further down; the first Berlin address on its page is not its own.
-        if not (is_berlin_postcode(postcode) and town == "Berlin"):
+        if not (is_berlin_postcode(postcode) and town.split("-")[0].casefold() == "berlin"):
             return None
         street = _street_before(text, match.start())
         return {"address": f"{street}, {postcode} Berlin", "postcode": postcode, "city": "Berlin"} if street else None
@@ -125,9 +125,13 @@ def names_only_own_register(text: str, own: list[str]) -> bool:
     found = [register_parts(entry) for entry in extract_register_numbers(text)]
     if not any(entry in ours for entry in found):
         return False
-    # "HRB 794 28" is also read as "HRB 794": a prefix of our own number is not another entry.
+    # "HRB 794 28" is also read as "HRB 794": that shorter reading is not another entry, but only
+    # where the page prints our number split there ("HRB 1263 B" next to our 126307 is another).
     return all(
-        any(kind == own_kind and own_digits.startswith(digits) for own_kind, own_digits in ours)
+        (kind, digits) in ours or any(
+            kind == own_kind and len(own_digits) > len(digits) and own_digits.startswith(digits)
+            and re.search(rf"(?<!\d){digits}[ \u00a0]{own_digits[len(digits):]}(?!\d)", text)
+            for own_kind, own_digits in ours)
         for kind, digits in found
     )
 
@@ -157,7 +161,7 @@ def run_read() -> None:
     try:
         with connection, connection.cursor() as cur:
             source_id = ensure_source(
-                cur, key=SOURCE_KEY, name="Impressum (name and address)", source_type="website",
+                cur, key=SOURCE_KEY, name="Impressum (address)", source_type="website",
                 metadata={"dag_id": DAG_ID, "rule": RULE}, details=DETAILS)
             sync_run_id = start_sync_run(cur, source_id=source_id)
             companies = companies_with_website_to_read(cur, source_id=source_id, limit=BATCH_SIZE)
@@ -217,7 +221,7 @@ def _make_dag():  # noqa: ANN201
 
     with DAG(
         dag_id=DAG_ID,
-        description="Current name and address from the Impressum that names the company's own register number",
+        description="Current address from the Impressum that names the company's own register number",
         schedule=SCHEDULE, start_date=datetime(2026, 11, 1, tzinfo=timezone.utc), catchup=False,
         max_active_runs=1, tags=["sources", "websites", "register"],
     ) as dag:

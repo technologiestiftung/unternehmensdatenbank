@@ -28,11 +28,21 @@ def test_a_number_printed_with_a_space_is_still_ours() -> None:
     assert names_only_own_register("Registernummer: HRB 794 28", ["Berlin (Charlottenburg) HRB 79428"])
 
 
+def test_a_parent_whose_number_starts_like_ours_is_another_entry() -> None:
+    # 1263 is a prefix of our 126307, but the page does not print ours split there.
+    assert claims_from_impressum(PAGE + "\nMuttergesellschaft: HRB 1263 B", OWN) == {}
+
+
 def test_only_the_first_address_counts() -> None:
     page = "Beispiel GmbH\nMusterweg 1\n20539 Hamburg\nAufsicht: Bezirksamt, Karl-Marx-Allee 31, 10178 Berlin"
     assert address_on(page) is None  # moved to Hamburg; the Berlin address is the office's
     page = "Beispiel GmbH, Pestalozzistraße 103, 10625 Berlin\nHosting: STRATO AG, Otto-Ostrowski-Str. 7, 10249 Berlin"
     assert address_on(page)["postcode"] == "10625"
+
+
+def test_a_berlin_district_after_the_town_is_still_berlin() -> None:
+    assert address_on("Bleibtreustr. 4\n10623 Berlin-Charlottenburg") == {
+        "address": "Bleibtreustr. 4, 10623 Berlin", "postcode": "10623", "city": "Berlin"}
 
 
 def test_a_room_or_a_mailbox_is_not_a_street() -> None:
