@@ -56,7 +56,7 @@ The goal is one record per Berlin company with 20 columns. Counts are from the l
 
 | # | Column | `v_company_profile` | Filled by | Today |
 |---|---|---|---|---|
-| 1 | Name | `name` | OffeneRegister, `handelsregister_lookup`, `gleif` (companies with an LEI; a name differing only in case is not written) | 296,897 |
+| 1 | Name | `name` | OffeneRegister, `handelsregister_lookup`, `gleif` (companies with an LEI; a name differing only in case or punctuation is not written) | 296,897 |
 | 2 | Mitarbeiter | `employee_count` | no source yet | 0 |
 | 3 | Umsatz | `revenue` | no source yet | 0 |
 | 4 | Förderungen | `funding_count`, `funding_total_eur`, `fundings` | `foerderkatalog`, `berlin_zuwendungen` | 5,189 companies with a grant |
