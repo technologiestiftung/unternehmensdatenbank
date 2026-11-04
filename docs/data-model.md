@@ -95,7 +95,7 @@ python scripts/import_register_managers.py
 ## Migration strategy
 
 `V1__baseline.sql` is the whole schema as of 2026-11-04, squashed five times: the first example data set,
-V1-V9 and V10 on 2026-10-28, V1-V10 on 2026-10-31 (#68), V1-V8 on 2026-11-04. The last one was
+V1-V9 and V10 on 2026-10-28, V1-V10 on 2026-10-31 (#68), V1-V9 on 2026-11-04. The last one was
 generated from the play server's database, so play and the file agree by construction; a database
 built from it and one built from the old V1-V8 dump to the same schema, grants and seed rows.
 Forward-only from here: never edit a migration that has run anywhere shared, add new ones as

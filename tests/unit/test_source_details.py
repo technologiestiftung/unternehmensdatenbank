@@ -40,7 +40,7 @@ def test_every_dag_module_can_be_imported_with_its_details() -> None:
     # Building DETAILS runs schedule_label on each DAG's SCHEDULE: an unmapped schedule fails here.
     import importlib
 
-    for module in ("berlin_zuwendungen", "common_crawl", "cordis", "foerderkatalog", "gleif",
+    for module in ("ba_jobsuche", "berlin_zuwendungen", "common_crawl", "cordis", "foerderkatalog", "gleif",
                    "handelsregister_lookup", "openregister", "register_announcements", "register_crosslink",
                    "structured_data", "feedback_observations", "website_discovery", "wikidata", "wirtschaftsatlas",
                    "technology_field", "website_contacts", "manager_ner", "website_keywords"):
