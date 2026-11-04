@@ -64,3 +64,10 @@ def test_a_recipient_becomes_a_register_entry_with_name_legal_form_and_city() ->
 
 def test_a_recipient_inside_the_snapshot_range_is_only_linked_never_created() -> None:
     assert not entry_for("HRB 150000", "Beispiel GmbH", "Berlin", None, 1, LINE).active
+
+
+def test_a_recipient_without_a_grant_year_is_never_created_and_states_nothing() -> None:
+    # Undated, its values would count as read today and beat a register source by age.
+    entry = entry_for("HRB 239529", "Beispiel Technologies GmbH", "Berlin", None, 1, LINE)
+    assert not entry.active
+    assert entry.fields == {} and entry.updated is None

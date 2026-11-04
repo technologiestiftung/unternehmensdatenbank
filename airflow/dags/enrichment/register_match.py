@@ -150,8 +150,8 @@ class RegisterEntry:
     active: bool | None
     #: Field name to value, among `ENTRY_FIELDS`.
     fields: dict[str, str]
-    #: When the source last confirmed the entry, as `source_updated_at`.
-    updated: str
+    #: When the source last confirmed the entry, as `source_updated_at`. None only with no fields.
+    updated: str | None
     payload: dict[str, Any]
     #: Further identifiers, scheme to value, e.g. {"lei": "5299..."}.
     identifiers: dict[str, str] = field(default_factory=dict)

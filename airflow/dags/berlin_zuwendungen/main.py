@@ -165,15 +165,18 @@ def is_new_firm(register: str, line: dict[str, int]) -> bool:
 
 def entry_for(register: str, name: str, city: str | None, year: date | None, grants: int,
               line: dict[str, int]) -> RegisterEntry:
-    """The recipient of a grant as the register entry `write_entry` writes."""
-    fields = {"name": name, "legal_form": legal_form(name), "city": city}
-    updated = (year or date.today()).isoformat()
+    """The recipient of a grant as the register entry `write_entry` writes.
+
+    Without a grant year the entry is only linked by register number, never created, and states no
+    field: undated, its values would count as read today and beat any register source by age."""
+    fields = {"name": name, "legal_form": legal_form(name), "city": city} if year else {}
     return RegisterEntry(
         external_id=f"recipient:{register}", external_url=URL.split("/index.php")[0], name=name,
         registers=[f"Berlin (Charlottenburg) {register}", f"Berlin (Charlottenburg) {register} B"],
-        city=city, active=is_new_firm(register, line),
-        fields={field: value for field, value in fields.items() if value}, updated=updated,
-        payload={"register": register, "grants": grants, "newest_grant_year": updated[:4]},
+        city=city, active=bool(year) and is_new_firm(register, line),
+        fields={field: value for field, value in fields.items() if value},
+        updated=year.isoformat() if year else None,
+        payload={"register": register, "grants": grants, "newest_grant_year": str(year.year) if year else None},
     )
 
 
