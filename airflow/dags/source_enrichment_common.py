@@ -389,10 +389,10 @@ def insert_text_observation(
 ) -> str:
     """Write one claim by one source about one text field of one company. Returns the row's id.
 
-    An append for most fields. Eighteen of them — the five discovery ones (`website`, `candidate_url`,
+    An append for most fields. Nineteen of them — the five discovery ones (`website`, `candidate_url`,
     `directory_url`, `discovery_tier`, `osm_id`), the four classification ones
     (`technology_field`, `purpose_field` and their `_withheld` variants) and the nine register fields
-    (`resolver.REGISTER_FIELDS`, V3) — have a unique key (a partial unique index) so a re-run updates
+    (`resolver.REGISTER_FIELDS`, V3) and `founding_year` (V6) — have a unique key (a partial unique index) so a re-run updates
     rather than writing a second copy. Without
     that, a source re-writing what it already wrote had to DELETE first, and
     `company_canonical_field_sources` cascades off these rows — which un-published 558 websites for
@@ -445,7 +445,8 @@ def insert_text_observation(
             'technology_field', 'purpose_field',
             'technology_field_withheld', 'purpose_field_withheld',
             'name', 'legal_form', 'address', 'postcode', 'city',
-            'register_status', 'established_at', 'business_purpose', 'wz_code'
+            'register_status', 'established_at', 'business_purpose', 'wz_code',
+            'founding_year'
           )
         DO UPDATE SET
           confidence = EXCLUDED.confidence,

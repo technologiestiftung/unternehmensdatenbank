@@ -105,6 +105,45 @@ def test_the_app_key_becomes_the_coordinators_field_name() -> None:
     assert {row["field_name"] for row in planned} == {"ceo_name_or_contact", "deeptech_class"}
 
 
+def test_a_corrected_date_also_corrects_the_shown_year() -> None:
+    planned, _ = planned_observations([vote(p, field="established_at", correction="01.03.2012", value="2010-05-01")
+                                       for p in "ab"])
+    assert {(row["field_name"], row["value"], row["confidence"]) for row in planned} == {
+        ("established_at", "2012-03-01", 0.60), ("founding_year", "2012", 0.60)}
+
+
+def years(planned: list[dict]) -> list[tuple[str, int]]:
+    return [(row["value"], row["agree"]) for row in planned if row["field_name"] == "founding_year"]
+
+
+def test_two_dates_in_the_same_year_back_one_year() -> None:
+    planned, _ = planned_observations([vote("a", field="established_at", correction="01.03.2012", value="2010-05-01"),
+                                       vote("b", field="established_at", correction="15.04.2012", value="2010-05-01")])
+    assert years(planned) == [("2012", 2)]
+
+
+def test_a_date_and_a_typed_year_are_two_people_behind_the_year() -> None:
+    planned, _ = planned_observations([vote("a", field="established_at", correction="2012-03-01", value="2010-05-01"),
+                                       vote("b", field="established_year", correction="2012", value="2010"),
+                                       vote("b", field="established_at", correction="2012-03-01", value="2010-05-01")])
+    assert years(planned) == [("2012", 2)]
+
+
+def test_a_persons_newer_date_replaces_their_older_typed_year() -> None:
+    planned, _ = planned_observations([
+        {**vote("a", field="established_year", correction="2013", value="2010"), "updated_at": date(2026, 1, 1)},
+        {**vote("a", field="established_at", correction="01.03.2012", value="2010-05-01"), "updated_at": date(2026, 2, 1)},
+    ], filled=set())
+    shown = {row["value"]: (row["agree"], row["confidence"]) for row in planned if row["field_name"] == "founding_year"}
+    assert shown["2012"] == (1, 0.60) and shown.get("2013", (0, 0.0)) == (0, 0.0)
+
+
+def test_one_date_correction_does_not_override_a_year_a_website_gives() -> None:
+    planned, _ = planned_observations([vote("a", field="established_at", correction="2012-03-01", value="")],
+                                      filled={(COMPANY, "founding_year")})
+    assert {row["field_name"]: row["confidence"] for row in planned} == {"established_at": 0.60, "founding_year": 0.30}
+
+
 def test_invalid_and_uncorrectable_corrections_are_counted_and_skipped() -> None:
     planned, skipped = planned_observations([
         vote("b", field="technology_field", correction="Raketenbau"),

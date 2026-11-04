@@ -69,6 +69,8 @@ FIELDS: dict[str, tuple[str, str]] = {
     "register_status": ("register_status", "register_status"),
     "wz_code": ("wz_code", "wz_code"),
     "established_at": ("established_at", "date"),
+    # The app's "Gründung" column (V6): a correction keeps its year only; the column shows a year.
+    "established_year": ("founding_year", "year"),
     "business_purpose": ("business_purpose", "text"),
     "employee_count": ("employee_count", "integer"),
     "revenue": ("revenue", "number"),
@@ -84,6 +86,8 @@ NOT_CORRECTABLE = {"fundings", "register_announcement", "registration_number"}
 #: Shown as several values at once: a vote is about one of them, and confirming one denies no other.
 LIST_FIELDS = {"management", "activity_keywords"}
 
+#: A year alone, or the year of a date ("2010", "2010-05-01", "01.05.2010").
+_YEAR = re.compile(r"^(?:\d{1,2}\.\d{1,2}\.)?(\d{4})(?:-\d{2}(?:-\d{2})?)?$")
 _WZ_CODE = re.compile(r"^\d{2}(\.\d{1,2}(\.\d{1,2})?)?$")
 _THOUSANDS = re.compile(r"^\d{1,3}(\.\d{3})+$")
 _HOST = re.compile(r"^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$")
@@ -139,6 +143,10 @@ def clean(kind: str, raw: str, technology_fields: frozenset[str] = frozenset()) 
             except ValueError:
                 pass
         return None
+    if kind == "year":
+        found = _YEAR.match(text)
+        year = int(found.group(1)) if found else 0
+        return str(year) if 1800 <= year <= date.today().year else None
     if kind in {"integer", "number"}:
         # German notation, as the app is German: "1.200" is 1200, "1.200,5" is 1200.5.
         german = "," in text or _THOUSANDS.match(text)
@@ -182,6 +190,7 @@ def planned_observations(
     rejected: dict[tuple[str, str, Any], set[str]] = defaultdict(set)
     skipped: dict[str, int] = defaultdict(int)
     voted_at: dict[tuple[str, str, str], Any] = {}
+    year_of: dict[tuple[str, str], tuple[str, str, Any]] = {}
     for (company, key, author, _), vote in latest.items():
         when = vote.get("updated_at")
         if when is not None and (voted_at.get((company, key, author)) is None or when > voted_at[(company, key, author)]):
@@ -208,10 +217,22 @@ def planned_observations(
         if value is None:
             skipped[f"invalid {key}"] += 1
             continue
-        claim = (company, key, claim_key(value))
-        agree[claim].add(author)
-        rejected[claim].discard(author)
-        spelling.setdefault(claim, value)
+        claims = [((company, key, claim_key(value)), value)]
+        # A corrected date also backs its year: the shown "Gründung" year is founding_year first (V6).
+        if key == "established_at":
+            claims.append(((company, "established_year", value[:4]), value[:4]))
+            when, year_vote = vote.get("updated_at"), (company, "established_year", author)
+            if when is not None and (voted_at.get(year_vote) is None or when > voted_at[year_vote]):
+                voted_at[year_vote] = when
+        # One year per person: a typed year and a corrected date share it, the later one wins.
+        if key in {"established_at", "established_year"}:
+            year_claim = claims[-1][0]
+            agree.get(year_of.get((company, author)), set()).discard(author)
+            year_of[(company, author)] = year_claim
+        for claim, claimed in claims:
+            agree[claim].add(author)
+            rejected[claim].discard(author)
+            spelling.setdefault(claim, claimed)
 
     planned = []
     for claim, typed in sorted(agree.items(), key=lambda item: str(item[0])):
@@ -262,7 +283,9 @@ def filled_fields(cur: Any, votes: list[dict[str, Any]]) -> set[tuple[str, str]]
         (SOURCE_KEY, companies, [f for f, _ in FIELDS.values()] + ["candidate_url"],
          _WEBSITE_MIN_CONF, _FIELD_MIN_CONF),
     )
-    return {(row[0], row[1]) for row in cur.fetchall()}
+    filled = {(row[0], row[1]) for row in cur.fetchall()}
+    # The shown year (V6) is founding_year, else the year of established_at.
+    return filled | {(company, "founding_year") for company, field in filled if field == "established_at"}
 
 
 def run_publish() -> int:

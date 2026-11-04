@@ -13,6 +13,7 @@ from resolver import (
     resolve_ceo_contact,
     resolve_deeptech_and_ai,
     resolve_employee_count,
+    resolve_founding_year,
     resolve_purpose_field,
     resolve_register_announcement,
     resolve_register_fields,
@@ -52,6 +53,7 @@ def run_pipeline_coordinator() -> None:
                 "register_announcement": resolve_register_announcement(cur),
                 "register fields": resolve_register_fields(cur),
                 "deeptech/is_ai": resolve_deeptech_and_ai(cur),
+                "founding_year": resolve_founding_year(cur),
             }
         log.info("Resolution complete, canonical records changed — %s",
                  " ".join(f"{name}={n}" for name, n in changed.items()))
