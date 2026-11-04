@@ -136,7 +136,7 @@ bar: exact-name domain 2 of 21, exact-name domain plus email at the domain 1 of 
 verdicts first; a person checked every row, and only the person's verdicts are counted.
 
 **Decision: these sites stay hidden, as today.** Neither shown nor offered as a suggestion. Instead,
-the signals against a site get sharper, so the wrong ones drop out of the 0.34 pool (follow-up issues):
+the signals against a site get sharper, so the wrong ones drop out of the 0.34 pool (#111, #112, #113):
 an Impressum abroad, register numbers we cannot read yet (`HR B 61871`, Swiss `CH-…`), a page that
 proves another company in our database, and register numbers we do not have at all. Two right sites
 the guesses missed: `hma-berlin.de` (abbreviation plus "berlin", #89) and a "Legal Notice" link
