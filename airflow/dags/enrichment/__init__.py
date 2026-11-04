@@ -1,8 +1,8 @@
 """The building blocks that fill a company's fields from the open web. No API, no key, no bill.
 
-This package is a library, not a DAG. `website_discovery`, `wikidata`, `common_crawl`, `wirtschaftsatlas`,
-`website_contacts`, `website_keywords`, `technology_field`, `register_announcements`, `gleif` and `manager_ner`
-run it.
+This package is a library, not a DAG. `website_discovery`, `wikidata`, `common_crawl`, `register_crosslink`,
+`wirtschaftsatlas`, `website_contacts`, `website_keywords`, `technology_field`, `register_announcements`, `gleif`
+and `manager_ner` run it.
 
 Website discovery
   url_patterns.py     guess domains from the company name, check DNS, download the live ones
