@@ -12,7 +12,7 @@ them. This repo runs the same pieces locally, so "works here" means "works on th
 | Airflow (add-on, default 3.3.2) | Airflow 3.3.2 | `docker-compose.yml` |
 | Keycloak 26 (realm `tsb-prd`) | Keycloak 26.8.1, realm `datahub` | `keycloak/datahub-realm.json` |
 | Hasura v2 | Hasura v2.51.3 | `hasura/metadata/` |
-| MinIO (S3) | RustFS, same S3 API | `s3` service |
+| MinIO (S3) | RustFS, same S3 API | `s3` service; what the hub must provide: [release](release.md), "S3 on the hub" |
 | APISIX gateway | not emulated; the app talks to Hasura directly | — |
 
 Postgres 15 and the Airflow version are CIVITAS/CORE defaults (read 2026-10-23). The three logins,

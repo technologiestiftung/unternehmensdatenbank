@@ -21,6 +21,11 @@ without a privacy review.
 Configured by `CORPUS_S3_ENDPOINT` (host:port), `CORPUS_S3_ACCESS_KEY`, `CORPUS_S3_SECRET_KEY`,
 `CORPUS_S3_BUCKET`, `CORPUS_S3_SECURE`. Without an endpoint every function here is a no-op, and a
 store that fails behaves exactly like an empty one: nothing here raises, except `get_bytes` and `put_bytes` (models).
+Each S3 error is logged once per run as a warning (#85); one that means the store cannot work as
+configured (a wrong key, a missing permission or bucket) also switches it off for the run.
+
+After deploying, check the settings with `python -m enrichment.corpus` (from the DAGs folder): it
+writes and reads back one small object and exits non-zero on failure.
 """
 from __future__ import annotations
 
@@ -29,6 +34,7 @@ import hashlib
 import json
 import logging
 import os
+import sys
 import threading
 import time
 from datetime import datetime, timedelta, timezone
@@ -46,6 +52,11 @@ _bucket_ready = False
 #: Set after S3 failed to answer: the rest of the run works without the store instead of waiting for
 #: a timeout on every page (8 threads, thousands of pages).
 _unreachable = False
+#: S3 answers that mean the store cannot work as configured, for any object.
+UNUSABLE = frozenset({"AccessDenied", "InvalidAccessKeyId", "SignatureDoesNotMatch", "NoSuchBucket",
+                      "AllAccessDisabled", "InvalidBucketName"})
+#: Error codes already logged this run: a wrong key must be visible, but once, not per page.
+_warned: set[str] = set()
 
 
 def _setting(name: str, default: str = "") -> str:
@@ -63,11 +74,19 @@ def enabled() -> bool:
 
 
 def _failed(exc: Exception, what: str) -> None:
-    """A missing object is a miss; anything that is not an S3 answer means S3 is not there."""
+    """A missing object is a miss; an `UNUSABLE` answer or no answer at all means S3 is not there."""
     global _unreachable
     if type(exc).__name__ == "S3Error":
-        if getattr(exc, "code", "") != "NoSuchKey":
-            log.debug("corpus: %s failed: %s", what, getattr(exc, "code", exc))
+        code = getattr(exc, "code", "") or str(exc)
+        if code == "NoSuchKey":
+            return
+        unusable = code in UNUSABLE
+        if code not in _warned:
+            _warned.add(code)
+            log.warning("Company corpus answered %s when %s%s.", code, what,
+                        "; check CORPUS_S3_*; this run continues without it" if unusable else "")
+        if unusable:
+            _unreachable = True
         return
     if not _unreachable:
         log.warning("Company corpus unreachable (%s); this run continues without it.", type(exc).__name__)
@@ -232,3 +251,23 @@ def get_bytes(name: str) -> bytes | None:
         if _missing(exc):
             return None
         raise
+
+
+def check() -> None:
+    """Write one small object and read it back; raises on any failure. Needs only the permissions the
+    pipelines need (s3:ListBucket, s3:PutObject, s3:GetObject); the object is overwritten, never deleted."""
+    if not configured():
+        raise RuntimeError("CORPUS_S3_ENDPOINT is not set")
+    name, data = "healthcheck/ping", datetime.now(timezone.utc).isoformat().encode()
+    put_bytes(name, data, content_type="text/plain")
+    if get_bytes(name) != data:
+        raise RuntimeError(f"{name} did not come back as written")
+
+
+if __name__ == "__main__":
+    try:
+        check()
+    except Exception as exc:  # noqa: BLE001  the message is the whole point of this command
+        print(f"company corpus: FAILED ({type(exc).__name__}: {getattr(exc, 'code', exc)})", file=sys.stderr)
+        raise SystemExit(1) from None
+    print(f"company corpus: OK ({_setting('CORPUS_S3_ENDPOINT')}, bucket {bucket()})")
