@@ -51,6 +51,7 @@ from typing import Any, Iterator
 from psycopg2.extras import Json
 
 from enrichment.common_crawl import identifier_values
+from enrichment.imprint_extractor import is_berlin_postcode
 from enrichment.register_match import company_for, record_match
 from enrichment.register_names import ACTIVE, DISSOLVED, legal_form
 from source_enrichment_common import (
@@ -111,7 +112,7 @@ def in_berlin(city: str | None, postcode: str | None) -> bool:
     Berlin"), or, only when there is no city, a Berlin postcode (10115 to 14199; 12529 is Schönefeld too)."""
     if city and city.strip():
         return city.strip().lower().startswith("berlin")
-    return bool(postcode and postcode.isdigit() and 10115 <= int(postcode) <= 14199)
+    return is_berlin_postcode(postcode)
 
 
 def parse_row(row: dict[str, str]) -> LeiRecord | None:

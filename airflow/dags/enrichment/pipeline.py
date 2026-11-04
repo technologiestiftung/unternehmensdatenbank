@@ -21,7 +21,7 @@ from urllib.parse import urlparse
 
 from enrichment.imprint_probe import best_imprint
 from enrichment.own_site import origin_url, own_site_verdict
-from enrichment.imprint_extractor import extract_from_html, extract_register_numbers, is_abroad, person_key
+from enrichment.imprint_extractor import extract_from_html, extract_register_numbers, is_abroad, is_berlin_postcode, person_key
 from enrichment.url_scorer import name_uniqueness
 
 from enrichment import confidence as conf
@@ -239,6 +239,11 @@ def _page_evidence(
         )
         if company.postcode and company.postcode in page_postcodes:
             evidence.add(conf.POSTCODE_MATCH)
+        # Every company here is a Berlin register entry. An Impressum whose addresses are all outside
+        # Berlin, and none of them the company's own, was in the hand check (#96) always another
+        # business or organisation of the same name. Proof on the page lifts it (`confidence.py`).
+        elif page_postcodes and not any(is_berlin_postcode(p) for p in page_postcodes):
+            evidence.add(conf.IMPRINT_OUTSIDE_BERLIN)
         # A Geschäftsführer on the Impressum who is one of the company's register officers. The
         # officers are personal data: they arrive as comparison keys only, and only the evidence
         # NAME is stored, never which person matched.

@@ -76,6 +76,8 @@ REGISTER_MISMATCH = "register_number_mismatch"
 #: The Impressum (or, without one, the page) is a business abroad: a foreign VAT or company number,
 #: a US-style address, or (in an Impressum) a foreign phone or country and no German postcode (#111).
 IMPRINT_ABROAD = "imprint_abroad"
+#: The Impressum gives German postcodes, none in Berlin and none the company's own (#111).
+IMPRINT_OUTSIDE_BERLIN = "imprint_outside_berlin"
 #: A Geschäftsführer named on the page's Impressum is one of this company's officers in the register.
 #: Identity evidence of the same kind as the register number: a fact about THIS company that a
 #: directory or another company's site has no reason to carry on its own Impressum.
@@ -298,6 +300,7 @@ def register_number_is_on_page(digits: str, text: str) -> bool:
 _DISQUALIFIERS = {
     REGISTER_MISMATCH: "the page prints a different company's register number",
     IMPRINT_ABROAD: "the page is a business abroad",
+    IMPRINT_OUTSIDE_BERLIN: "the Impressum is outside Berlin and not at the company's address",
     DIRECTORY_HOST: "the host is a business directory, not a company",
     HOST_NAME_MISMATCH: "the domain does not carry the company's name",
     GENERIC_HOST: "the domain names an industry, which cannot identify one company",
@@ -339,6 +342,8 @@ _LIFTED_BY: dict[str, frozenset[str]] = {
     HOST_NAME_MISMATCH: frozenset({OSM_EMAIL_DOMAIN, JSONLD_NAME_MATCH}),
     # A group's site abroad that prints our own register entry or names our Geschäftsführer is ours.
     IMPRINT_ABROAD: frozenset({REGISTER_MATCH, OFFICER_MATCH}),
+    # A company that moved out of Berlin and proves itself on its page keeps its site.
+    IMPRINT_OUTSIDE_BERLIN: frozenset({REGISTER_MATCH, OFFICER_MATCH}),
 }
 
 BANDS = (

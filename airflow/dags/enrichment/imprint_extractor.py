@@ -290,6 +290,11 @@ def is_abroad(text: str, *, imprint: bool = True) -> bool:
     return False
 
 
+def is_berlin_postcode(postcode: str | None) -> bool:
+    """Berlin's postcodes run from 10115 to 14199 (12529 is Schönefeld too, outside Berlin)."""
+    return bool(postcode and postcode.isdigit() and 10115 <= int(postcode) <= 14199)
+
+
 def extract_postcode(text: str) -> str | None:
     """The first postcode in a postal address, or None.
 
