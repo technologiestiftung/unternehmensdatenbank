@@ -228,20 +228,25 @@ class SourceDetails:
     terms_url: str | None = None
 
 
+#: Every source's rank unless it says otherwise; a lower one wins before any confidence counts.
+DEFAULT_PRIORITY = 100
+
+
 def ensure_source(cur: Any, *, key: str, name: str, source_type: str, metadata: dict[str, Any],
-                  details: SourceDetails) -> str:
+                  details: SourceDetails, priority: int = DEFAULT_PRIORITY) -> str:
     cur.execute(
         """
         INSERT INTO public.sources (
-          key, name, source_type, metadata, base_url, description, terms, terms_url, schedule,
+          key, name, source_type, metadata, priority, base_url, description, terms, terms_url, schedule,
           created_at, updated_at
         )
-        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, now(), now())
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, now(), now())
         ON CONFLICT (key)
         DO UPDATE SET
           name = EXCLUDED.name,
           source_type = EXCLUDED.source_type,
           metadata = public.sources.metadata || EXCLUDED.metadata,
+          priority = EXCLUDED.priority,
           base_url = EXCLUDED.base_url,
           description = EXCLUDED.description,
           terms = EXCLUDED.terms,
@@ -250,7 +255,7 @@ def ensure_source(cur: Any, *, key: str, name: str, source_type: str, metadata: 
           updated_at = now()
         RETURNING id
         """,
-        (key, name, source_type, Json(metadata), details.base_url, details.description, details.terms,
+        (key, name, source_type, Json(metadata), priority, details.base_url, details.description, details.terms,
          details.terms_url, details.schedule),
     )
     return cur.fetchone()[0]

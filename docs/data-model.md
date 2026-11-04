@@ -97,25 +97,29 @@ python scripts/import_register_managers.py
 `V1__baseline.sql` is the whole schema as of 2026-11-04, squashed five times: the first example data set,
 V1-V9 and V10 on 2026-10-28, V1-V10 on 2026-10-31 (#68), V1-V9 on 2026-11-04. The last one was
 generated from the play server's database, so play and the file agree by construction; a database
-built from it and one built from the old V1-V8 dump to the same schema, grants and seed rows.
+built from it and one built from the old V1-V9 dump to the same schema and grants. The reference rows
+(Technologiefelder, keywords, WZ divisions) are in their own file, `V1.1__reference_data.sql`.
 Forward-only from here: never edit a migration that has run anywhere shared, add new ones as
 `V{N}__description.sql` (the next is V2), and run Flyway before Airflow touches the changed schema.
 The headings below and comments in the code keep the pre-squash migration numbers ("V3", "V10") so
 git history finds the reasoning.
 
-**Text is not schema.** What each source is, its origin, terms and schedule (the app's sources pages)
-live in the code that registers the source (`SourceDetails` in each DAG, written by `ensure_source`),
-not in a migration. A wording fix is a code change.
+**Sources are code, not migrations.** A `sources` row, its priority and what the app says about it
+(origin, terms, schedule) are written by the code that registers the source (`ensure_source` with
+`SourceDetails` and `priority`, in each DAG), on every run. A fresh database has no source until its
+DAG has run once. A wording fix is a code change.
 
 **A database migrated before the squash** (local, play) still has the old files in its Flyway
 history, and Flyway refuses to run until that is reset. No data moves. Only for a database with
-every pre-squash migration up to V6 applied (`flyway info`, the last one `founding year`; V7 and V8
-changed rows only, which the DAGs now write); migrate an older one to V6 with the pre-squash files
-first (git history), or build it fresh:
+every pre-squash migration up to V6 applied (`flyway info`, the last one `founding year`; V7 to V9
+changed `sources` rows only, which the DAGs now write); migrate an older one to V6 with the pre-squash
+files first (git history), or build it fresh. `migrate` then runs V1.1, which finds its rows there and
+changes nothing:
 
 ```bash
 docker compose exec -T postgres psql -U app -d unternehmensdatenbank -c "DROP TABLE flyway_schema_history"
 docker compose --profile tools run --rm flyway baseline -baselineVersion=1 -baselineDescription=baseline
+docker compose --profile tools run --rm flyway migrate
 ```
 
 **Copying the database to a server** (play, 2026-10-31): dump only `public`, restore into an empty
@@ -273,7 +277,7 @@ once. Tags are not a source field: no vote, no observation, no coordinator.
 A vote on an empty field has `value = ''` and must be `wrong`, with the missing value as its
 correction.
 
-**Corrections are a source** (`user_feedback`, priority 50, V4; DAG `feedback_observations`). Per
+**Corrections are a source** (`user_feedback`, priority 50, set by its DAG `feedback_observations`). Per
 company, field and corrected value, the people who typed it or voted that value `correct` count
 for it; the people who voted another value `correct`, or this one `wrong` (with or without a
 correction of their own), count against it. Nobody counts both ways: only a person's latest vote

@@ -32,7 +32,8 @@ def test_ensure_source_writes_the_text_with_the_row() -> None:
     details = SourceDetails(description="Was die Quelle ist.", schedule="täglich", base_url="https://example.org",
                             terms="CC0", terms_url="https://example.org/terms")
     assert ensure_source(cur, key="k", name="K", source_type="register", metadata={}, details=details) == "source-id"
-    assert cur.params[4:] == ("https://example.org", "Was die Quelle ist.", "CC0", "https://example.org/terms",
+    assert cur.params[4] == 100  # DEFAULT_PRIORITY
+    assert cur.params[5:] == ("https://example.org", "Was die Quelle ist.", "CC0", "https://example.org/terms",
                               "täglich")
 
 
