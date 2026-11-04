@@ -91,7 +91,11 @@ _STREET = re.compile(
     r"([A-ZÄÖÜa-zäöü][\wÄÖÜäöüß.'’\- ]{1,60}?)\s\d{1,4}\s?[a-zA-Z]?(?:\s?[-–/]\s?\d{1,4}\s?[a-zA-Z]?)?"
 )
 # A room, a building or a mailbox is not the street ("Raum 128"); whole words, so "Bleibtreustr." passes.
-_NOT_A_STREET = re.compile(r"\b(?:postfach|raum|haus|etage|zimmer|gebäude|aufgang|tel|fax|hr[ab]|ust)\b", re.IGNORECASE)
+_NOT_A_STREET = re.compile(
+    r"\b(?:postfach|raum|haus|etage|zimmer|zi|gebäude|aufgang|büro|buero|hof|stock|og|eg|wohnung"
+    r"|suite|office|unit|apartment|tel|fax|hr[ab]|ust)\b",
+    re.IGNORECASE,
+)
 _SEGMENT_SPLIT = re.compile(r"[,|·•;]")
 # A company name or a person ahead of the street on the same line is not part of the address.
 _LEGAL_FORM = re.compile("|".join(rf"(?:{pattern})(?![a-zäöüß])" for _, pattern in LEGAL_FORMS), re.IGNORECASE)
