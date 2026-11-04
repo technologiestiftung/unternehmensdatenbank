@@ -194,7 +194,8 @@ Impressum pages carry managing-director names.
 - **A model's stated reason is not evidence.** A former LLM judge once "quoted" a register number that
   appears nowhere on the page; it had been given the number in its prompt. The judge stage has since
   been removed.
-- **Search-engine discovery was measured and removed** (paid APIs, SearXNG, Ollama). Free scraped search
+- **Search-engine discovery was measured and removed** (paid APIs, SearXNG, Ollama); a search API is back
+  only as a proposal source started by hand (`web_search`, #92), verified like any guess. Free scraped search
   fails from this network on CAPTCHAs within a dozen queries. A new search source must feed the same
   verification and `confidence.py`, never a scorer of its own.
 - **Wikidata** (DAG `wikidata`, #26) proposes the official website (P856) of Berlin organisations it

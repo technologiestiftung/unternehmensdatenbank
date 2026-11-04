@@ -137,6 +137,9 @@ METHOD_WIRTSCHAFTSATLAS = "wirtschaftsatlas"
 #: A domain discovery guessed for another company whose page prints this company's register number
 #: (#112). Starts like a guessed domain: the number lacks its court, so only the page read again proves it.
 METHOD_REGISTER_CROSSLINK = "register_crosslink"
+#: A host a web search API returned for the company's name (#92). A rank proves nothing: it starts like a
+#: guessed domain, and only the page read again proves it.
+METHOD_WEB_SEARCH = "web_search"
 
 # ---------------------------------------------------------------------------------------
 # The weights. Every one of these is a judgement call, not a measurement. They are grouped so
@@ -441,7 +444,8 @@ def score(
     evidence_set = set(evidence)
     ordered_methods = [
         m for m in (METHOD_URL_PATTERN, METHOD_OSM, METHOD_WIKIDATA, METHOD_COMMON_CRAWL,
-                  METHOD_WIRTSCHAFTSATLAS, METHOD_REGISTER_CROSSLINK) if m in methods
+                  METHOD_WIRTSCHAFTSATLAS, METHOD_REGISTER_CROSSLINK,
+                  METHOD_WEB_SEARCH) if m in methods
     ]
 
     for name, reason in _DISQUALIFIERS.items():

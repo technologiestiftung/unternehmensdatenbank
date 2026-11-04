@@ -40,6 +40,7 @@ Record counts are from the local database on 2026-11-02.
 | `branch_classifier` | Technologiefeld from the keywords on the website ([branch-classification](branch-classification.md)) | DAG `technology_field`; a spaCy text classifier may fill gaps | after discovery | 542 |
 | `spacy_ner` | Geschäftsführer names a spaCy model finds on the Impressum | DAG `manager_ner_extract` | after discovery | 72 |
 | `cordis` | EU research grants (CORDIS: Horizon Europe, Horizon 2020) to private companies in Berlin. Reuse under the European Commission's reuse notice, exact terms not yet checked | DAG `cordis`, into `company_fundings`, linked by name and city (no register number). Local copy, 2026-11-04, rolled back: 1,188 participations of 518 companies, 761 linked to 319 of ours, EUR 248 million | monthly | grants table |
+| `web_search` | the Brave Search API: hosts found for a company's name and "Berlin" | DAG `web_search`: proposals verified like a guessed domain (#92). **Started by hand only**: price and storage terms not checked | by hand | not run yet |
 | `ba_jobsuche` | Federal Employment Agency job search: employers with open ads in Berlin (33,514 ads on 2026-11-04) | DAG `ba_jobsuche`: reads the list view, matches employers by name and postcode, stores matches only. **Started by hand only**: the portal's terms (2a (3)) forbid automated reading for data collection; read on the developer's decision of 2026-11-04 (#106) | by hand | not run yet |
 | `foerderkatalog` | grants of the federal government (Förderkatalog des Bundes) | DAG `foerderkatalog`, into `company_fundings`, linked by name and city | monthly | grants table |
 | `berlin_zuwendungen` | grants of Land Berlin (Zuwendungsdatenbank) | DAG `berlin_zuwendungen`, into `company_fundings`, linked by register number; a recipient registered after the snapshot that we lack becomes a company (name, legal form, city; #103) | monthly | grants table; 1,743 companies created (local, 2026-11-04) |
@@ -71,7 +72,7 @@ The goal is one record per Berlin company with 20 columns. Counts are from the l
 | 8 | Rechtsform | `legal_form` | OffeneRegister, `gleif` (both read from the end of the name) | 257,244 |
 | 9 | Cluster (n=5) | — | removed with #47; comes back with a classifier | — |
 | 10 | Technologiefeld | `technology_field` | `branch_classifier` | 194 |
-| 11 | Website | `website` | `website_discovery`, `wikidata`, `common_crawl`, `wirtschaftsatlas`, `register_crosslink` | 6,090 |
+| 11 | Website | `website` | `website_discovery`, `wikidata`, `common_crawl`, `wirtschaftsatlas`, `register_crosslink`, `web_search` | 6,090 |
 | 12 | Geschäftsführung / Kontakt | `management` | register officers (`import_register_managers.py`), `spacy_ner`; email and phone from `impressum_contacts`, stored, not shown | names 111,374 |
 | 13 | Tätigkeitsbeschreibung | `business_purpose`, `activity_keywords` | `website_keywords` (published once 500 companies are read); the purpose from `openregister`; OffeneRegister has no purpose | purpose 0 |
 | 14 | Kommentar | `comments` | people in the app | — |
