@@ -84,3 +84,9 @@ def test_an_association_register_makes_a_page_an_impressum() -> None:
 def test_a_bare_legal_link_is_not_taken_for_the_impressum() -> None:
     assert http_client._find_impressum_link("https://a.de/", '<a href="/legal">Legal</a>') is None
     assert http_client._find_impressum_link("https://a.de/", '<a href="mailto:x@a.de">Legal Notice</a>') is None
+
+
+def test_a_link_back_to_the_page_itself_is_not_the_impressum() -> None:
+    assert http_client._find_impressum_link("https://a.de/", '<a href="#">Impressum</a>') is None
+    assert http_client._find_impressum_link("https://a.de/", '<a href="#impressum">Impressum</a>') is None
+    assert http_client._find_impressum_link("https://a.de/", '<a href="">Legal Notice</a>') is None

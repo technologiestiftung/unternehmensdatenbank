@@ -5,7 +5,7 @@ import os
 import re
 import threading
 
-from urllib.parse import urljoin
+from urllib.parse import urldefrag, urljoin
 
 import requests
 from bs4 import BeautifulSoup
@@ -163,7 +163,9 @@ def _find_impressum_link(base_url: str, html: str) -> str | None:
     Links are tried in three passes, so a page with several still takes the Impressum: the address
     says Impressum, then the link text does, then either says "Legal Notice" or a German equivalent
     (`_LEGAL_NOTICE_RE`). START Berlin links "Legal Notice" to `legal/legal-notice.html`, which prints
-    its register number; the first pass alone never read it (#109).
+    its register number; the first pass alone never read it (#109). A link back to the page itself
+    (`href="#"`, `#impressum`) is skipped: read under its own address, the footer word Impressum
+    would make the homepage the Impressum.
     """
     try:
         links = [(a["href"], " ".join(a.get_text(" ").split())) for a in _soup(html).find_all("a", href=True)]
@@ -174,9 +176,16 @@ def _find_impressum_link(base_url: str, html: str) -> str | None:
         lambda _href, text: bool(_IMPRINT_WORD_RE.search(text)),
         lambda href, text: bool(_LEGAL_NOTICE_RE.search(href) or _LEGAL_NOTICE_RE.search(text)),
     )
+    page = urldefrag(base_url).url
+    links = [
+        (href, text)
+        for href, text in links
+        if not href.lower().startswith(("mailto:", "tel:", "javascript:"))
+        and urldefrag(urljoin(base_url, href)).url != page
+    ]
     for matches in passes:
         for href, text in links:
-            if matches(href, text) and not href.lower().startswith(("mailto:", "tel:", "javascript:")):
+            if matches(href, text):
                 return urljoin(base_url, href)
     return None
 
