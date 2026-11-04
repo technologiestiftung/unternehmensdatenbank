@@ -35,3 +35,15 @@ def test_no_dag_file_imports_another_dag_file_at_the_top() -> None:
         if isinstance(node, ast.ImportFrom) and node.module in dag_modules - {name}
     ]
     assert offending == []
+
+
+def test_every_task_that_runs_our_code_is_a_pipeline_task() -> None:
+    """A bare `PythonOperator` runs in Airflow's own Python, which on the hub holds none of our packages:
+    `register_announcements` was one until #88's follow-up. `pipeline_task` makes it a pod there."""
+    offending = [
+        _module(path)
+        for path in DAGS.glob("*/*.py")
+        for node in ast.walk(ast.parse(path.read_text(encoding="utf-8")))
+        if isinstance(node, ast.Call) and getattr(node.func, "id", None) == "PythonOperator"
+    ]
+    assert offending == []
