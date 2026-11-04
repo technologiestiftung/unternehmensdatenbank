@@ -45,8 +45,14 @@ def test_the_search_asks_for_berlin_since_a_day_one_page_at_a_time() -> None:
 
 
 def test_the_next_run_continues_the_pass_then_starts_a_new_one() -> None:
-    today = date(2026, 11, 4)
-    assert next_state(None, 5, today) == {"incorporated_from": "01-01-2019", "page": 2}
-    assert next_state({"incorporated_from": "01-01-2019", "page": 4}, 5, today)["page"] == 5
-    assert next_state({"incorporated_from": "01-01-2019", "page": 5}, 5, today) == {
+    first = next_state(None, 5, date(2026, 3, 2))
+    assert first == {"incorporated_from": "01-01-2019", "page": 2, "pass_started": "2026-03-02"}
+    assert next_state({**first, "page": 4}, 5, date(2026, 9, 1))["pass_started"] == "2026-03-02"
+    # The pass began on 2 March; 31 days before is 30 January, not 31 days before the day it ended.
+    assert next_state({**first, "page": 5}, 5, date(2026, 11, 4)) == {
+        "incorporated_from": "30-01-2026", "page": 1}
+
+
+def test_a_one_page_pass_starts_the_next_from_its_own_day() -> None:
+    assert next_state({"incorporated_from": "30-01-2026", "page": 1}, 1, date(2026, 11, 4)) == {
         "incorporated_from": "04-10-2026", "page": 1}

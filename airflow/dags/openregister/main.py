@@ -15,7 +15,8 @@ balance nothing. A run makes at most `MAX_SEARCHES` searches (default 10, so 100
 when the balance would fall below one search. Each search is one page of Berlin companies incorporated
 since `INCORPORATED_FROM`; `pipeline_state` (openregister / search) remembers the next page, so the
 next run continues there and the whole list is read across runs. After the last page the next run
-starts again at page 1, now only for companies incorporated since 31 days before the last pass ended.
+starts again at page 1, now only for companies incorporated since 31 days before the last pass read its
+first page, so a company incorporated while a long pass ran is read by the next one.
 
 **What a run writes**, per company, like `gleif` (`enrichment.register_match.write_entry`): a source
 record (`external_id` = OpenRegister's company id), linked by register number, then a unique live name in
@@ -100,11 +101,14 @@ def entry_for(item: dict[str, Any], today: str) -> RegisterEntry | None:
 
 def next_state(state: dict[str, Any] | None, total_pages: int, today: date) -> dict[str, Any]:
     """Where the next search starts: the next page, or after the last page a new pass for the companies
-    incorporated since 31 days before today."""
+    incorporated since 31 days before the day this pass read its first page (`pass_started`)."""
     state = dict(state or {"incorporated_from": INCORPORATED_FROM, "page": 1})
+    if state["page"] == 1:
+        state["pass_started"] = today.isoformat()
     if state["page"] < total_pages:
         return {**state, "page": state["page"] + 1}
-    return {"incorporated_from": (today - timedelta(days=31)).strftime("%d-%m-%Y"), "page": 1}
+    started = date.fromisoformat(state["pass_started"])
+    return {"incorporated_from": (started - timedelta(days=31)).strftime("%d-%m-%Y"), "page": 1}
 
 
 def _session():  # noqa: ANN202
@@ -147,13 +151,16 @@ def run_search() -> int:
                 log.info("Fewer than %d credits left; stopping.", SEARCH_COST)
                 break
             current = state or {"incorporated_from": INCORPORATED_FROM, "page": 1}
-            response = session.post(f"{API}/v1/search/company", json=search_body(**current), timeout=TIMEOUT_S)
+            response = session.post(f"{API}/v1/search/company", timeout=TIMEOUT_S,
+                                    json=search_body(current["incorporated_from"], current["page"]))
             if response.status_code == 402:  # credits used up between the balance check and the search
                 log.info("OpenRegister refused the search: no credits left; stopping.")
                 break
             response.raise_for_status()
             data = response.json()
             searches += 1
+            pagination = data["pagination"]
+            total_pages = int(pagination["total_pages"])
             # Each page in its own transaction: a later failure must not undo pages whose credits are spent.
             with connection, connection.cursor() as cur:
                 for item in data["results"]:
@@ -161,11 +168,9 @@ def run_search() -> int:
                     method = write_entry(cur, entry, source_id=source_id, sync_run_id=sync_run_id,
                                          created_by=SOURCE_KEY) if entry else "unreadable"
                     methods[method] = methods.get(method, 0) + 1
-                pagination = data["pagination"]
-                log.info("Page %d of %d (%d companies since %s, %d per page).", current["page"],
-                         pagination["total_pages"], pagination.get("total_results", -1),
-                         current["incorporated_from"], pagination["per_page"])
-                state = next_state(current, int(pagination["total_pages"]), today)
+                log.info("Page %d of %d (%s companies since %s, %s per page).", current["page"], total_pages,
+                         pagination.get("total_results"), current["incorporated_from"], pagination.get("per_page"))
+                state = next_state(current, total_pages, today)
                 cur.execute(
                     """
                     INSERT INTO public.pipeline_state (pipeline, key, value) VALUES (%s, %s, %s)
