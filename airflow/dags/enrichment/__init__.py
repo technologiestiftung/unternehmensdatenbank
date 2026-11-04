@@ -38,6 +38,7 @@ Industry classification (three columns that must never be mixed: docs/branch-cla
   branch_classifier.py                         Technologiefeld from the words a company publishes;
                                                fields and keywords in Postgres (technology_fields, #84)
   branch_textcat.py                            spaCy text classifier, seeded by the keywords, trained by technology_field_train
+  llm.py                                       teacher labels from the Claude API (#87): prompt, redaction, batches
   purpose_branch.py                            the same 77 fields from the register purpose
   wz_cluster.py                                the official WZ cluster, a lookup in wz_divisions
 
