@@ -109,6 +109,42 @@ left out, because their domain can carry the owner's name) holds 106 of the 110,
 by hand, and 292 of the 300 sampled hits; `scripts/measure_url_guesses.py` reports
 how many each group gets guessed. `--draw-hand-sample` draws the 200 companies for the hand search.
 
+## Sites that name the company but prove nothing (#96)
+
+A guessed site whose page carries the company's name, but no register number, no register officer
+and no matching postcode, stays at 0.34 and is never shown. Two patterns from the hand search (#89):
+the company moved since the 2017–2019 snapshot, so its postcode no longer matches; or the domain does
+not carry the name and is refused before its Impressum is read (`tub.co`).
+
+**How many**, local Berlin database, 2026-11-04: **7,014** active companies (sole traders left out)
+without a proven website have such a site. On 3,696 the domain is exactly the name, on 1,171 the
+Impressum gives an email at the domain, on 1,527 the page's structured data names the company. On play
+(2026-11-03) the issue counted 21,641 without these filters.
+
+**Nothing is shown before a hand check.** `scripts/check_unproven_sites.py --draw` draws 50 (the
+`review_sample` first, then a fixed order) into a CSV for a person to mark `own_site`, `directory`,
+`parent`, `namesake` or `other`; `--score` gives the share of own sites, overall and per flag (for
+example exact-name domain plus email at the domain). Only at about 9 in 10 is a shown value
+defensible; otherwise these sites are never shown as the website, and stay only in the app's list
+of all claims under `website` (`v_company_claims`), like every other claim.
+
+**Checked by hand on play, 2026-11-04: 2 of 40 are the company's own site (5%).** 50 drawn, 10 not
+judgeable (5 parked or broken, 5 without enough on the page). Of the 40: 2 own sites, 29 another
+business with the same name (about 16 abroad: US, Canada, Denmark, Austria, Vietnam, Dubai; about 10
+in another German city), 5 a parent or group company, 4 another organisation. No flag lifts it near the
+bar: exact-name domain 2 of 21, exact-name domain plus email at the domain 1 of 5. A model suggested
+verdicts first; a person checked every row, and only the person's verdicts are counted.
+
+**Decision: these sites are never shown as the website, as today.** They stay listed in the app's
+"all claims" toggle (`v_company_claims`), like every other claim, and nothing more. Instead, the
+signals against a site get sharper: #111 (Impressum abroad, unread register numbers) targets the
+largest group, about 16 of the 38 wrong sites with an Impressum abroad; how many it drops out of the
+0.34 pool is not measured yet. #112 and #113 follow up the rest. The signals:
+an Impressum abroad, register numbers we cannot read yet (`HR B 61871`, Swiss `CH-…`), a page that
+proves another company in our database, and register numbers we do not have at all. Two right sites
+the guesses missed: `hma-berlin.de` (abbreviation plus "berlin", #89) and a "Legal Notice" link
+that was never followed (#109).
+
 ## Pages are cached, so extraction changes are cheap to try
 
 `COMBINED_PAGE_CACHE_DIR` turns on a disk cache of raw HTML and status, for measurement runs. Inside
