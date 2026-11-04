@@ -218,11 +218,13 @@ def planned_observations(
             skipped[f"invalid {key}"] += 1
             continue
         claims = [((company, key, claim_key(value)), value)]
+        # A corrected date also backs its year: the shown "Gründung" year is founding_year first (V6).
         if key == "established_at":
             claims.append(((company, "established_year", value[:4]), value[:4]))
             when, year_vote = vote.get("updated_at"), (company, "established_year", author)
             if when is not None and (voted_at.get(year_vote) is None or when > voted_at[year_vote]):
                 voted_at[year_vote] = when
+        # One year per person: a typed year and a corrected date share it, the later one wins.
         if key in {"established_at", "established_year"}:
             year_claim = claims[-1][0]
             agree.get(year_of.get((company, author)), set()).discard(author)
