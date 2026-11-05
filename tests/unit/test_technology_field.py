@@ -273,3 +273,32 @@ def test_nothing_is_read_again_while_the_store_is_off_or_down(monkeypatch) -> No
     monkeypatch.setattr(corpus, "_unreachable", False)
     monkeypatch.setattr(corpus, "_s3", lambda: Up())
     assert set(main.text_to_read_again(Cursor(), "s", 10)) == {"c1", "c2"}
+
+
+@pytest.mark.parametrize(("new", "again", "full"), [(3, {}, True), (1, {"c9": ("N", "n.de", {})}, False), (0, {}, False)])
+def test_the_next_batch_starts_only_after_a_full_one(monkeypatch, new: int, again: dict, full: bool) -> None:  # noqa: ANN001
+    """Intent (#156): the DAG starts its next run while a batch comes back full, and stops on a short
+    one, so the chain ends. A batch topped up with re-reads up to the size counts as full."""
+    monkeypatch.setattr(main, "BATCH_SIZE", 3)
+    monkeypatch.setattr(main.bc, "load_taxonomy", lambda: None)
+    monkeypatch.setattr(main, "get_connection", lambda: _Connection(SimpleNamespace()))
+    monkeypatch.setattr(main, "_source_id", lambda cur: "source")
+    monkeypatch.setattr(main, "start_sync_run", lambda *a, **k: "run")
+    monkeypatch.setattr(main, "finish_sync_run", lambda *a, **k: None)
+    monkeypatch.setattr(main, "upsert_source_record", lambda *a, **k: None)
+    monkeypatch.setattr(main.corpus, "record_document", lambda *a, **k: None)
+    monkeypatch.setattr(main, "read_site", lambda website, taxonomy: {"keywords": {}, "homepage_loaded": True})
+    monkeypatch.setattr(main, "companies_with_website_to_read",
+                        lambda cur, **k: [(f"c{i}", "N", f"s{i}.de", 0) for i in range(new)])
+    monkeypatch.setattr(main, "text_to_read_again", lambda cur, source_id, limit: dict(list(again.items())[:limit]))
+    assert main.run_read() is full
+
+
+def test_a_top_up_of_re_reads_to_the_batch_size_counts_as_full(monkeypatch) -> None:  # noqa: ANN001
+    again = {f"r{i}": ("N", f"r{i}.de", {}) for i in range(2)}
+    test_the_next_batch_starts_only_after_a_full_one(monkeypatch, 1, again, True)
+
+
+def test_the_source_page_says_daily_in_batches() -> None:
+    assert main.SCHEDULE == "@daily"
+    assert main.DETAILS.schedule == "täglich in Paketen"
