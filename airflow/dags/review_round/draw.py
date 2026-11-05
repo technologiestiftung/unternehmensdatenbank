@@ -21,7 +21,8 @@ The order is random but fixed per round (md5 of the observation or company and t
 
 A verdict reaches `extraction_feedback` under the round's feedback field (the trigger in V4), which
 must be one that table accepts: read from its check constraint, never restated here. Email and phone
-have none, so their verdicts are counted, never turned into a correction.
+have none, so their verdicts are counted, never turned into a correction. They are stored, never
+resolved (`NEVER_RESOLVED`), so a `shown` round draws every stored value and there is no `refused`.
 """
 from __future__ import annotations
 
@@ -36,6 +37,8 @@ from psycopg2.extras import Json
 log = logging.getLogger(__name__)
 
 DEFAULT_SIZE = 200
+#: Fields the coordinator stores but never resolves (CLAUDE.md): the app shows every stored value.
+NEVER_RESOLVED = frozenset({"email", "phone"})
 #: Observation fields whose verdict counts for another field: a website candidate is a website.
 FEEDBACK_ALIASES = {"candidate_url": "website", "directory_url": "website", "deeptech_class": "deeptech"}
 #: Gap rounds other than technology_field: the profile column that is empty, and who is asked about.
@@ -74,12 +77,13 @@ def _observations(cur: Any, *, source: str, field: str, shown: bool, size: int, 
         JOIN public.sources s ON s.id = o.source_id AND s.key = %(source)s
         JOIN public.companies c ON c.id = o.company_id AND c.merged_into IS NULL
         WHERE o.field_name = %(field)s AND COALESCE(o.value_text, '') <> ''
-          AND EXISTS (SELECT 1 FROM public.company_canonical_field_sources k
-                      WHERE k.company_field_observation_id = o.id) = %(shown)s
+          AND (%(stored_only)s OR EXISTS (SELECT 1 FROM public.company_canonical_field_sources k
+                                          WHERE k.company_field_observation_id = o.id) = %(shown)s)
         ORDER BY md5(o.id::text || %(salt)s)
         LIMIT %(size)s
         """,
-        {"source": source, "field": field, "shown": shown, "size": size, "salt": salt},
+        {"source": source, "field": field, "shown": shown, "stored_only": field in NEVER_RESOLVED,
+         "size": size, "salt": salt},
     )
     return [{"observation_id": oid, "company_id": cid, "value": value[:500], "confidence": conf,
              "evidence": evidence, "method": method} for oid, cid, value, conf, evidence, method in cur.fetchall()]
@@ -131,6 +135,8 @@ def draw(cur: Any, *, field: str, kind: str, source: str | None = None, size: in
     """Create one round and its tasks. Returns (round id, tasks drawn)."""
     if kind in ("shown", "refused") and not source:
         raise ValueError(f"a {kind} round needs --source")
+    if kind == "refused" and field in NEVER_RESOLVED:
+        raise ValueError(f"{field} is never resolved, so nothing is refused: draw it as shown")
     if kind == "gap" and field != "technology_field" and field not in PROFILE_GAPS:
         raise ValueError(f"no gap rule for {field!r}; known: technology_field, {', '.join(sorted(PROFILE_GAPS))}")
     round_id = str(uuid.uuid4())

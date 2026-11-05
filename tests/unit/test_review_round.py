@@ -28,3 +28,10 @@ def test_a_round_without_what_it_needs_is_refused_before_touching_the_database()
         draw(None, field="technology_field", kind="shown")
     with pytest.raises(ValueError, match="no gap rule"):
         draw(None, field="email", kind="gap")
+
+
+def test_email_and_phone_are_never_refused_because_they_are_never_resolved() -> None:
+    # CLAUDE.md: email and phone are stored, never resolved, so the app shows every stored value.
+    for field in ("email", "phone"):
+        with pytest.raises(ValueError, match="never resolved"):
+            draw(None, source="impressum_contacts", field=field, kind="refused")

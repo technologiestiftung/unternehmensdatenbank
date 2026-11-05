@@ -87,18 +87,22 @@ want="77,77,67,544,27,87,22,0,7,4,t,f,t,t"
 [ "$taxonomy" = "$want" ] || { echo "taxonomy tables: got $taxonomy, want $want"; exit 1; }
 # The review queue (#153): a verdict the reader (Hasura) writes becomes the same person's vote in
 # extraction_feedback; "unsure" takes it back; a gap task copies only a correction; a round without a
-# feedback field (email, phone) copies nothing; the reader cannot draw tasks.
+# feedback field (email, phone) copies nothing; taking back a second round's verdict keeps the first
+# round's vote; a vote cast in the app survives a deleted verdict; the reader cannot draw tasks.
 review=$(docker exec -i "$pg" psql -U postgres -d udb -v ON_ERROR_STOP=1 -qtA <<'SQL'
 BEGIN;
 INSERT INTO public.companies (id) VALUES ('00000000-0000-0000-0000-000000000001');
 INSERT INTO public.review_rounds (id, source_key, field_name, feedback_field, kind, title, size) VALUES
   ('00000000-0000-0000-0000-0000000000a1', 'branch_classifier', 'technology_field', 'technology_field', 'shown', 't', 1),
   ('00000000-0000-0000-0000-0000000000a2', NULL, 'technology_field', 'technology_field', 'gap', 'g', 1),
-  ('00000000-0000-0000-0000-0000000000a3', 'impressum_contacts', 'email', NULL, 'shown', 'e', 1);
+  ('00000000-0000-0000-0000-0000000000a3', 'impressum_contacts', 'email', NULL, 'shown', 'e', 1),
+  ('00000000-0000-0000-0000-0000000000a4', 'branch_classifier', 'technology_field', 'technology_field', 'shown', 't2', 1);
 INSERT INTO public.review_tasks (id, round_id, position, company_id, value) VALUES
   ('00000000-0000-0000-0000-0000000000b1', '00000000-0000-0000-0000-0000000000a1', 1, '00000000-0000-0000-0000-000000000001', 'Photonics'),
   ('00000000-0000-0000-0000-0000000000b2', '00000000-0000-0000-0000-0000000000a2', 1, '00000000-0000-0000-0000-000000000001', ''),
-  ('00000000-0000-0000-0000-0000000000b3', '00000000-0000-0000-0000-0000000000a3', 1, '00000000-0000-0000-0000-000000000001', 'x@example.de');
+  ('00000000-0000-0000-0000-0000000000b3', '00000000-0000-0000-0000-0000000000a3', 1, '00000000-0000-0000-0000-000000000001', 'x@example.de'),
+  ('00000000-0000-0000-0000-0000000000b4', '00000000-0000-0000-0000-0000000000a1', 2, '00000000-0000-0000-0000-000000000001', 'Robotics'),
+  ('00000000-0000-0000-0000-0000000000b5', '00000000-0000-0000-0000-0000000000a4', 1, '00000000-0000-0000-0000-000000000001', 'Photonics');
 SET ROLE hub_reader;
 INSERT INTO public.review_verdicts (task_id, verdict, author_id) VALUES
   ('00000000-0000-0000-0000-0000000000b1', 'correct', 'u1'),
@@ -106,12 +110,24 @@ INSERT INTO public.review_verdicts (task_id, verdict, author_id) VALUES
 INSERT INTO public.review_verdicts (task_id, verdict, correction, author_id) VALUES
   ('00000000-0000-0000-0000-0000000000b2', 'wrong', 'Software', 'u1');
 SELECT string_agg(value || ':' || verdict || ':' || coalesce(correction, '-'), ' ' ORDER BY value) FROM public.extraction_feedback;
+INSERT INTO public.review_verdicts (task_id, verdict, author_id) VALUES
+  ('00000000-0000-0000-0000-0000000000b5', 'correct', 'u1');
+INSERT INTO public.review_verdicts (task_id, verdict, author_id) VALUES
+  ('00000000-0000-0000-0000-0000000000b5', 'unsure', 'u1')
+  ON CONFLICT (task_id) DO UPDATE SET verdict = EXCLUDED.verdict;
+SELECT count(*) FROM public.extraction_feedback WHERE value = 'Photonics';
 UPDATE public.review_verdicts SET verdict = 'unsure' WHERE task_id = '00000000-0000-0000-0000-0000000000b1';
 SELECT count(*) FROM public.extraction_feedback;
+INSERT INTO public.extraction_feedback (company_id, field_name, value, verdict, author_id) VALUES
+  ('00000000-0000-0000-0000-000000000001', 'technology_field', 'Robotics', 'correct', 'u1');
+INSERT INTO public.review_verdicts (task_id, verdict, author_id) VALUES
+  ('00000000-0000-0000-0000-0000000000b4', 'wrong', 'u1');
+DELETE FROM public.review_verdicts WHERE task_id = '00000000-0000-0000-0000-0000000000b4';
+SELECT count(*) FROM public.extraction_feedback WHERE value = 'Robotics';
 SELECT has_table_privilege('hub_reader', 'public.review_tasks', 'INSERT');
 ROLLBACK;
 SQL
 )
-want=$(printf '%s\n%s\n%s' ':wrong:Software Photonics:correct:-' '1' 'f')
+want=$(printf '%s\n%s\n%s\n%s\n%s' ':wrong:Software Photonics:correct:-' '1' '1' '1' 'f')
 [ "$review" = "$want" ] || { echo "review queue: got [$review], want [$want]"; exit 1; }
 echo "migration image OK"

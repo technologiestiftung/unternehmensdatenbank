@@ -31,10 +31,14 @@ draw a round  ──►  review_tasks  ──►  a person judges in the app  �
 - **A task** keeps the value, its confidence, evidence flags and method as they were when drawn.
 - **A verdict** (one per task, one person per round): `correct`, `wrong` (with a reason and the right
   value) or `unsure`. A trigger copies `correct`/`wrong` into `extraction_feedback` as that person's
-  vote, under the round's feedback field. `unsure` takes the vote back.
+  vote, under the round's feedback field. `unsure` or a deleted verdict takes back only a vote the
+  queue wrote (`created_vote`): a vote the person cast in the app stays. If another verdict of the
+  same person on the same company and value still says `correct`/`wrong` (a second round drew it),
+  the vote follows that verdict instead of disappearing.
 - **Email and phone** are shown in the queue (decided for the research phase, 2026-11-05) but have no
   feedback field: their verdicts are counted, never turned into a correction (they are stored, never
-  resolved).
+  resolved). Because nothing is resolved, the app shows every stored value: a `shown` round draws
+  from all of them (`NEVER_RESOLVED` in `draw.py`), and a `refused` round is refused.
 
 ## Draw a round
 
