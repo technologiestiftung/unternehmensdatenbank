@@ -21,8 +21,8 @@ Weekly, two steps, then `pipeline_coordinator` publishes:
      and better than the model in use, judged the same way.
 2. **classify.** Every company whose published website the `technology_field` DAG read gets the
    promoted model's division, confidence = the model's probability (the coordinator shows it from
-   0.50). The prediction is cached in this source's record with the model version, so a company is
-   read again only for a new model. A company whose prediction changed keeps its old row at
+   0.50). The prediction is cached in this source's record with the model version and website, so a
+   company is read again only for a new model or a new website. A company whose prediction changed keeps its old row at
    confidence 0: never deleted. No promoted model, nothing written.
 
 Not hand-checked: no precision is known (#158). Labels come only from companies Claude was asked
