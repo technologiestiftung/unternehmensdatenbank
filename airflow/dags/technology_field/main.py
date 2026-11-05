@@ -50,6 +50,7 @@ from source_enrichment_common import (
     finish_sync_run,
     get_connection,
     insert_text_observation,
+    schedule_label,
     start_sync_run,
     upsert_source_record,
 )
@@ -57,13 +58,15 @@ from source_enrichment_common import (
 log = logging.getLogger(__name__)
 
 DAG_ID = "technology_field"
+#: Daily restarts the chain of batches (below) for new websites and pages grown too old.
+SCHEDULE = "@daily"
 #: What the app's source page says about this source (German).
 DETAILS = SourceDetails(
     description=(
         "Das Technologiefeld aus den Stichworten auf der Website (Berlins 77 Felder). Ein Textmodell "
         "füllt nur Lücken, in denen kein Stichwort vorkam."
     ),
-    schedule="nach der Website-Suche",
+    schedule=f"{schedule_label(SCHEDULE)} in Paketen",
 )
 BATCH_SIZE = int(os.getenv("TECHNOLOGY_FIELD_BATCH_SIZE", "50"))
 #: Companies read before whose stored homepage one run checks, oldest read first.
@@ -108,7 +111,8 @@ def read_site(website: str, taxonomy: bc.Taxonomy) -> dict[str, Any]:
     }
 
 
-def run_read() -> None:
+def run_read() -> bool:
+    """Read one batch. Returns whether it was full, so the DAG starts the next one."""
     taxonomy = bc.load_taxonomy()
     connection = get_connection()
     try:
@@ -152,6 +156,7 @@ def run_read() -> None:
             finish_sync_run(cur, sync_run_id=sync_run_id, records_seen=len(companies),
                             records_created=with_keywords, records_updated=0, records_failed=failed)
         log.info("Read %d websites: %d with a keyword, %d unreadable.", len(companies), with_keywords, failed)
+        return len(companies) >= BATCH_SIZE
     finally:
         connection.close()
 
@@ -379,24 +384,34 @@ def run_classify() -> None:
 def _make_dag():  # noqa: ANN201
     try:
         from airflow import DAG
+        from airflow.providers.standard.operators.python import ShortCircuitOperator
         from pipeline_task import pipeline_task
         from airflow.providers.standard.operators.trigger_dagrun import TriggerDagRunOperator
     except ImportError:
         return None
 
+    # Each run starts the next while batches come back full, so the companies to read (new, or whose
+    # stored text is missing or too old) are worked through without anyone re-triggering; the daily
+    # schedule restarts the chain. max_active_runs=1 queues a run behind a running one.
     with DAG(
         dag_id=DAG_ID,
         description="Berlin's Technologiefeld from the keywords on the company's own website",
-        schedule=None, start_date=datetime(2026, 10, 1, tzinfo=timezone.utc), catchup=False,
+        schedule=SCHEDULE, start_date=datetime(2026, 10, 1, tzinfo=timezone.utc), catchup=False,
         max_active_runs=1, tags=["sources", "websites", "classification"],
     ) as dag:
-        read = pipeline_task("read_websites", run_read)
+        read = pipeline_task("read_websites", run_read, returns=True)
         classify = pipeline_task("classify", run_classify)
         coordinate = TriggerDagRunOperator(
             task_id="trigger_pipeline_coordinator", trigger_dag_id="pipeline_coordinator",
             wait_for_completion=False,
         )
-        read >> classify >> coordinate
+        more_left = ShortCircuitOperator(
+            task_id="more_left", ignore_downstream_trigger_rules=False,
+            python_callable=lambda ti: bool(ti.xcom_pull(task_ids="read_websites")),
+        )
+        next_batch = TriggerDagRunOperator(task_id="next_batch", trigger_dag_id=DAG_ID, wait_for_completion=False)
+        read >> classify >> [coordinate, more_left]
+        more_left >> next_batch
     return dag
 
 
