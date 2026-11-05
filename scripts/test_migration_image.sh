@@ -88,7 +88,8 @@ want="77,77,67,544,27,87,22,0,7,4,t,f,t,t"
 # The review queue (#153): a verdict the reader (Hasura) writes becomes the same person's vote in
 # extraction_feedback; "unsure" takes it back; a gap task copies only a correction; a round without a
 # feedback field (email, phone) copies nothing; taking back a second round's verdict keeps the first
-# round's vote; a vote cast in the app survives a deleted verdict; the reader cannot draw tasks.
+# round's vote; a vote cast in the app gets its own answer back when the verdict that overwrote it
+# is deleted; the reader cannot draw tasks.
 review=$(docker exec -i "$pg" psql -U postgres -d udb -v ON_ERROR_STOP=1 -qtA <<'SQL'
 BEGIN;
 INSERT INTO public.companies (id) VALUES ('00000000-0000-0000-0000-000000000001');
@@ -120,14 +121,41 @@ UPDATE public.review_verdicts SET verdict = 'unsure' WHERE task_id = '00000000-0
 SELECT count(*) FROM public.extraction_feedback;
 INSERT INTO public.extraction_feedback (company_id, field_name, value, verdict, author_id) VALUES
   ('00000000-0000-0000-0000-000000000001', 'technology_field', 'Robotics', 'correct', 'u1');
-INSERT INTO public.review_verdicts (task_id, verdict, author_id) VALUES
-  ('00000000-0000-0000-0000-0000000000b4', 'wrong', 'u1');
+INSERT INTO public.review_verdicts (task_id, verdict, correction, author_id) VALUES
+  ('00000000-0000-0000-0000-0000000000b4', 'wrong', 'Software', 'u1');
+SELECT verdict || ':' || coalesce(correction, '-') FROM public.extraction_feedback WHERE value = 'Robotics';
 DELETE FROM public.review_verdicts WHERE task_id = '00000000-0000-0000-0000-0000000000b4';
-SELECT count(*) FROM public.extraction_feedback WHERE value = 'Robotics';
+SELECT verdict || ':' || coalesce(correction, '-') FROM public.extraction_feedback WHERE value = 'Robotics';
 SELECT has_table_privilege('hub_reader', 'public.review_tasks', 'INSERT');
 ROLLBACK;
 SQL
 )
-want=$(printf '%s\n%s\n%s\n%s\n%s' ':wrong:Software Photonics:correct:-' '1' '1' '1' 'f')
+want=$(printf '%s\n%s\n%s\n%s\n%s\n%s' ':wrong:Software Photonics:correct:-' '1' '1' 'wrong:Software' 'correct:-' 'f')
 [ "$review" = "$want" ] || { echo "review queue: got [$review], want [$want]"; exit 1; }
+# A drawn round holds at most one task per company: company c1 has two refused website candidates,
+# c2 one, so the writer's draw (review_round.draw, run for real) gives 2 tasks for 2 companies.
+docker exec -i "$pg" psql -U postgres -d udb -v ON_ERROR_STOP=1 -q <<'SQL'
+INSERT INTO public.companies (id) VALUES
+  ('00000000-0000-0000-0000-0000000000c1'), ('00000000-0000-0000-0000-0000000000c2');
+INSERT INTO public.sources (id, key, name, source_type) VALUES
+  ('00000000-0000-0000-0000-0000000000d1', 'website_discovery', 'w', 'web');
+INSERT INTO public.company_source_records (id, company_id, source_id, external_id) VALUES
+  ('00000000-0000-0000-0000-0000000000e1', '00000000-0000-0000-0000-0000000000c1', '00000000-0000-0000-0000-0000000000d1', 'c1'),
+  ('00000000-0000-0000-0000-0000000000e2', '00000000-0000-0000-0000-0000000000c2', '00000000-0000-0000-0000-0000000000d1', 'c2');
+INSERT INTO public.company_field_observations (company_id, company_source_record_id, source_id, field_name, value_text) VALUES
+  ('00000000-0000-0000-0000-0000000000c1', '00000000-0000-0000-0000-0000000000e1', '00000000-0000-0000-0000-0000000000d1', 'candidate_url', 'https://a.example'),
+  ('00000000-0000-0000-0000-0000000000c1', '00000000-0000-0000-0000-0000000000e1', '00000000-0000-0000-0000-0000000000d1', 'candidate_url', 'https://b.example'),
+  ('00000000-0000-0000-0000-0000000000c2', '00000000-0000-0000-0000-0000000000e2', '00000000-0000-0000-0000-0000000000d1', 'candidate_url', 'https://c.example');
+SQL
+drawn=$(docker run --rm --network "$net" -v "$PWD/airflow/dags:/dags:ro" -e PYTHONPATH=/dags python:3.12-slim sh -c "
+pip install -q --disable-pip-version-check --root-user-action=ignore psycopg2-binary >/dev/null && python - <<'PY'
+import psycopg2
+from review_round.draw import draw
+with psycopg2.connect(host='$pg', dbname='udb', user='hub_writer', password='pw') as conn, conn.cursor() as cur:
+    round_id, n = draw(cur, source='website_discovery', field='candidate_url', kind='refused', size=10)
+    cur.execute('SELECT count(DISTINCT company_id), max(feedback_field) FROM public.review_tasks t '
+                'JOIN public.review_rounds r ON r.id = t.round_id WHERE r.id = %s', (round_id,))
+    print(n, *cur.fetchone())
+PY")
+[ "$drawn" = "2 2 website" ] || { echo "review draw: got [$drawn], want [2 2 website]"; exit 1; }
 echo "migration image OK"

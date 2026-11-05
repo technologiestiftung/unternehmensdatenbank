@@ -16,7 +16,8 @@ Three kinds (V4__review_queue.sql):
   shows the LLM's label (#87) as a suggestion where there is one. Other fields: the company profile's
   column is empty.
 
-The order is random but fixed per round (md5 of the observation or company and the round id). Only
+The order is random but fixed per round (md5 of the observation or company and the round id). At most
+one task per company: `feedback_observations` keeps one vote per person, company and field. Only
 `measure` rounds so far: `teach` (the cases a model is least sure of) comes with a model to ask.
 
 A verdict reaches `extraction_feedback` under the round's feedback field (the trigger in V4), which
@@ -70,16 +71,23 @@ def _accepted(cur: Any) -> set[str]:
 def _observations(cur: Any, *, source: str, field: str, shown: bool, size: int, salt: str) -> list[dict[str, Any]]:
     cur.execute(
         """
-        SELECT o.id::text, o.company_id::text, o.value_text, o.confidence,
-               CASE WHEN jsonb_typeof(o.metadata -> 'evidence') = 'array' THEN o.metadata -> 'evidence' ELSE '[]' END,
-               COALESCE(o.metadata ->> 'method', o.metadata -> 'methods' ->> 0)
-        FROM public.company_field_observations o
-        JOIN public.sources s ON s.id = o.source_id AND s.key = %(source)s
-        JOIN public.companies c ON c.id = o.company_id AND c.merged_into IS NULL
-        WHERE o.field_name = %(field)s AND COALESCE(o.value_text, '') <> ''
-          AND (%(stored_only)s OR EXISTS (SELECT 1 FROM public.company_canonical_field_sources k
-                                          WHERE k.company_field_observation_id = o.id) = %(shown)s)
-        ORDER BY md5(o.id::text || %(salt)s)
+        SELECT id, company_id, value_text, confidence, evidence, method
+        FROM (
+            SELECT DISTINCT ON (o.company_id)
+                   o.id::text AS id, o.company_id::text AS company_id, o.value_text, o.confidence,
+                   CASE WHEN jsonb_typeof(o.metadata -> 'evidence') = 'array' THEN o.metadata -> 'evidence'
+                        ELSE '[]' END AS evidence,
+                   COALESCE(o.metadata ->> 'method', o.metadata -> 'methods' ->> 0) AS method,
+                   md5(o.id::text || %(salt)s) AS draw_key
+            FROM public.company_field_observations o
+            JOIN public.sources s ON s.id = o.source_id AND s.key = %(source)s
+            JOIN public.companies c ON c.id = o.company_id AND c.merged_into IS NULL
+            WHERE o.field_name = %(field)s AND COALESCE(o.value_text, '') <> ''
+              AND (%(stored_only)s OR EXISTS (SELECT 1 FROM public.company_canonical_field_sources k
+                                              WHERE k.company_field_observation_id = o.id) = %(shown)s)
+            ORDER BY o.company_id, draw_key
+        ) one_per_company
+        ORDER BY draw_key
         LIMIT %(size)s
         """,
         {"source": source, "field": field, "shown": shown, "stored_only": field in NEVER_RESOLVED,

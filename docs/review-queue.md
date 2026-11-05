@@ -29,10 +29,13 @@ draw a round  ──►  review_tasks  ──►  a person judges in the app  �
   - Mode `measure` is a random draw, the only kind that gives a precision. `teach` (the cases a model
     is least sure of) is not built yet.
 - **A task** keeps the value, its confidence, evidence flags and method as they were when drawn.
+  A round draws at most one task per company: `feedback_observations` keeps one vote per person,
+  company and field, so a second value of the same company would overwrite the first one's verdict.
 - **A verdict** (one per task, one person per round): `correct`, `wrong` (with a reason and the right
   value) or `unsure`. A trigger copies `correct`/`wrong` into `extraction_feedback` as that person's
   vote, under the round's feedback field. `unsure` or a deleted verdict takes back only a vote the
-  queue wrote (`created_vote`): a vote the person cast in the app stays. If another verdict of the
+  queue wrote (`created_vote`): a vote the person cast in the app gets back the answer the verdict
+  overwrote (`prior_verdict`, `prior_correction`). If another verdict of the
   same person on the same company and value still says `correct`/`wrong` (a second round drew it),
   the vote follows that verdict instead of disappearing.
 - **Email and phone** are shown in the queue (decided for the research phase, 2026-11-05) but have no
@@ -68,7 +71,7 @@ Counts only, never who judged what.
 ## Removal
 
 1. Export the verdicts once (training data).
-2. One migration drops the trigger, the two views and the four tables.
+2. One migration drops the trigger and its function, the two views and the four tables.
 3. Delete the Hasura metadata (`review_*`, `v_review_round_results`, `v_review_breakdown`), restart Hasura.
 4. Delete `airflow/dags/review_round/` and the app's `/pruefen` routes.
 

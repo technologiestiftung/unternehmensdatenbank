@@ -73,11 +73,15 @@ CREATE TABLE public.review_verdicts (
     created_at timestamptz NOT NULL DEFAULT now(),
     updated_at timestamptz NOT NULL DEFAULT now(),
     created_vote boolean NOT NULL DEFAULT false,
+    prior_verdict text,
+    prior_correction text,
     CHECK (correction IS NULL OR verdict = 'wrong'),
     CHECK (reason IS NULL OR verdict = 'wrong')
 );
 COMMENT ON TABLE public.review_verdicts IS 'The one answer to a review task (#153). Copied into extraction_feedback by a trigger.';
 COMMENT ON COLUMN public.review_verdicts.created_vote IS 'Set by the trigger: this verdict wrote the extraction_feedback vote, so only it may take the vote back.';
+COMMENT ON COLUMN public.review_verdicts.prior_verdict IS 'Set by the trigger: the app vote this verdict overwrote, restored when the verdict is taken back.';
+COMMENT ON COLUMN public.review_verdicts.prior_correction IS 'Set by the trigger: the correction of the app vote this verdict overwrote.';
 
 CREATE TRIGGER review_verdicts_touch_updated_at BEFORE UPDATE ON public.review_verdicts
     FOR EACH ROW EXECUTE FUNCTION public.touch_updated_at();
@@ -85,8 +89,9 @@ CREATE TRIGGER review_verdicts_touch_updated_at BEFORE UPDATE ON public.review_v
 -- A verdict becomes the person's vote on the same value in extraction_feedback, so corrections and
 -- training read it without knowing about the queue. A gap task has no value: only a correction can be
 -- copied (the table requires one for an empty value). `unsure` and a deleted verdict take back only a
--- vote the queue wrote (`created_vote`): a vote cast in the app stays. If another verdict of the same
--- person on the same value still says correct/wrong, the vote follows that one instead.
+-- vote the queue wrote (`created_vote`); a vote cast in the app gets back the answer the verdict
+-- overwrote (`prior_verdict`). If another verdict of the same person on the same value still says
+-- correct/wrong, the vote follows that one instead.
 CREATE FUNCTION public.copy_review_verdict() RETURNS trigger
     LANGUAGE plpgsql
     AS $$
@@ -96,12 +101,19 @@ DECLARE
     other public.review_verdicts;
     target text;
     created boolean := false;
+    prior_v text;
+    prior_c text;
+    vote public.extraction_feedback;
 BEGIN
     IF TG_OP = 'UPDATE' AND pg_trigger_depth() > 1 THEN
         RETURN NULL;
     END IF;
     IF TG_OP = 'DELETE' THEN v := OLD; ELSE v := NEW; END IF;
-    IF TG_OP <> 'INSERT' THEN created := OLD.created_vote; END IF;
+    IF TG_OP <> 'INSERT' THEN
+        created := OLD.created_vote;
+        prior_v := OLD.prior_verdict;
+        prior_c := OLD.prior_correction;
+    END IF;
     SELECT * INTO t FROM public.review_tasks WHERE id = v.task_id;
     SELECT feedback_field INTO target FROM public.review_rounds WHERE id = t.round_id;
     IF target IS NULL THEN
@@ -127,20 +139,31 @@ BEGIN
         ELSIF created THEN
             DELETE FROM public.extraction_feedback
             WHERE company_id = t.company_id AND field_name = target AND value = t.value AND author_id = v.author_id;
+        ELSIF prior_v IS NOT NULL THEN
+            UPDATE public.extraction_feedback SET verdict = prior_v, correction = prior_c
+            WHERE company_id = t.company_id AND field_name = target AND value = t.value AND author_id = v.author_id;
         END IF;
         created := false;
+        prior_v := NULL;
+        prior_c := NULL;
     ELSE
-        created := created OR NOT EXISTS (
-            SELECT 1 FROM public.extraction_feedback
-            WHERE company_id = t.company_id AND field_name = target AND value = t.value AND author_id = v.author_id);
+        SELECT * INTO vote FROM public.extraction_feedback
+        WHERE company_id = t.company_id AND field_name = target AND value = t.value AND author_id = v.author_id;
+        created := created OR NOT FOUND;
+        IF FOUND AND NOT created AND prior_v IS NULL THEN
+            prior_v := vote.verdict;
+            prior_c := vote.correction;
+        END IF;
         INSERT INTO public.extraction_feedback (company_id, field_name, value, verdict, correction, author_id)
         VALUES (t.company_id, target, t.value, CASE WHEN t.value = '' THEN 'wrong' ELSE v.verdict END,
                 v.correction, v.author_id)
         ON CONFLICT (company_id, field_name, value, author_id)
         DO UPDATE SET verdict = EXCLUDED.verdict, correction = EXCLUDED.correction;
     END IF;
-    IF TG_OP <> 'DELETE' AND created IS DISTINCT FROM v.created_vote THEN
-        UPDATE public.review_verdicts SET created_vote = created WHERE task_id = v.task_id;
+    IF TG_OP <> 'DELETE' AND (created, prior_v, prior_c)
+            IS DISTINCT FROM (v.created_vote, v.prior_verdict, v.prior_correction) THEN
+        UPDATE public.review_verdicts SET created_vote = created, prior_verdict = prior_v, prior_correction = prior_c
+        WHERE task_id = v.task_id;
     END IF;
     RETURN NULL;
 END;
