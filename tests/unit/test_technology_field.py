@@ -234,3 +234,42 @@ def test_only_a_store_that_answers_no_such_object_counts_as_missing(monkeypatch)
     assert corpus.exists("page", "https://example.de") is True
     monkeypatch.setattr(corpus, "enabled", lambda: False)
     assert corpus.exists("page", "https://example.de") is True
+
+
+def test_nothing_is_read_again_while_the_store_is_off_or_down(monkeypatch) -> None:  # noqa: ANN001
+    # Without a store a re-read indexes no page, so `read_at` stays NULL and the same companies
+    # would be downloaded again every run.
+    from enrichment import corpus
+
+    rows = [("c1", "A GmbH", "https://a.de", {"keywords": {}}, None),
+            ("c2", "B GmbH", "https://b.de", {"keywords": {}}, None)]
+
+    class Cursor:
+        def execute(self, sql, params):  # noqa: ANN001, ANN202
+            self.ran = True
+
+        def fetchall(self):  # noqa: ANN202
+            return rows
+
+    class Down(Exception):
+        pass
+
+    class Client:
+        def stat_object(self, bucket, name):  # noqa: ANN001, ANN202
+            raise Down()
+
+    class Up:
+        def stat_object(self, bucket, name):  # noqa: ANN001, ANN202
+            return None
+
+    monkeypatch.setattr(corpus, "_unreachable", False)
+    monkeypatch.setattr(corpus, "configured", lambda: False)
+    assert main.text_to_read_again(Cursor(), "s", 10) == {}
+
+    monkeypatch.setattr(corpus, "configured", lambda: True)
+    monkeypatch.setattr(corpus, "_s3", lambda: Client())
+    assert main.text_to_read_again(Cursor(), "s", 10) == {}
+
+    monkeypatch.setattr(corpus, "_unreachable", False)
+    monkeypatch.setattr(corpus, "_s3", lambda: Up())
+    assert set(main.text_to_read_again(Cursor(), "s", 10)) == {"c1", "c2"}

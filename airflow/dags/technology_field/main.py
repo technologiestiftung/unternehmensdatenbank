@@ -165,7 +165,10 @@ def needs_text(read_at: datetime | None, now: datetime, stored: Callable[[], boo
 def text_to_read_again(cur: Any, source_id: str, limit: int) -> dict[str, tuple[str, str, dict[str, Any]]]:
     """company_id -> (name, website, earlier payload) for up to `limit` companies read before whose
     homepage text is missing or too old, oldest first. Only companies still on the website they were
-    read from, and not after `MAX_READ_ATTEMPTS` failed re-reads; at most `MAX_TEXT_CHECKS` checked."""
+    read from, and not after `MAX_READ_ATTEMPTS` failed re-reads; at most `MAX_TEXT_CHECKS` checked.
+    None while the store is off or down: a re-read then indexes nothing, so it would repeat every run."""
+    if not corpus.enabled():
+        return {}
     cur.execute(
         """
         SELECT r.company_id::text, e.company_name, r.external_url, r.source_payload, max(d.read_at)
@@ -185,8 +188,11 @@ def text_to_read_again(cur: Any, source_id: str, limit: int) -> dict[str, tuple[
     )
     now = datetime.now(timezone.utc)
     again: dict[str, tuple[str, str, dict[str, Any]]] = {}
-    for company_id, name, website, payload, read_at in cur.fetchall():
-        if len(again) == limit:
+    rows = cur.fetchall()
+    if rows:
+        corpus.exists("page", rows[0][2])  # one request proves the store answers before NULL read_at is trusted
+    for company_id, name, website, payload, read_at in rows:
+        if len(again) == limit or not corpus.enabled():
             break
         if needs_text(read_at, now, lambda: corpus.exists("page", website)):
             again[company_id] = (name, website, payload or {})
