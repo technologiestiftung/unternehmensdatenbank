@@ -100,7 +100,7 @@ generated from the play server's database, so play and the file agree by constru
 built from it and one built from the old V1-V9 dump to the same schema and grants. The reference rows
 (Technologiefelder, keywords, WZ divisions) are in their own file, `V1.1__reference_data.sql`.
 Forward-only from here: never edit a migration that has run anywhere shared, add new ones as
-`V{N}__description.sql` (the next is V3), and run Flyway before Airflow touches the changed schema.
+`V{N}__description.sql` (the next is V5), and run Flyway before Airflow touches the changed schema.
 The headings below and comments in the code keep the pre-squash migration numbers ("V3", "V10") so
 git history finds the reasoning.
 

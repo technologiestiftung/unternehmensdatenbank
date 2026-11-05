@@ -43,7 +43,7 @@ draw a round  ──►  review_tasks  ──►  a person judges in the app  �
 - **Email and phone** are shown in the queue (decided for the research phase, 2026-11-05) but have no
   feedback field: their verdicts are counted, never turned into a correction (they are stored, never
   resolved). Because nothing is resolved, the app shows every stored value: a `shown` round draws
-  from all of them (`NEVER_RESOLVED` in `draw.py`), and a `refused` round is refused.
+  from all of them (`NEVER_RESOLVED` in `draw.py`), and `draw.py` rejects a `refused` round for them.
 
 ## Draw a round
 
