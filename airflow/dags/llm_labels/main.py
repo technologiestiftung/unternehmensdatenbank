@@ -56,7 +56,8 @@ SOURCE_KEY = "llm_technology_field"
 SCHEDULE = None
 DETAILS = SourceDetails(
     description=(
-        "KI-Vorschläge (Claude API) für das Technologiefeld von Firmen, bei denen kein Stichwort passte, "
+        "KI-Vorschläge (Claude API) für das Technologiefeld, zuerst für Firmen, bei denen kein Stichwort passte, "
+        "danach für Firmen mit Stichwort-Technologiefeld (für das WZ-Modell), "
         "und eine geschätzte WZ-Abteilung. Nur zum Trainieren und Prüfen gespeichert, nie in der App angezeigt."
     ),
     schedule=schedule_label(SCHEDULE),
