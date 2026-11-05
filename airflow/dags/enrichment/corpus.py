@@ -222,6 +222,21 @@ def _strict(call: Any) -> Any:
             time.sleep(MODEL_RETRY_SECONDS * attempt)
 
 
+def exists(namespace: str, key: str) -> bool:
+    """Is the object in the store? True when no store is configured or the store failed: only a
+    store that answered "no such object" says False, so an outage never looks like lost text."""
+    if not enabled():
+        return True
+    try:
+        _s3().stat_object(bucket(), object_key(namespace, key))
+        return True
+    except Exception as exc:  # noqa: BLE001
+        if _missing(exc):
+            return False
+        _failed(exc, f"checking {namespace}")
+        return True
+
+
 def put_bytes(name: str, data: bytes, content_type: str = "application/octet-stream") -> None:
     """Store raw bytes under an exact object name (models, not documents). A no-op when no store is
     configured; a failure raises after `MODEL_ATTEMPTS` tries, so a model is never lost quietly."""
