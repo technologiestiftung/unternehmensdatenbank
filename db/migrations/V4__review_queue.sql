@@ -17,8 +17,8 @@
 -- **Switch:** `review_settings.enabled`. Hasura shows rounds and tasks only while it is true, and the
 -- app reads it to show the page, so the feature is turned off without a deploy.
 --
--- **Removal:** export the verdicts (training data), then one migration drops the trigger, the view
--- and the four tables. What was copied into `extraction_feedback` stays: it is ordinary feedback.
+-- **Removal:** export the verdicts (training data), then one migration drops the trigger and its
+-- function, the two views and the four tables. What was copied into `extraction_feedback` stays: it is ordinary feedback.
 
 CREATE TABLE public.review_settings (
     id boolean PRIMARY KEY DEFAULT true CHECK (id),
