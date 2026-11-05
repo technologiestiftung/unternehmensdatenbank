@@ -6,6 +6,7 @@ The target design and the order of the next pull requests: issue #18.
 - [data-model.md](data-model.md): the tables, how a value reaches the app, loading OffeneRegister
 - [sources.md](sources.md): every source, how we get it, and which of the 20 columns it fills
 - [dags.md](dags.md): every pipeline and its schedule
+- [review-queue.md](review-queue.md): people judge ~200 results per source and field; the verdicts flow back (#153)
 - [core-queries-current.sql](core-queries-current.sql): queries against the current schema
 
 **Rules** (most numbers were measured on an earlier example data set; the rules still hold)

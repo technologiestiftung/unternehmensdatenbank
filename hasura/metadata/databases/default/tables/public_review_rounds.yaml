@@ -1,0 +1,55 @@
+table:
+  name: review_rounds
+  schema: public
+configuration:
+  custom_name: review_rounds
+object_relationships:
+  - name: results
+    using:
+      manual_configuration:
+        remote_table:
+          name: v_review_round_results
+          schema: public
+        column_mapping:
+          id: round_id
+array_relationships:
+  - name: tasks
+    using:
+      manual_configuration:
+        remote_table:
+          name: review_tasks
+          schema: public
+        column_mapping:
+          id: round_id
+  - name: breakdown
+    using:
+      manual_configuration:
+        remote_table:
+          name: v_review_breakdown
+          schema: public
+        column_mapping:
+          id: round_id
+select_permissions:
+  # Read-only, and only while the review queue is switched on (review_settings, #153).
+  - role: user
+    permission:
+      columns:
+        - id
+        - source_key
+        - field_name
+        - feedback_field
+        - kind
+        - mode
+        - version
+        - title
+        - size
+        - created_at
+        - closed_at
+      filter:
+        _exists:
+          _table:
+            name: review_settings
+            schema: public
+          _where:
+            enabled:
+              _eq: true

@@ -1,0 +1,12 @@
+table:
+  name: review_settings
+  schema: public
+configuration:
+  custom_name: review_settings
+select_permissions:
+  # The app shows the "Prüfen" page only while this is true (#153).
+  - role: user
+    permission:
+      columns:
+        - enabled
+      filter: {}

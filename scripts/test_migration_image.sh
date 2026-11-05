@@ -85,4 +85,33 @@ taxonomy=$(docker exec "$pg" psql -U postgres -d udb -tAc "
     has_table_privilege('hub_reader', 'public.wz_divisions', 'SELECT'))")
 want="77,77,67,544,27,87,22,0,7,4,t,f,t,t"
 [ "$taxonomy" = "$want" ] || { echo "taxonomy tables: got $taxonomy, want $want"; exit 1; }
+# The review queue (#153): a verdict the reader (Hasura) writes becomes the same person's vote in
+# extraction_feedback; "unsure" takes it back; a gap task copies only a correction; a round without a
+# feedback field (email, phone) copies nothing; the reader cannot draw tasks.
+review=$(docker exec -i "$pg" psql -U postgres -d udb -v ON_ERROR_STOP=1 -qtA <<'SQL'
+BEGIN;
+INSERT INTO public.companies (id) VALUES ('00000000-0000-0000-0000-000000000001');
+INSERT INTO public.review_rounds (id, source_key, field_name, feedback_field, kind, title, size) VALUES
+  ('00000000-0000-0000-0000-0000000000a1', 'branch_classifier', 'technology_field', 'technology_field', 'shown', 't', 1),
+  ('00000000-0000-0000-0000-0000000000a2', NULL, 'technology_field', 'technology_field', 'gap', 'g', 1),
+  ('00000000-0000-0000-0000-0000000000a3', 'impressum_contacts', 'email', NULL, 'shown', 'e', 1);
+INSERT INTO public.review_tasks (id, round_id, position, company_id, value) VALUES
+  ('00000000-0000-0000-0000-0000000000b1', '00000000-0000-0000-0000-0000000000a1', 1, '00000000-0000-0000-0000-000000000001', 'Photonics'),
+  ('00000000-0000-0000-0000-0000000000b2', '00000000-0000-0000-0000-0000000000a2', 1, '00000000-0000-0000-0000-000000000001', ''),
+  ('00000000-0000-0000-0000-0000000000b3', '00000000-0000-0000-0000-0000000000a3', 1, '00000000-0000-0000-0000-000000000001', 'x@example.de');
+SET ROLE hub_reader;
+INSERT INTO public.review_verdicts (task_id, verdict, author_id) VALUES
+  ('00000000-0000-0000-0000-0000000000b1', 'correct', 'u1'),
+  ('00000000-0000-0000-0000-0000000000b3', 'wrong', 'u1');
+INSERT INTO public.review_verdicts (task_id, verdict, correction, author_id) VALUES
+  ('00000000-0000-0000-0000-0000000000b2', 'wrong', 'Software', 'u1');
+SELECT string_agg(value || ':' || verdict || ':' || coalesce(correction, '-'), ' ' ORDER BY value) FROM public.extraction_feedback;
+UPDATE public.review_verdicts SET verdict = 'unsure' WHERE task_id = '00000000-0000-0000-0000-0000000000b1';
+SELECT count(*) FROM public.extraction_feedback;
+SELECT has_table_privilege('hub_reader', 'public.review_tasks', 'INSERT');
+ROLLBACK;
+SQL
+)
+want=$(printf '%s\n%s\n%s' ':wrong:Software Photonics:correct:-' '1' 'f')
+[ "$review" = "$want" ] || { echo "review queue: got [$review], want [$want]"; exit 1; }
 echo "migration image OK"
