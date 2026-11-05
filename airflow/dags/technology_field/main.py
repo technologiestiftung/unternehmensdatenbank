@@ -7,7 +7,7 @@ lets `pipeline_coordinator` publish the result:
    the homepage and the services and about pages it links to (`content_pages`). Room left in the
    batch goes to companies read before whose homepage is no longer in the corpus, or was read more
    than `corpus.max_age()` ago (`text_to_read_again`): the text classifier trains on that text, and
-   play lost the pages of its first 560 reads when its store changed (2026-11-04). The keywords that
+   play lost the pages of its first 562 reads when its store changed (2026-11-04). The keywords that
    fired, and on which of the two texts, go into the company's source record. A site whose homepage
    did not load is marked `failed` and tried again, at most `MAX_READ_ATTEMPTS` times.
 2. **classify.** No downloads. A keyword's weight depends on how many companies use it, so every

@@ -20,7 +20,8 @@ without a privacy review.
 
 Configured by `CORPUS_S3_ENDPOINT` (host:port), `CORPUS_S3_ACCESS_KEY`, `CORPUS_S3_SECRET_KEY`,
 `CORPUS_S3_BUCKET`, `CORPUS_S3_SECURE`. Without an endpoint every function here is a no-op, and a
-store that fails behaves exactly like an empty one: nothing here raises, except `get_bytes` and `put_bytes` (models).
+store that fails behaves exactly like an empty one (except `exists`, which then answers True): nothing
+here raises, except `get_bytes` and `put_bytes` (models).
 Each S3 error is logged once per run as a warning (#85); one that means the store cannot work as
 configured (a wrong key, a missing permission or bucket) also switches it off for the run.
 
