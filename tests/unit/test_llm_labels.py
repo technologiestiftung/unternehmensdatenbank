@@ -110,3 +110,27 @@ def test_score_counts_only_judged_rows() -> None:
             {"label": "NONE", "verdict": "Correct", "wz_verdict": "wrong"},
             {"label": "Software", "verdict": "", "wz_verdict": "correct"}]
     assert sample.score(rows) == {"field": (1, 2), "NONE": (1, 1), "all": (2, 3), "wz": (1, 2)}
+
+
+def test_the_client_lives_until_every_result_is_read(monkeypatch) -> None:  # noqa: ANN001
+    from types import SimpleNamespace
+
+    state = {"closed": False}
+
+    def stream():  # stands in for the JSONL stream, which needs the client's open connection
+        for n in range(3):
+            assert not state["closed"], "connection closed while results were still read"
+            text = SimpleNamespace(type="text", text=json.dumps({"field": "NONE", "wz_division": "56"}))
+            message = SimpleNamespace(content=[text], stop_reason="end_turn", usage=None)
+            yield SimpleNamespace(custom_id=f"c{n}", result=SimpleNamespace(type="succeeded", message=message))
+
+    class Client:
+        def __init__(self) -> None:
+            self.messages = SimpleNamespace(batches=SimpleNamespace(results=lambda batch_id: stream()))
+
+        def __del__(self) -> None:  # the real client closes its connection here
+            state["closed"] = True
+
+    monkeypatch.setattr(llm, "_client", Client)
+    got = list(llm.results("b1", llm.answers(TAXONOMY), llm.wz_answers(WZ_TITLES)))
+    assert [row[0] for row in got] == ["c0", "c1", "c2"]
