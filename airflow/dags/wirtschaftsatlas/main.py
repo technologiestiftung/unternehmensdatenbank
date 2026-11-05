@@ -24,8 +24,9 @@ it trigger itself without a new decision.
    person runs it again to verify the rest (matching is skipped then, see `REFRESH_HOURS`).
 
 The layers (Künstliche Intelligenz, FinTech, Robotik, ...) stay in the record's payload. They are a
-Technologiefeld signal, but nothing writes them as an observation yet: that needs a mapping table
-and a measurement on the review sample first.
+Technologiefeld signal, but nothing writes them as an observation yet: `wirtschaftsatlas_layer_fields`
+(V2, #148) maps the layers that name one field, and a person checks a sample of them first
+(`scripts/wirtschaftsatlas_layers_sample.py`).
 """
 from __future__ import annotations
 
