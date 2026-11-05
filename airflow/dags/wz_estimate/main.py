@@ -26,7 +26,7 @@ Weekly, two steps, then `pipeline_coordinator` publishes:
    confidence 0: never deleted. No promoted model, nothing written.
 
 Not hand-checked: no precision is known (#158). Labels come only from companies Claude was asked
-about, so far those the keywords left open (`llm_labels`).
+about (`llm_labels`): first those the keywords left open, then those the keywords gave a field.
 """
 from __future__ import annotations
 

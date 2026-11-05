@@ -3,7 +3,8 @@
     PG_DSN="host=localhost port=5433 dbname=unternehmensdatenbank user=app password=app" \\
       python scripts/llm_labels_sample.py draw claude-opus-5-5 > sample.csv
 
-prints `SAMPLE_SIZE` labels of one model as CSV, in a fixed order (md5 of the id), so the same
+prints `SAMPLE_SIZE` labels of one model as CSV, only of companies the keywords left open
+(`keyword_outcome` `no_keyword`, the ones the labels are for), in a fixed order (md5 of the id), so the same
 database draws the same sample: company name, website, the model's label, and two empty columns for
 the person: `verdict` (`correct` or `wrong`) and, if wrong, `correction` (one of the 77 English
 names, or NONE). The same for the estimated WZ division (#140): `wz_division`, then `wz_verdict`
@@ -44,6 +45,7 @@ def draw(model: str) -> None:
                 FROM public.company_source_records r
                 JOIN public.sources s ON s.id = r.source_id AND s.key = %s
                 WHERE r.source_payload ->> 'model' = %s AND r.source_payload ->> 'outcome' = 'labelled'
+                  AND COALESCE(r.source_payload ->> 'keyword_outcome', 'no_keyword') = 'no_keyword'
                 ORDER BY md5(r.company_id::text)
                 LIMIT %s
                 """,

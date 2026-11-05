@@ -167,7 +167,7 @@ def _wait(batch_id: str) -> None:
 
 
 def run_label() -> int:
-    """Label up to `MAX_COMPANIES` gap companies. Returns how many got a label (NONE included)."""
+    """Label up to `MAX_COMPANIES` companies: gaps first, then those the keywords gave a field. Returns how many got a label (NONE included)."""
     taxonomy = bc.load_taxonomy()
     wz_titles = wz_cluster.load_clusters().division_titles
     system = llm.system_prompt(taxonomy, wz_titles)
