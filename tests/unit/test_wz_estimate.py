@@ -41,13 +41,18 @@ def test_promoted_only_when_judged_on_enough_companies_well_enough_and_better(mo
 
 
 def test_a_cached_prediction_is_reused_and_kept_without_text() -> None:
-    cached = {"a": {"model_version": "v2", "division": "62", "probability": 0.9},
-              "b": {"model_version": "v1", "division": "56", "probability": 0.8},
-              "c": {"model_version": "v1", "division": "41", "probability": 0.7}}
-    texts = {"site-b": "Restaurant", "site-d": "Hochbau"}
-    found, new = predictions({"a": "site-a", "b": "site-b", "c": "site-c", "d": "site-d"}, cached, "v2",
+    cached = {"a": {"model_version": "v2", "website": "site-a", "division": "62", "probability": 0.9},
+              "b": {"model_version": "v1", "website": "site-b", "division": "56", "probability": 0.8},
+              "c": {"model_version": "v1", "website": "site-c", "division": "41", "probability": 0.7},
+              "e": {"model_version": "v2", "website": "old-e", "division": "56", "probability": 0.9},
+              "f": {"model_version": "v2", "website": "old-f", "division": "56", "probability": 0.9}}
+    texts = {"site-b": "Restaurant", "site-d": "Hochbau", "site-e": "Hochbau"}
+    found, new = predictions({"a": "site-a", "b": "site-b", "c": "site-c", "d": "site-d", "e": "site-e",
+                              "f": "site-f"}, cached, "v2",
                              lambda text: ("41", 0.66666) if text == "Hochbau" else ("56", 0.9), lambda w: texts.get(w, ""))
     assert found["a"] is cached["a"] and found["c"] is cached["c"]
-    assert found["b"] == {"model_version": "v2", "division": "56", "probability": 0.9}
+    assert found["b"] == {"model_version": "v2", "website": "site-b", "division": "56", "probability": 0.9}
     assert found["d"]["probability"] == 0.667
-    assert new == {"b", "d"}
+    assert found["e"]["division"] == "41" and found["e"]["website"] == "site-e"
+    assert "f" not in found
+    assert new == {"b", "d", "e"}

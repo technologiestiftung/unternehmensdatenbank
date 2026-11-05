@@ -227,18 +227,22 @@ def predictions(websites: Mapping[str, str], cached: Mapping[str, Mapping[str, A
                 text_of: Callable[[str], str]) -> tuple[dict[str, Mapping[str, Any]], set[str]]:
     """(prediction per company, the ids predicted anew) for {company_id: website}.
 
-    A cached prediction of `version` is reused. Without a stored text the cached one stays, even an
-    older model's, rather than one made on nothing."""
+    A cached prediction of `version` from the same website is reused. Without a stored text the
+    cached one stays, even an older model's, rather than one made on nothing; one from another
+    website never does."""
     result: dict[str, Mapping[str, Any]] = {}
     new: set[str] = set()
     for cid, website in websites.items():
         old = cached.get(cid)
+        if old and old.get("website") != website:
+            old = None
         if old and old.get("model_version") == version:
             result[cid] = old
         elif text := text_of(website):
             division, probability = predict(text)
             if division:
-                result[cid] = {"model_version": version, "division": division, "probability": round(probability, 3)}
+                result[cid] = {"model_version": version, "website": website, "division": division,
+                               "probability": round(probability, 3)}
                 new.add(cid)
         elif old:
             result[cid] = old
