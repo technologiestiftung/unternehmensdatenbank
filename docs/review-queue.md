@@ -37,7 +37,9 @@ draw a round  ──►  review_tasks  ──►  a person judges in the app  �
   queue wrote (`created_vote`): a vote the person cast in the app gets back the answer the verdict
   overwrote (`prior_verdict`, `prior_correction`). If another verdict of the
   same person on the same company and value still says `correct`/`wrong` (a second round drew it),
-  the vote follows that verdict instead of disappearing.
+  the vote follows that verdict instead of disappearing. While a queue verdict stands, the queue
+  owns that vote: an edit made in the app meanwhile is not restored when the verdicts are taken
+  back; the vote returns to the answer from before the queue.
 - **Email and phone** are shown in the queue (decided for the research phase, 2026-11-05) but have no
   feedback field: their verdicts are counted, never turned into a correction (they are stored, never
   resolved). Because nothing is resolved, the app shows every stored value: a `shown` round draws
