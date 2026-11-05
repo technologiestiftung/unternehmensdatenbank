@@ -16,6 +16,8 @@ Logical field names → observation field_name aliases:
   register_announcement ← register_announcement (latest kind of court announcement; a hint, not the status)
   REGISTER_FIELDS   name, legal_form, address, postcode, city, register_status, ... (V3)
   deeptech_class, is_ai (only corrections from the app fill them so far)
+  wz_division_estimated ← wz_division_estimated (a WZ division estimated from the website, #158;
+                          never the official wz_code)
 
 `email` and `phone` (the `website_contacts` DAG) are stored, never resolved: a resolved value
 reaches the app and `v_field_provenance`.
@@ -440,6 +442,13 @@ def resolve_founding_year(cur: Any) -> int:
     year in it would break `v_companies_enriched`; the profile shows this, else the year of
     `established_at`."""
     return _apply_canonical(cur, logical_field="founding_year", obs_field_names=["founding_year"],
+                            value_col="value_text", min_confidence=_FIELD_MIN_CONF)
+
+
+def resolve_wz_division_estimated(cur: Any) -> int:
+    """An estimated WZ division ("62"), from the website text (`wz_estimate`, #158). Its own field:
+    an estimate never fills the official `wz_code`, and the app labels it "WZ (geschätzt)"."""
+    return _apply_canonical(cur, logical_field="wz_division_estimated", obs_field_names=["wz_division_estimated"],
                             value_col="value_text", min_confidence=_FIELD_MIN_CONF)
 
 

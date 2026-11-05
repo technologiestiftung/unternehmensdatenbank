@@ -1,4 +1,4 @@
-"""Technologiefeld teacher labels from the Claude API for companies the keywords left open (#87),
+"""Technologiefeld teacher labels from the Claude API, first for companies the keywords left open (#87),
 with an estimated WZ division from the same answer (#140).
 
 **Started by hand only**, never scheduled, until a hand-checked sample shows the labels are right
@@ -6,17 +6,19 @@ often enough (`scripts/llm_labels_sample.py`). What is sent and how: `enrichment
 
 A run:
 
-1. **picks** up to `MAX_COMPANIES` companies whose published website the `technology_field` DAG read
-   and where no keyword fired (`no_keyword`), that have stored text and no label from this model and
-   prompt version yet. The order is fixed (a hash of the company id), so two models asked in turn get
-   the same companies first.
+1. **picks** up to `MAX_COMPANIES` companies whose published website the `technology_field` DAG read,
+   that have stored text and no label from this model and prompt version yet. Companies where no
+   keyword fired (`no_keyword`) come first; once they are all labelled, companies the keywords gave a
+   field (`assigned`), so the WZ model (`wz_estimate`, #158) does not learn only from the gaps. Within
+   each, the order is fixed (a hash of the company id), so two models asked in turn get the same
+   companies first. The record keeps which of the two it was (`keyword_outcome`).
 2. **sends** them as one Message Batch and waits for it (most end within an hour, all within 24).
    The batch id is kept in `pipeline_state` (llm_labels / batch), so a run that fails while waiting
    picks up the same batch instead of paying for a new one.
 3. **writes** one source record per company and model (`external_id` = model:company id): the label,
    the WZ division, the outcome, model, prompt version and tokens. No observation: neither reaches
-   the app. The WZ division is an estimate, never the official `wz_code`; it is shown (as
-   "WZ (geschätzt)") only after a hand check on the sample measured it.
+   the app. The WZ division is an estimate, never the official `wz_code`; it trains the
+   `wz_estimate` model, whose answer is shown as "WZ (geschätzt)" (#158).
 
 **Budget.** At most `MAX_COMPANIES` per run, and no new batch once this month's tokens
 (`pipeline_state` llm_labels / usage) reach `MONTHLY_TOKENS`. Set a spend limit on the key in the
@@ -54,7 +56,8 @@ SOURCE_KEY = "llm_technology_field"
 SCHEDULE = None
 DETAILS = SourceDetails(
     description=(
-        "KI-Vorschläge (Claude API) für das Technologiefeld von Firmen, bei denen kein Stichwort passte, "
+        "KI-Vorschläge (Claude API) für das Technologiefeld, zuerst für Firmen, bei denen kein Stichwort passte, "
+        "danach für Firmen mit Stichwort-Technologiefeld (für das WZ-Modell), "
         "und eine geschätzte WZ-Abteilung. Nur zum Trainieren und Prüfen gespeichert, nie in der App angezeigt."
     ),
     schedule=schedule_label(SCHEDULE),
@@ -98,11 +101,13 @@ def tokens_this_month(usage: dict[str, Any] | None, month: str) -> int:
     return int(usage["tokens"]) if usage and usage.get("month") == month else 0
 
 
-def pick(gaps: dict[str, tuple[str, str]], done: set[str], limit: int,
+def pick(gaps: dict[str, tuple[str, str, str]], done: set[str], limit: int,
          text_of: Callable[[str], str]) -> dict[str, str]:
-    """company_id -> text for up to `limit` gap companies not labelled yet that have text, in a fixed
-    order (a hash of the id). `text_of` gets the website; a company without text is skipped, not counted."""
-    todo = sorted((cid for cid in gaps if cid not in done), key=lambda cid: hashlib.sha256(cid.encode()).hexdigest())
+    """company_id -> text for up to `limit` companies not labelled yet that have text: `no_keyword`
+    first, then the rest, each in a fixed order (a hash of the id). `text_of` gets the website; a
+    company without text is skipped, not counted."""
+    todo = sorted((cid for cid in gaps if cid not in done),
+                  key=lambda cid: (gaps[cid][2] != "no_keyword", hashlib.sha256(cid.encode()).hexdigest()))
     chosen: dict[str, str] = {}
     for cid in todo:
         if len(chosen) == limit:
@@ -112,17 +117,18 @@ def pick(gaps: dict[str, tuple[str, str]], done: set[str], limit: int,
     return chosen
 
 
-def _gaps(cur: Any, taxonomy: bc.Taxonomy) -> dict[str, tuple[str, str]]:
-    """company_id -> (name, website) for every company the keywords left open on its published site."""
+def _gaps(cur: Any, taxonomy: bc.Taxonomy) -> dict[str, tuple[str, str, str]]:
+    """company_id -> (name, website, keyword outcome) for every company on its published site that the
+    keywords left open (`no_keyword`) or gave a field (`assigned`)."""
     # Imported here: importing `technology_field.main` builds that DAG (see `technology_field.train`).
     from technology_field.main import _source_id as keyword_source, keyword_answers, read_records
 
     records = read_records(cur, keyword_source(cur))
     answers = keyword_answers(records, taxonomy)
     websites = {cid: website for cid, *_, still_published, website in records if still_published}
-    gap_ids = [cid for cid, a in answers.items() if a.outcome == "no_keyword" and cid in websites]
-    cur.execute("SELECT id::text, name FROM public.company_profile_mv WHERE id = ANY(%s::uuid[])", (gap_ids,))
-    return {cid: (name, websites[cid]) for cid, name in cur.fetchall()}
+    outcomes = {cid: a.outcome for cid, a in answers.items() if a.outcome in ("no_keyword", "assigned") and cid in websites}
+    cur.execute("SELECT id::text, name FROM public.company_profile_mv WHERE id = ANY(%s::uuid[])", (list(outcomes),))
+    return {cid: (name, websites[cid], outcomes[cid]) for cid, name in cur.fetchall()}
 
 
 def _labelled(cur: Any, source_id: str, version: str) -> set[str]:
@@ -136,8 +142,8 @@ def _labelled(cur: Any, source_id: str, version: str) -> set[str]:
     return {row[0] for row in cur.fetchall()}
 
 
-def _texts(gaps: dict[str, tuple[str, str]], done: set[str]) -> dict[str, str]:
-    """company_id -> redacted text, for up to `MAX_COMPANIES` unlabelled gap companies with stored text."""
+def _texts(gaps: dict[str, tuple[str, str, str]], done: set[str]) -> dict[str, str]:
+    """company_id -> redacted text, for up to `MAX_COMPANIES` unlabelled companies with stored text."""
     import spacy
 
     from technology_field.train import require_store, stored_text
@@ -162,7 +168,7 @@ def _wait(batch_id: str) -> None:
 
 
 def run_label() -> int:
-    """Label up to `MAX_COMPANIES` gap companies. Returns how many got a label (NONE included)."""
+    """Label up to `MAX_COMPANIES` companies: gaps first, then those the keywords gave a field. Returns how many got a label (NONE included)."""
     taxonomy = bc.load_taxonomy()
     wz_titles = wz_cluster.load_clusters().division_titles
     system = llm.system_prompt(taxonomy, wz_titles)
@@ -185,7 +191,7 @@ def run_label() -> int:
         else:
             texts = _texts(gaps, done)
             if not texts:
-                log.info("%d gap companies, %d labelled; nothing left with stored text.", len(gaps), len(done))
+                log.info("%d companies, %d labelled; nothing left with stored text.", len(gaps), len(done))
                 return 0
             requests = [llm.request(cid, text, model=MODEL, system=system, choices=choices, wz_choices=wz_choices)
                         for cid, text in sorted(texts.items())]
@@ -205,11 +211,12 @@ def run_label() -> int:
                 tokens += used_tokens
                 if cid not in gaps or outcome in ("errored", "expired"):
                     continue  # sent again by the next run
-                name, website = gaps[cid]
+                name, website, keyword_outcome = gaps[cid]
                 upsert_source_record(
                     cur, company_id=cid, source_id=source_id, external_id=f"{pending['model']}:{cid}",
                     external_url=website, source_company_name=name,
-                    source_payload={"label": label, "wz_division": wz_division, "outcome": outcome, "provider": llm.PROVIDER,
+                    source_payload={"label": label, "wz_division": wz_division, "outcome": outcome, "keyword_outcome": keyword_outcome,
+                                    "provider": llm.PROVIDER,
                                     "model": pending["model"], "prompt_version": pending["prompt_version"],
                                     "taxonomy_version": pending["taxonomy_version"],
                                     "batch_id": pending["batch_id"], "tokens": used_tokens, "ai_generated": True},
