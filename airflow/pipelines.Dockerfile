@@ -9,6 +9,11 @@
 FROM python:3.12-slim
 
 ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 PYTHONPATH=/opt/pipelines
+# The models' working copies. Their defaults (/opt/airflow/data/models/...) are the Airflow image's
+# folders, which do not exist here and cannot be made by the task user: the first training on play
+# failed with "Permission denied: '/opt/airflow'" (2026-11-05). The durable copy is S3
+# (enrichment.model_store), so a folder that ends with the container is enough.
+ENV BRANCH_TEXTCAT_MODEL_DIR=/tmp/models/branch_textcat MANAGER_NER_MODEL_DIR=/tmp/models/manager_ner
 WORKDIR /opt/pipelines
 
 COPY requirements.txt /tmp/requirements.txt
