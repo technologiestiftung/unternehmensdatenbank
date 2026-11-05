@@ -93,6 +93,8 @@ FIELDS: dict[str, tuple[str, str]] = {
     "deeptech": ("deeptech_class", "text"),
     "is_ai": ("is_ai", "boolean"),
     "activity_keywords": ("activity_keywords", "text"),
+    # "WZ (geschätzt)" (#158): two digits, never the official wz_code.
+    "wz_division_estimated": ("wz_division_estimated", "wz_division"),
 }
 #: Voted on in the app, never corrected into a value. See the module docstring.
 NOT_CORRECTABLE = {"fundings", "register_announcement", "registration_number"}
@@ -102,6 +104,9 @@ LIST_FIELDS = {"management", "activity_keywords"}
 #: A year alone, or the year of a date ("2010", "2010-05-01", "01.05.2010").
 _YEAR = re.compile(r"^(?:\d{1,2}\.\d{1,2}\.)?(\d{4})(?:-\d{2}(?:-\d{2})?)?$")
 _WZ_CODE = re.compile(r"^\d{2}(\.\d{1,2}(\.\d{1,2})?)?$")
+# shortcut: any two digits pass, not only the 87 in `wz_divisions`; check the table if the app ever
+# lets people type a division instead of picking one.
+_WZ_DIVISION = re.compile(r"^\d{2}$")
 _THOUSANDS = re.compile(r"^\d{1,3}(\.\d{3})+$")
 _HOST = re.compile(r"^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$")
 _TRUE, _FALSE = {"true", "ja", "yes", "1"}, {"false", "nein", "no", "0"}
@@ -146,6 +151,8 @@ def clean(kind: str, raw: str, technology_fields: frozenset[str] = frozenset()) 
         return text if text in REGISTER_STATUSES else None
     if kind == "wz_code":
         return text if _WZ_CODE.match(text) else None
+    if kind == "wz_division":
+        return text if _WZ_DIVISION.match(text) else None
     if kind == "boolean":
         word = text.casefold()
         return "true" if word in _TRUE else "false" if word in _FALSE else None

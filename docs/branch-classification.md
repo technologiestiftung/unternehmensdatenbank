@@ -101,9 +101,20 @@ app. They may train the text classifier only after a person has checked a sample
 **Estimated WZ division (#140).** The same answer also names one of the 87 WZ divisions in
 `wz_divisions`, or `NONE`, stored as `wz_division` next to the label. It is an **estimate** of what the
 company does, from its website: never the official `wz_code`, and never in the WZ cluster column. It
-reaches the app only after the same sample's `wz_verdict` column measured it, and then as a field of its
-own, "WZ (geschätzt)". For now only companies the keywords left empty are asked, so the sample says
-nothing yet about companies that have a Technologiefeld. Not measured yet.
+reaches the app as a field of its own, `wz_division_estimated`, "WZ (geschätzt)", through our own model
+(below). For now only companies the keywords left empty are asked, so the labels say nothing yet about
+companies that have a Technologiefeld. Not measured yet.
+
+**WZ (geschätzt) from our own model (#158).** The weekly DAG `wz_estimate` trains a spaCy text
+classifier over the WZ divisions (`branch_textcat.train`, the same code) on Claude's `wz_division`
+labels, and people's votes on `wz_division_estimated` in the app replace them per company. Claude
+costs money per company; the model reads every company with a downloaded website for free. It can
+at first only be as good as Claude. Decided 2026-11-05: it is shown before a hand check, labelled as
+an estimate, so the app's review can check and correct it. Judged on a held-out fifth:
+**by Claude's labels** until 30 held-out companies have a person's label, **by people** from then on.
+A model judged by Claude measured agreement with Claude, not correctness (rule 7); `metrics.json`
+says which judged (`judged_by`). Promoted at 70% or more, and only when better than the model in
+use (policy, not measured). Not measured yet.
 Locally, 2026-11-04: 205 companies with `no_keyword` on a published website, 189 with stored text.
 
 **Wirtschaftsatlas layers (#148).** Berlin Partner's Wirtschaftsatlas sorts companies into layers

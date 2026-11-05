@@ -20,6 +20,7 @@ from resolver import (
     resolve_revenue,
     resolve_technology_field,
     resolve_website,
+    resolve_wz_division_estimated,
 )
 from source_enrichment_common import get_connection
 
@@ -54,6 +55,7 @@ def run_pipeline_coordinator() -> None:
                 "register fields": resolve_register_fields(cur),
                 "deeptech/is_ai": resolve_deeptech_and_ai(cur),
                 "founding_year": resolve_founding_year(cur),
+                "wz_division_estimated": resolve_wz_division_estimated(cur),
             }
         log.info("Resolution complete, canonical records changed — %s",
                  " ".join(f"{name}={n}" for name, n in changed.items()))

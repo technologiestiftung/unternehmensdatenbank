@@ -15,8 +15,8 @@ A run:
    picks up the same batch instead of paying for a new one.
 3. **writes** one source record per company and model (`external_id` = model:company id): the label,
    the WZ division, the outcome, model, prompt version and tokens. No observation: neither reaches
-   the app. The WZ division is an estimate, never the official `wz_code`; it is shown (as
-   "WZ (geschätzt)") only after a hand check on the sample measured it.
+   the app. The WZ division is an estimate, never the official `wz_code`; it trains the
+   `wz_estimate` model, whose answer is shown as "WZ (geschätzt)" (#158).
 
 **Budget.** At most `MAX_COMPANIES` per run, and no new batch once this month's tokens
 (`pipeline_state` llm_labels / usage) reach `MONTHLY_TOKENS`. Set a spend limit on the key in the
