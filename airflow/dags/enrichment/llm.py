@@ -185,7 +185,10 @@ def results(batch_id: str, choices: list[str],
             wz_choices: list[str]) -> Iterator[tuple[str, str | None, str | None, str, int]]:
     """(custom_id, label, WZ division, outcome, tokens) per request. A request that errored or expired has
     outcome `errored` or `expired` and is sent again by the next run."""
-    for item in _client().messages.batches.results(batch_id):
+    # Held in a name: a client nobody refers to is freed mid-stream, and freeing it closes the connection
+    # the results are still read from ("Bad file descriptor", first run 2026-11-05).
+    client = _client()
+    for item in client.messages.batches.results(batch_id):
         if item.result.type != "succeeded":
             yield item.custom_id, None, None, item.result.type, 0
             continue
