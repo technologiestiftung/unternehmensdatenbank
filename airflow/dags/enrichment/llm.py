@@ -1,4 +1,5 @@
-"""Technologiefeld labels from a large language model, as a teacher for the text classifier (#87).
+"""Technologiefeld labels from a large language model, as a teacher for the text classifier (#87),
+and an estimated WZ division in the same answer (#140).
 
 WHAT IT IS FOR
 
@@ -18,7 +19,9 @@ HOW (Claude API)
 
 - Message Batches: asynchronous, half the price; a run waits for its batch.
 - Structured output: a JSON object whose one field is an enum of the 77 English names plus `NONE`, so
-  every answer parses.
+  every answer parses. A second field, `wz_division`, is an enum of the WZ 2025 divisions in
+  `wz_divisions` plus `NONE` (#140): an **estimate** of what the company does, never its official
+  WZ code, kept in the same source record and not shown until a hand check measured it.
 - The system prompt (fields and their keywords) is identical for every request and cached.
 - `PROMPT_VERSION` is a hash of the system prompt, stored with every label next to the model, so a
   label always says what made it (TSB rule 4).
@@ -59,14 +62,23 @@ Names, email addresses and phone numbers were replaced by [NAME], [EMAIL] and [P
 The fields: the English name you answer with, the German name, and words that typically show it.
 """
 
+_WZ_INSTRUCTIONS = """Second answer, wz_division: the two-digit WZ 2025 division (Abteilung) of the company's MAIN economic
+activity as its website shows it. Unlike the technology fields, every business has a division (a
+restaurant is 56). Answer NONE only when the text does not show what the company does.
 
-def system_prompt(taxonomy: bc.Taxonomy) -> str:
-    """The instructions and every field with its keywords, in a fixed order, so the cache holds."""
+The divisions:
+"""
+
+
+def system_prompt(taxonomy: bc.Taxonomy, wz_titles: dict[str, str]) -> str:
+    """The instructions, every field with its keywords and every WZ division ("56" -> "Gastronomie"),
+    in a fixed order, so the cache holds."""
     lines = [
         f"- {meta['name_en']} (German: {name}): {', '.join(sorted(meta['keywords']))}"
         for name, meta in sorted(taxonomy.branches.items(), key=lambda item: item[1]["name_en"])
     ]
-    return _INSTRUCTIONS + "\n" + "\n".join(lines)
+    divisions = [f"- {code}: {title}" for code, title in sorted(wz_titles.items())]
+    return _INSTRUCTIONS + "\n" + "\n".join(lines) + "\n\n" + _WZ_INSTRUCTIONS + "\n".join(divisions)
 
 
 def prompt_version(system: str) -> str:
@@ -76,6 +88,11 @@ def prompt_version(system: str) -> str:
 def answers(taxonomy: bc.Taxonomy) -> list[str]:
     """What the model may answer: the 77 English names and `NONE`."""
     return [*taxonomy.english_names(), bc.NONE]
+
+
+def wz_answers(wz_titles: dict[str, str]) -> list[str]:
+    """What the model may answer for the WZ division: the two-digit codes and `NONE`."""
+    return [*sorted(wz_titles), bc.NONE]
 
 
 def redact(text: str, person_spans: Callable[[str], Iterable[tuple[int, int]]]) -> str:
@@ -91,8 +108,10 @@ def redact(text: str, person_spans: Callable[[str], Iterable[tuple[int, int]]]) 
     return text
 
 
-def request(custom_id: str, text: str, *, model: str, system: str, choices: list[str]) -> dict[str, Any]:
-    """One batch request: the cached system prompt, the company's text, an answer from `choices`."""
+def request(custom_id: str, text: str, *, model: str, system: str, choices: list[str],
+            wz_choices: list[str]) -> dict[str, Any]:
+    """One batch request: the cached system prompt, the company's text, a field from `choices` and a
+    WZ division from `wz_choices`."""
     return {
         "custom_id": custom_id,
         "params": {
@@ -106,8 +125,9 @@ def request(custom_id: str, text: str, *, model: str, system: str, choices: list
                     "type": "json_schema",
                     "schema": {
                         "type": "object",
-                        "properties": {"field": {"type": "string", "enum": choices}},
-                        "required": ["field"],
+                        "properties": {"field": {"type": "string", "enum": choices},
+                                       "wz_division": {"type": "string", "enum": wz_choices}},
+                        "required": ["field", "wz_division"],
                         "additionalProperties": False,
                     },
                 },
@@ -127,6 +147,15 @@ def label_of(stop_reason: str | None, texts: list[str], choices: list[str]) -> t
     except (IndexError, ValueError, KeyError, TypeError):
         return None, "unparsable"
     return (field, "labelled") if field in choices else (None, "unparsable")
+
+
+def wz_division_of(texts: list[str], wz_choices: list[str]) -> str | None:
+    """The WZ division of one answer, or None when it is missing or not one of `wz_choices`."""
+    try:
+        division = json.loads(texts[0])["wz_division"]
+    except (IndexError, ValueError, KeyError, TypeError):
+        return None
+    return division if division in wz_choices else None
 
 
 def usage_tokens(usage: Any) -> int:
@@ -152,14 +181,16 @@ def ended(batch_id: str) -> bool:
     return _client().messages.batches.retrieve(batch_id).processing_status == "ended"
 
 
-def results(batch_id: str, choices: list[str]) -> Iterator[tuple[str, str | None, str, int]]:
-    """(custom_id, label, outcome, tokens) per request. A request that errored or expired has
+def results(batch_id: str, choices: list[str],
+            wz_choices: list[str]) -> Iterator[tuple[str, str | None, str | None, str, int]]:
+    """(custom_id, label, WZ division, outcome, tokens) per request. A request that errored or expired has
     outcome `errored` or `expired` and is sent again by the next run."""
     for item in _client().messages.batches.results(batch_id):
         if item.result.type != "succeeded":
-            yield item.custom_id, None, item.result.type, 0
+            yield item.custom_id, None, None, item.result.type, 0
             continue
         message = item.result.message
         texts = [block.text for block in message.content if block.type == "text"]
         label, outcome = label_of(message.stop_reason, texts, choices)
-        yield item.custom_id, label, outcome, usage_tokens(message.usage)
+        wz_division = wz_division_of(texts, wz_choices) if outcome == "labelled" else None
+        yield item.custom_id, label, wz_division, outcome, usage_tokens(message.usage)

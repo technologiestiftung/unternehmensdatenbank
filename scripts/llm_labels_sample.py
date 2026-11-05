@@ -6,12 +6,13 @@
 prints `SAMPLE_SIZE` labels of one model as CSV, in a fixed order (md5 of the id), so the same
 database draws the same sample: company name, website, the model's label, and two empty columns for
 the person: `verdict` (`correct` or `wrong`) and, if wrong, `correction` (one of the 77 English
-names, or NONE). Keep the file out of git: it names companies, and the verdicts are a person's work.
+names, or NONE). The same for the estimated WZ division (#140): `wz_division`, then `wz_verdict`
+and `wz_correction` (a two-digit division, or NONE). Keep the file out of git: it names companies, and the verdicts are a person's work.
 
     python scripts/llm_labels_sample.py score sample.csv
 
 prints the precision: of the labels a person judged, how many were correct, split into field labels
-and NONE. That number, with the cost per label from the DAG's log, goes into
+and NONE, and the same for the WZ division (`wz`). That number, with the cost per label from the DAG's log, goes into
 docs/branch-classification.md. Needs the database for `draw` only.
 """
 from __future__ import annotations
@@ -26,7 +27,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "airflow" / "dags")
 from llm_labels.main import SOURCE_KEY  # noqa: E402
 
 SAMPLE_SIZE = 100
-COLUMNS = ["company_id", "name", "website", "label", "model", "verdict", "correction"]
+COLUMNS = ["company_id", "name", "website", "label", "model", "verdict", "correction",
+           "wz_division", "wz_verdict", "wz_correction"]
 
 
 def draw(model: str) -> None:
@@ -37,7 +39,8 @@ def draw(model: str) -> None:
         with connection, connection.cursor() as cur:
             cur.execute(
                 """
-                SELECT r.company_id::text, r.source_company_name, r.external_url, r.source_payload ->> 'label'
+                SELECT r.company_id::text, r.source_company_name, r.external_url, r.source_payload ->> 'label',
+                       r.source_payload ->> 'wz_division'
                 FROM public.company_source_records r
                 JOIN public.sources s ON s.id = r.source_id AND s.key = %s
                 WHERE r.source_payload ->> 'model' = %s AND r.source_payload ->> 'outcome' = 'labelled'
@@ -51,14 +54,18 @@ def draw(model: str) -> None:
         connection.close()
     writer = csv.writer(sys.stdout)
     writer.writerow(COLUMNS)
-    for company_id, name, website, label in rows:
-        writer.writerow([company_id, name, website, label, model, "", ""])
+    for company_id, name, website, label, wz_division in rows:
+        writer.writerow([company_id, name, website, label, model, "", "", wz_division or "", "", ""])
 
 
 def score(rows: list[dict[str, str]]) -> dict[str, tuple[int, int]]:
-    """kind ('field', 'NONE', 'all') -> (correct, judged)."""
-    tally: dict[str, Counter] = {kind: Counter() for kind in ("field", "NONE", "all")}
+    """kind ('field', 'NONE', 'all', 'wz') -> (correct, judged)."""
+    tally: dict[str, Counter] = {kind: Counter() for kind in ("field", "NONE", "all", "wz")}
     for row in rows:
+        wz_verdict = (row.get("wz_verdict") or "").strip().lower()
+        if wz_verdict in ("correct", "wrong"):
+            tally["wz"]["judged"] += 1
+            tally["wz"]["correct"] += wz_verdict == "correct"
         verdict = (row.get("verdict") or "").strip().lower()
         if verdict not in ("correct", "wrong"):
             continue

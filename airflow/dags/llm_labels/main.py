@@ -1,4 +1,5 @@
-"""Technologiefeld teacher labels from the Claude API for companies the keywords left open (#87).
+"""Technologiefeld teacher labels from the Claude API for companies the keywords left open (#87),
+with an estimated WZ division from the same answer (#140).
 
 **Started by hand only**, never scheduled, until a hand-checked sample shows the labels are right
 often enough (`scripts/llm_labels_sample.py`). What is sent and how: `enrichment.llm`.
@@ -13,7 +14,9 @@ A run:
    The batch id is kept in `pipeline_state` (llm_labels / batch), so a run that fails while waiting
    picks up the same batch instead of paying for a new one.
 3. **writes** one source record per company and model (`external_id` = model:company id): the label,
-   the outcome, model, prompt version and tokens. No observation: a label never reaches the app.
+   the WZ division, the outcome, model, prompt version and tokens. No observation: neither reaches
+   the app. The WZ division is an estimate, never the official `wz_code`; it is shown (as
+   "WZ (geschätzt)") only after a hand check on the sample measured it.
 
 **Budget.** At most `MAX_COMPANIES` per run, and no new batch once this month's tokens
 (`pipeline_state` llm_labels / usage) reach `MONTHLY_TOKENS`. Set a spend limit on the key in the
@@ -33,7 +36,7 @@ from typing import Any, Callable
 from psycopg2.extras import Json
 
 from enrichment import branch_classifier as bc
-from enrichment import llm
+from enrichment import llm, wz_cluster
 from source_enrichment_common import (
     SourceDetails,
     ensure_source,
@@ -51,8 +54,8 @@ SOURCE_KEY = "llm_technology_field"
 SCHEDULE = None
 DETAILS = SourceDetails(
     description=(
-        "KI-Vorschläge (Claude API) für das Technologiefeld von Firmen, bei denen kein Stichwort passte. "
-        "Nur zum Trainieren und Prüfen gespeichert, nie in der App angezeigt."
+        "KI-Vorschläge (Claude API) für das Technologiefeld von Firmen, bei denen kein Stichwort passte, "
+        "und eine geschätzte WZ-Abteilung. Nur zum Trainieren und Prüfen gespeichert, nie in der App angezeigt."
     ),
     schedule=schedule_label(SCHEDULE),
     base_url="https://www.anthropic.com/api",
@@ -161,8 +164,9 @@ def _wait(batch_id: str) -> None:
 def run_label() -> int:
     """Label up to `MAX_COMPANIES` gap companies. Returns how many got a label (NONE included)."""
     taxonomy = bc.load_taxonomy()
-    system = llm.system_prompt(taxonomy)
-    version, choices = llm.prompt_version(system), llm.answers(taxonomy)
+    wz_titles = wz_cluster.load_clusters().division_titles
+    system = llm.system_prompt(taxonomy, wz_titles)
+    version, choices, wz_choices = llm.prompt_version(system), llm.answers(taxonomy), llm.wz_answers(wz_titles)
     month = datetime.now(timezone.utc).strftime("%Y-%m")
     connection = get_connection()
     try:
@@ -183,7 +187,7 @@ def run_label() -> int:
             if not texts:
                 log.info("%d gap companies, %d labelled; nothing left with stored text.", len(gaps), len(done))
                 return 0
-            requests = [llm.request(cid, text, model=MODEL, system=system, choices=choices)
+            requests = [llm.request(cid, text, model=MODEL, system=system, choices=choices, wz_choices=wz_choices)
                         for cid, text in sorted(texts.items())]
             pending = {"batch_id": llm.submit(requests), "model": MODEL, "prompt_version": version,
                        "taxonomy_version": taxonomy.version, "companies": len(requests)}
@@ -196,7 +200,7 @@ def run_label() -> int:
         tokens = 0
         with connection, connection.cursor() as cur:
             sync_run_id = start_sync_run(cur, source_id=source_id)
-            for cid, label, outcome, used_tokens in llm.results(pending["batch_id"], choices):
+            for cid, label, wz_division, outcome, used_tokens in llm.results(pending["batch_id"], choices, wz_choices):
                 outcomes[outcome] = outcomes.get(outcome, 0) + 1
                 tokens += used_tokens
                 if cid not in gaps or outcome in ("errored", "expired"):
@@ -205,7 +209,7 @@ def run_label() -> int:
                 upsert_source_record(
                     cur, company_id=cid, source_id=source_id, external_id=f"{pending['model']}:{cid}",
                     external_url=website, source_company_name=name,
-                    source_payload={"label": label, "outcome": outcome, "provider": llm.PROVIDER,
+                    source_payload={"label": label, "wz_division": wz_division, "outcome": outcome, "provider": llm.PROVIDER,
                                     "model": pending["model"], "prompt_version": pending["prompt_version"],
                                     "taxonomy_version": pending["taxonomy_version"],
                                     "batch_id": pending["batch_id"], "tokens": used_tokens, "ai_generated": True},

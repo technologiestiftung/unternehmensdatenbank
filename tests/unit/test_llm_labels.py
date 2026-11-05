@@ -7,6 +7,8 @@ from enrichment import branch_classifier as bc
 from enrichment import llm
 from llm_labels.main import pick, tokens_this_month
 
+WZ_TITLES = {"62": "Erbringung von Dienstleistungen der Informationstechnologie", "56": "Gastronomie"}
+
 TAXONOMY = bc.taxonomy_from_rows(
     [{"name": "Software", "name_en": "Software"}, {"name": "Photonik", "name_en": "Photonics"}],
     [("Software", "App-Entwicklung"), ("Photonik", "Laser")],
@@ -30,14 +32,21 @@ def test_text_is_cut_before_sending() -> None:
 def test_the_answer_is_one_of_the_fields_or_none() -> None:
     choices = llm.answers(TAXONOMY)
     assert choices == ["Photonics", "Software", "NONE"]
-    params = llm.request("c1", "Wir bauen Laser.", model="m", system="s", choices=choices)["params"]
-    assert params["output_config"]["format"]["schema"]["properties"]["field"]["enum"] == choices
+    wz_choices = llm.wz_answers(WZ_TITLES)
+    assert wz_choices == ["56", "62", "NONE"]
+    params = llm.request("c1", "Wir bauen Laser.", model="m", system="s", choices=choices,
+                         wz_choices=wz_choices)["params"]
+    schema = params["output_config"]["format"]["schema"]
+    assert schema["properties"]["field"]["enum"] == choices
+    assert schema["properties"]["wz_division"]["enum"] == wz_choices
+    assert schema["required"] == ["field", "wz_division"]
     assert params["system"][0]["cache_control"] == {"type": "ephemeral"}
 
 
 def test_system_prompt_lists_every_field_and_its_version_follows_it() -> None:
-    system = llm.system_prompt(TAXONOMY)
+    system = llm.system_prompt(TAXONOMY, WZ_TITLES)
     assert "- Photonics (German: Photonik): Laser" in system and "- Software (German: Software): App-Entwicklung" in system
+    assert "- 56: Gastronomie" in system
     assert llm.prompt_version(system) != llm.prompt_version(system + " ")
 
 
@@ -49,6 +58,15 @@ def test_answers_are_read_or_marked() -> None:
     assert llm.label_of("end_turn", [], choices) == (None, "unparsable")
     assert llm.label_of("refusal", [], choices) == (None, "refused")
     assert llm.label_of("max_tokens", ["{"], choices) == (None, "truncated")
+
+
+def test_the_wz_division_is_read_or_left_empty() -> None:
+    wz_choices = llm.wz_answers(WZ_TITLES)
+    assert llm.wz_division_of([json.dumps({"field": "NONE", "wz_division": "56"})], wz_choices) == "56"
+    assert llm.wz_division_of([json.dumps({"field": "NONE", "wz_division": "NONE"})], wz_choices) == "NONE"
+    assert llm.wz_division_of([json.dumps({"field": "NONE", "wz_division": "99"})], wz_choices) is None
+    assert llm.wz_division_of([json.dumps({"field": "NONE"})], wz_choices) is None
+    assert llm.wz_division_of([], wz_choices) is None
 
 
 def test_pick_skips_labelled_companies_in_a_fixed_order() -> None:
@@ -89,5 +107,6 @@ def test_score_counts_only_judged_rows() -> None:
     sample = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(sample)
     rows = [{"label": "Photonics", "verdict": "correct"}, {"label": "Software", "verdict": "wrong"},
-            {"label": "NONE", "verdict": "Correct"}, {"label": "Software", "verdict": ""}]
-    assert sample.score(rows) == {"field": (1, 2), "NONE": (1, 1), "all": (2, 3)}
+            {"label": "NONE", "verdict": "Correct", "wz_verdict": "wrong"},
+            {"label": "Software", "verdict": "", "wz_verdict": "correct"}]
+    assert sample.score(rows) == {"field": (1, 2), "NONE": (1, 1), "all": (2, 3), "wz": (1, 2)}
