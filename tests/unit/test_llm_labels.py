@@ -70,18 +70,25 @@ def test_the_wz_division_is_read_or_left_empty() -> None:
 
 
 def test_pick_skips_labelled_companies_in_a_fixed_order() -> None:
-    gaps = {cid: ("Name", f"https://{cid}.example") for cid in ("a", "b", "c", "d")}
+    gaps = {cid: ("Name", f"https://{cid}.example", "no_keyword") for cid in ("a", "b", "c", "d")}
     first = list(pick(gaps, set(), 4, lambda website: "text"))
     assert list(pick(gaps, set(), 2, lambda website: "text")) == first[:2]
     assert list(pick(gaps, {first[0]}, 4, lambda website: "text")) == first[1:]
 
 
 def test_pick_fills_the_limit_past_companies_without_text() -> None:
-    gaps = {cid: ("Name", f"https://{cid}.example") for cid in ("a", "b", "c", "d")}
+    gaps = {cid: ("Name", f"https://{cid}.example", "no_keyword") for cid in ("a", "b", "c", "d")}
     order = list(pick(gaps, set(), 4, lambda website: "text"))
     textless = {f"https://{cid}.example" for cid in order[:2]}
     chosen = pick(gaps, set(), 2, lambda website: "" if website in textless else website)
     assert chosen == {cid: f"https://{cid}.example" for cid in order[2:]}
+
+
+def test_pick_takes_the_gaps_before_companies_the_keywords_answered() -> None:
+    companies = {cid: ("Name", f"https://{cid}.example", "assigned" if cid in "ab" else "no_keyword")
+                 for cid in ("a", "b", "c", "d")}
+    assert set(pick(companies, set(), 2, lambda website: "text")) == {"c", "d"}
+    assert set(pick(companies, {"c", "d"}, 2, lambda website: "text")) == {"a", "b"}
 
 
 def test_an_email_or_phone_cut_at_the_limit_is_still_redacted() -> None:

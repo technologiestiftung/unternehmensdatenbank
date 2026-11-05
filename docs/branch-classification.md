@@ -102,8 +102,9 @@ app. They may train the text classifier only after a person has checked a sample
 `wz_divisions`, or `NONE`, stored as `wz_division` next to the label. It is an **estimate** of what the
 company does, from its website: never the official `wz_code`, and never in the WZ cluster column. It
 reaches the app as a field of its own, `wz_division_estimated`, "WZ (geschätzt)", through our own model
-(below). For now only companies the keywords left empty are asked, so the labels say nothing yet about
-companies that have a Technologiefeld. Not measured yet.
+(below). Companies the keywords left empty are asked first; once all of them are labelled, companies
+the keywords gave a field (each record says which: `keyword_outcome`), so the WZ model also learns
+from those. Not measured yet.
 
 **WZ (geschätzt) from our own model (#158).** The weekly DAG `wz_estimate` trains a spaCy text
 classifier over the WZ divisions (`branch_textcat.train`, the same code) on Claude's `wz_division`
