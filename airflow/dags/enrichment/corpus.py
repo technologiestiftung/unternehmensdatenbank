@@ -20,7 +20,8 @@ without a privacy review.
 
 Configured by `CORPUS_S3_ENDPOINT` (host:port), `CORPUS_S3_ACCESS_KEY`, `CORPUS_S3_SECRET_KEY`,
 `CORPUS_S3_BUCKET`, `CORPUS_S3_SECURE`. Without an endpoint every function here is a no-op, and a
-store that fails behaves exactly like an empty one: nothing here raises, except `get_bytes` and `put_bytes` (models).
+store that fails behaves exactly like an empty one (except `exists`, which then answers True): nothing
+here raises, except `get_bytes` and `put_bytes` (models).
 Each S3 error is logged once per run as a warning (#85); one that means the store cannot work as
 configured (a wrong key, a missing permission or bucket) also switches it off for the run.
 
@@ -220,6 +221,21 @@ def _strict(call: Any) -> Any:
                 raise
             log.warning("corpus: model object attempt %d failed (%s); retrying.", attempt, type(exc).__name__)
             time.sleep(MODEL_RETRY_SECONDS * attempt)
+
+
+def exists(namespace: str, key: str) -> bool:
+    """Is the object in the store? True when no store is configured or the store failed: only a
+    store that answered "no such object" says False, so an outage never looks like lost text."""
+    if not enabled():
+        return True
+    try:
+        _s3().stat_object(bucket(), object_key(namespace, key))
+        return True
+    except Exception as exc:  # noqa: BLE001
+        if _missing(exc):
+            return False
+        _failed(exc, f"checking {namespace}")
+        return True
 
 
 def put_bytes(name: str, data: bytes, content_type: str = "application/octet-stream") -> None:

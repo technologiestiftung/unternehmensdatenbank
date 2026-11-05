@@ -4,7 +4,10 @@ The rule lives in `enrichment.branch_classifier`; this file runs it. Each run do
 lets `pipeline_coordinator` publish the result:
 
 1. **read.** One batch of companies with a published website that this source has not read yet:
-   the homepage and the services and about pages it links to (`content_pages`). The keywords that
+   the homepage and the services and about pages it links to (`content_pages`). Room left in the
+   batch goes to companies read before whose homepage is no longer in the corpus, or was read more
+   than `corpus.max_age()` ago (`text_to_read_again`): the text classifier trains on that text, and
+   play lost the pages of its first 562 reads when its store changed (2026-11-04). The keywords that
    fired, and on which of the two texts, go into the company's source record. A site whose homepage
    did not load is marked `failed` and tried again, at most `MAX_READ_ATTEMPTS` times.
 2. **classify.** No downloads. A keyword's weight depends on how many companies use it, so every
@@ -31,7 +34,7 @@ import os
 from collections import Counter
 from dataclasses import asdict
 from datetime import datetime, timezone
-from typing import Any, Mapping
+from typing import Any, Callable, Mapping
 
 from psycopg2.extras import Json
 
@@ -41,6 +44,7 @@ from enrichment.branch_observations import SOURCE_KEY, planned_writes
 from source_enrichment_common import (
     SourceDetails,
     companies_with_website_to_read,
+    MAX_READ_ATTEMPTS,
     ensure_source,
     failed_read_payload,
     finish_sync_run,
@@ -62,6 +66,8 @@ DETAILS = SourceDetails(
     schedule="nach der Website-Suche",
 )
 BATCH_SIZE = int(os.getenv("TECHNOLOGY_FIELD_BATCH_SIZE", "50"))
+#: Companies read before whose stored homepage one run checks, oldest read first.
+MAX_TEXT_CHECKS = 500
 MIN_COMPANIES = int(os.getenv("TECHNOLOGY_FIELD_MIN_COMPANIES", "500"))
 FIELDS = ("technology_field", "technology_field_withheld")
 
@@ -111,6 +117,8 @@ def run_read() -> None:
             sync_run_id = start_sync_run(cur, source_id=source_id)
             companies = companies_with_website_to_read(cur, source_id=source_id, limit=BATCH_SIZE,
                                                        read_key="keywords")
+            again = text_to_read_again(cur, source_id, BATCH_SIZE - len(companies)) if len(companies) < BATCH_SIZE else {}
+        companies += [(company_id, name, website, 0) for company_id, (name, website, _) in again.items()]
 
         with_keywords = failed = 0
         for company_id, company_name, website, attempts in companies:
@@ -120,7 +128,12 @@ def run_read() -> None:
                 log.warning("Website not readable for %s: %s", company_id, type(exc).__name__)
                 payload = {"keywords": {}, "had_text": False, "error": type(exc).__name__}
             if not payload.get("homepage_loaded"):
-                payload, failed = failed_read_payload(payload, attempts), failed + 1
+                failed += 1
+                if company_id in again:  # the earlier answer stays; the failed re-read is counted
+                    earlier = again[company_id][2]
+                    payload = {**earlier, "reread_attempts": int(earlier.get("reread_attempts", 0)) + 1}
+                else:
+                    payload = failed_read_payload(payload, attempts)
             with_keywords += bool(payload["keywords"])
             with connection, connection.cursor() as cur:
                 upsert_source_record(
@@ -141,6 +154,49 @@ def run_read() -> None:
         log.info("Read %d websites: %d with a keyword, %d unreadable.", len(companies), with_keywords, failed)
     finally:
         connection.close()
+
+
+def needs_text(read_at: datetime | None, now: datetime, stored: Callable[[], bool]) -> bool:
+    """Read again: no homepage recorded, recorded longer ago than the corpus keeps it, or gone from the
+    store. `stored` is asked last, because it costs a request."""
+    return read_at is None or read_at < now - corpus.max_age() or not stored()
+
+
+def text_to_read_again(cur: Any, source_id: str, limit: int) -> dict[str, tuple[str, str, dict[str, Any]]]:
+    """company_id -> (name, website, earlier payload) for up to `limit` companies read before whose
+    homepage text is missing or too old, oldest first. Only companies still on the website they were
+    read from, and not after `MAX_READ_ATTEMPTS` failed re-reads; at most `MAX_TEXT_CHECKS` checked.
+    None while the store is off or down: a re-read then indexes nothing, so it would repeat every run."""
+    if not corpus.enabled():
+        return {}
+    cur.execute(
+        """
+        SELECT r.company_id::text, e.company_name, r.external_url, r.source_payload, max(d.read_at)
+        FROM public.company_source_records r
+        JOIN public.v_companies_enriched e ON e.id = r.company_id AND e.website_url = r.external_url
+        LEFT JOIN public.company_documents d
+          ON d.company_id = r.company_id AND d.source_id = r.source_id AND d.url = r.external_url
+         AND d.s3_key LIKE 'page/%%'
+        WHERE r.source_id = %s AND r.source_payload ? 'keywords'
+          AND r.source_payload ->> 'failed' IS DISTINCT FROM 'true'
+          AND COALESCE((r.source_payload ->> 'reread_attempts')::int, 0) < %s
+        GROUP BY 1, 2, 3, 4
+        ORDER BY max(d.read_at) NULLS FIRST, 1
+        LIMIT %s
+        """,
+        (source_id, MAX_READ_ATTEMPTS, MAX_TEXT_CHECKS),
+    )
+    now = datetime.now(timezone.utc)
+    again: dict[str, tuple[str, str, dict[str, Any]]] = {}
+    rows = cur.fetchall()
+    if rows:
+        corpus.exists("page", rows[0][2])  # one request proves the store answers before NULL read_at is trusted
+    for company_id, name, website, payload, read_at in rows:
+        if len(again) == limit or not corpus.enabled():
+            break
+        if needs_text(read_at, now, lambda: corpus.exists("page", website)):
+            again[company_id] = (name, website, payload or {})
+    return again
 
 
 # --- classify -------------------------------------------------------------------------------

@@ -186,3 +186,90 @@ def test_a_store_that_fails_mid_run_writes_nothing_and_drops_nothing(monkeypatch
         _run_classify(monkeypatch, tmp_path, _records(), shown, model=_Model(), store_up=False, inserts=inserts)
     # No observation, no cached prediction; drops happen only after the inserts, so none either.
     assert inserts == []
+
+
+def test_a_company_is_read_again_when_its_text_is_missing_or_too_old() -> None:
+    from datetime import datetime, timedelta, timezone
+
+    from enrichment import corpus
+    from technology_field.main import needs_text
+
+    now = datetime(2026, 11, 5, tzinfo=timezone.utc)
+    fresh, old = now - timedelta(days=5), now - corpus.max_age() - timedelta(days=1)
+    asked = []
+
+    def stored(answer: bool):  # noqa: ANN202
+        return lambda: asked.append(answer) or answer
+
+    assert needs_text(None, now, stored(True))
+    assert needs_text(old, now, stored(True))
+    assert not asked, "the store is only asked when the database cannot decide"
+    assert needs_text(fresh, now, stored(False))
+    assert not needs_text(fresh, now, stored(True))
+
+
+def test_only_a_store_that_answers_no_such_object_counts_as_missing(monkeypatch) -> None:  # noqa: ANN001
+    from enrichment import corpus
+
+    class NoSuchKey(Exception):
+        code = "NoSuchKey"
+
+    NoSuchKey.__name__ = "S3Error"
+
+    class Down(Exception):
+        pass
+
+    def client(error):  # noqa: ANN001, ANN202
+        class C:
+            def stat_object(self, bucket, name):  # noqa: ANN001, ANN202
+                raise error
+
+        return C()
+
+    monkeypatch.setattr(corpus, "enabled", lambda: True)
+    monkeypatch.setattr(corpus, "_failed", lambda exc, what: None)
+    monkeypatch.setattr(corpus, "_s3", lambda: client(NoSuchKey()))
+    assert corpus.exists("page", "https://example.de") is False
+    monkeypatch.setattr(corpus, "_s3", lambda: client(Down()))
+    assert corpus.exists("page", "https://example.de") is True
+    monkeypatch.setattr(corpus, "enabled", lambda: False)
+    assert corpus.exists("page", "https://example.de") is True
+
+
+def test_nothing_is_read_again_while_the_store_is_off_or_down(monkeypatch) -> None:  # noqa: ANN001
+    # Without a store a re-read indexes no page, so `read_at` stays NULL and the same companies
+    # would be downloaded again every run.
+    from enrichment import corpus
+
+    rows = [("c1", "A GmbH", "https://a.de", {"keywords": {}}, None),
+            ("c2", "B GmbH", "https://b.de", {"keywords": {}}, None)]
+
+    class Cursor:
+        def execute(self, sql, params):  # noqa: ANN001, ANN202
+            self.ran = True
+
+        def fetchall(self):  # noqa: ANN202
+            return rows
+
+    class Down(Exception):
+        pass
+
+    class Client:
+        def stat_object(self, bucket, name):  # noqa: ANN001, ANN202
+            raise Down()
+
+    class Up:
+        def stat_object(self, bucket, name):  # noqa: ANN001, ANN202
+            return None
+
+    monkeypatch.setattr(corpus, "_unreachable", False)
+    monkeypatch.setattr(corpus, "configured", lambda: False)
+    assert main.text_to_read_again(Cursor(), "s", 10) == {}
+
+    monkeypatch.setattr(corpus, "configured", lambda: True)
+    monkeypatch.setattr(corpus, "_s3", lambda: Client())
+    assert main.text_to_read_again(Cursor(), "s", 10) == {}
+
+    monkeypatch.setattr(corpus, "_unreachable", False)
+    monkeypatch.setattr(corpus, "_s3", lambda: Up())
+    assert set(main.text_to_read_again(Cursor(), "s", 10)) == {"c1", "c2"}
