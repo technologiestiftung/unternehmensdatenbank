@@ -89,7 +89,8 @@ want="77,77,67,544,27,87,22,0,7,4,t,f,t,t"
 # extraction_feedback; "unsure" takes it back; a gap task copies only a correction; a round without a
 # feedback field (email, phone) copies nothing; taking back a second round's verdict keeps the first
 # round's vote; a vote cast in the app gets its own answer back when the verdict that overwrote it
-# is deleted; the reader cannot draw tasks.
+# is deleted, also after two rounds overwrote it and were deleted in draw order; the reader cannot
+# draw tasks.
 review=$(docker exec -i "$pg" psql -U postgres -d udb -v ON_ERROR_STOP=1 -qtA <<'SQL'
 BEGIN;
 INSERT INTO public.companies (id) VALUES ('00000000-0000-0000-0000-000000000001');
@@ -103,7 +104,8 @@ INSERT INTO public.review_tasks (id, round_id, position, company_id, value) VALU
   ('00000000-0000-0000-0000-0000000000b2', '00000000-0000-0000-0000-0000000000a2', 1, '00000000-0000-0000-0000-000000000001', ''),
   ('00000000-0000-0000-0000-0000000000b3', '00000000-0000-0000-0000-0000000000a3', 1, '00000000-0000-0000-0000-000000000001', 'x@example.de'),
   ('00000000-0000-0000-0000-0000000000b4', '00000000-0000-0000-0000-0000000000a1', 2, '00000000-0000-0000-0000-000000000001', 'Robotics'),
-  ('00000000-0000-0000-0000-0000000000b5', '00000000-0000-0000-0000-0000000000a4', 1, '00000000-0000-0000-0000-000000000001', 'Photonics');
+  ('00000000-0000-0000-0000-0000000000b5', '00000000-0000-0000-0000-0000000000a4', 1, '00000000-0000-0000-0000-000000000001', 'Photonics'),
+  ('00000000-0000-0000-0000-0000000000b6', '00000000-0000-0000-0000-0000000000a4', 2, '00000000-0000-0000-0000-000000000001', 'Robotics');
 SET ROLE hub_reader;
 INSERT INTO public.review_verdicts (task_id, verdict, author_id) VALUES
   ('00000000-0000-0000-0000-0000000000b1', 'correct', 'u1'),
@@ -126,11 +128,20 @@ INSERT INTO public.review_verdicts (task_id, verdict, correction, author_id) VAL
 SELECT verdict || ':' || coalesce(correction, '-') FROM public.extraction_feedback WHERE value = 'Robotics';
 DELETE FROM public.review_verdicts WHERE task_id = '00000000-0000-0000-0000-0000000000b4';
 SELECT verdict || ':' || coalesce(correction, '-') FROM public.extraction_feedback WHERE value = 'Robotics';
+INSERT INTO public.review_verdicts (task_id, verdict, correction, author_id) VALUES
+  ('00000000-0000-0000-0000-0000000000b4', 'wrong', 'Software', 'u1');
+INSERT INTO public.review_verdicts (task_id, verdict, correction, author_id) VALUES
+  ('00000000-0000-0000-0000-0000000000b6', 'wrong', 'Biotech', 'u1');
+DELETE FROM public.review_verdicts WHERE task_id = '00000000-0000-0000-0000-0000000000b4';
+SELECT verdict || ':' || coalesce(correction, '-') FROM public.extraction_feedback WHERE value = 'Robotics';
+DELETE FROM public.review_verdicts WHERE task_id = '00000000-0000-0000-0000-0000000000b6';
+SELECT verdict || ':' || coalesce(correction, '-') FROM public.extraction_feedback WHERE value = 'Robotics';
 SELECT has_table_privilege('hub_reader', 'public.review_tasks', 'INSERT');
 ROLLBACK;
 SQL
 )
-want=$(printf '%s\n%s\n%s\n%s\n%s\n%s' ':wrong:Software Photonics:correct:-' '1' '1' 'wrong:Software' 'correct:-' 'f')
+want=$(printf '%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s' ':wrong:Software Photonics:correct:-' '1' '1' 'wrong:Software' 'correct:-' \
+  'wrong:Biotech' 'correct:-' 'f')
 [ "$review" = "$want" ] || { echo "review queue: got [$review], want [$want]"; exit 1; }
 # A drawn round holds at most one task per company: company c1 has two refused website candidates,
 # c2 one, so the writer's draw (review_round.draw, run for real) gives 2 tasks for 2 companies.

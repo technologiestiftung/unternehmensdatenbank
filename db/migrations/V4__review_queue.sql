@@ -91,7 +91,8 @@ CREATE TRIGGER review_verdicts_touch_updated_at BEFORE UPDATE ON public.review_v
 -- copied (the table requires one for an empty value). `unsure` and a deleted verdict take back only a
 -- vote the queue wrote (`created_vote`); a vote cast in the app gets back the answer the verdict
 -- overwrote (`prior_verdict`). If another verdict of the same person on the same value still says
--- correct/wrong, the vote follows that one instead.
+-- correct/wrong, the vote follows that one instead, and that verdict inherits `created_vote` and the
+-- app answer, so only the person's own app vote is ever restored.
 CREATE FUNCTION public.copy_review_verdict() RETURNS trigger
     LANGUAGE plpgsql
     AS $$
@@ -104,6 +105,7 @@ DECLARE
     prior_v text;
     prior_c text;
     vote public.extraction_feedback;
+    has_other boolean;
 BEGIN
     IF TG_OP = 'UPDATE' AND pg_trigger_depth() > 1 THEN
         RETURN NULL;
@@ -119,22 +121,27 @@ BEGIN
     IF target IS NULL THEN
         RETURN NULL;
     END IF;
+    SELECT o.* INTO other
+    FROM public.review_verdicts o
+    JOIN public.review_tasks ot ON ot.id = o.task_id
+    JOIN public.review_rounds r ON r.id = ot.round_id
+    WHERE o.task_id <> v.task_id AND o.author_id = v.author_id AND ot.company_id = t.company_id
+      AND ot.value = t.value AND r.feedback_field = target AND o.verdict IN ('correct', 'wrong')
+      AND (t.value <> '' OR o.correction IS NOT NULL)
+    ORDER BY o.updated_at DESC
+    LIMIT 1;
+    has_other := FOUND;
     IF TG_OP = 'DELETE' OR NEW.verdict = 'unsure' OR (t.value = '' AND NEW.correction IS NULL) THEN
-        SELECT o.* INTO other
-        FROM public.review_verdicts o
-        JOIN public.review_tasks ot ON ot.id = o.task_id
-        JOIN public.review_rounds r ON r.id = ot.round_id
-        WHERE o.task_id <> v.task_id AND o.author_id = v.author_id AND ot.company_id = t.company_id
-          AND ot.value = t.value AND r.feedback_field = target AND o.verdict IN ('correct', 'wrong')
-          AND (t.value <> '' OR o.correction IS NOT NULL)
-        ORDER BY o.updated_at DESC
-        LIMIT 1;
-        IF FOUND AND TG_OP <> 'INSERT' THEN
+        IF has_other AND TG_OP <> 'INSERT' THEN
             UPDATE public.extraction_feedback
             SET verdict = CASE WHEN t.value = '' THEN 'wrong' ELSE other.verdict END, correction = other.correction
             WHERE company_id = t.company_id AND field_name = target AND value = t.value AND author_id = v.author_id;
-            IF created THEN
-                UPDATE public.review_verdicts SET created_vote = true WHERE task_id = other.task_id;
+            IF created OR prior_v IS NOT NULL THEN
+                UPDATE public.review_verdicts
+                SET created_vote = created_vote OR created,
+                    prior_verdict = COALESCE(prior_v, prior_verdict),
+                    prior_correction = CASE WHEN prior_v IS NULL THEN prior_correction ELSE prior_c END
+                WHERE task_id = other.task_id;
             END IF;
         ELSIF created THEN
             DELETE FROM public.extraction_feedback
@@ -151,8 +158,13 @@ BEGIN
         WHERE company_id = t.company_id AND field_name = target AND value = t.value AND author_id = v.author_id;
         created := created OR NOT FOUND;
         IF FOUND AND NOT created AND prior_v IS NULL THEN
-            prior_v := vote.verdict;
-            prior_c := vote.correction;
+            IF has_other THEN
+                prior_v := other.prior_verdict;
+                prior_c := other.prior_correction;
+            ELSE
+                prior_v := vote.verdict;
+                prior_c := vote.correction;
+            END IF;
         END IF;
         INSERT INTO public.extraction_feedback (company_id, field_name, value, verdict, correction, author_id)
         VALUES (t.company_id, target, t.value, CASE WHEN t.value = '' THEN 'wrong' ELSE v.verdict END,
