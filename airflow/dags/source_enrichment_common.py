@@ -496,11 +496,19 @@ def insert_text_observation(
             field_name,
             value_text,
             confidence,
-            Json(metadata or {}),
+            Json(with_code_version(metadata)),
             source_updated_at,
         ),
     )
     return cur.fetchone()[0]
+
+
+def with_code_version(metadata: dict[str, Any] | None) -> dict[str, Any]:
+    """`metadata` with the code that wrote it (`CODE_VERSION`, the git commit the pipelines image was
+    built from), so a review round can compare the values of one rule version with the next (#153).
+    Unchanged when the variable is not set (local runs)."""
+    version = os.getenv("CODE_VERSION", "").strip()
+    return {**(metadata or {}), "code_version": version} if version else dict(metadata or {})
 
 
 def insert_number_observation(
@@ -541,7 +549,7 @@ def insert_number_observation(
             field_name,
             value_number,
             confidence,
-            Json(metadata or {}),
+            Json(with_code_version(metadata)),
         ),
     )
     return cur.fetchone()[0]

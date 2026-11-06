@@ -9,6 +9,9 @@
 FROM python:3.12-slim
 
 ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 PYTHONPATH=/opt/pipelines
+# The git commit this image was built from (CI passes it), stored with every observation (#153).
+ARG CODE_VERSION=""
+ENV CODE_VERSION=$CODE_VERSION
 # The models' working copies. Their defaults (/opt/airflow/data/models/...) are the Airflow image's
 # folders, which do not exist here and cannot be made by the task user: the first training on play
 # failed with "Permission denied: '/opt/airflow'" (2026-11-05). The durable copy is S3
