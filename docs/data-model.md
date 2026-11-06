@@ -126,10 +126,12 @@ docker compose --profile tools run --rm flyway migrate
 database. Tested on a copy without extensions: every table's row count matched, the restore took
 3 minutes. Three things a plain dump gets wrong: the local image has PostGIS and pgvector, which a
 plain `postgres:15` lacks (the schema uses neither), so leave out PostGIS's `spatial_ref_sys`; the
-dump creates `public` itself; and it carries neither database-level nor PUBLIC rights.
+dump creates `public` itself; and it carries neither database-level nor PUBLIC rights. A dump of one
+schema leaves out extensions, but the search index (V5) needs `pg_trgm`, hence `--extension=pg_trgm`
+(it lands in `public`, after the dump has created it).
 
 ```bash
-pg_dump -U app -Fc -n public --exclude-table=public.spatial_ref_sys -f udb.dump unternehmensdatenbank
+pg_dump -U app -Fc -n public --extension=pg_trgm --exclude-table=public.spatial_ref_sys -f udb.dump unternehmensdatenbank
 # on the server, as postgres, into a new database owned by app:
 psql -d unternehmensdatenbank -c "DROP SCHEMA public"
 pg_restore -l udb.dump | grep -v "MATERIALIZED VIEW DATA" > udb.list   # refreshed below, after ANALYZE
