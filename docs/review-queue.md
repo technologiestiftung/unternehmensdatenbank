@@ -26,8 +26,12 @@ draw a round  ──►  review_tasks  ──►  a person judges in the app  �
   - `gap`: companies without a value; the person enters it. Answers: what we miss. For
     `technology_field` these are the companies the keywords left empty on a website that was read,
     with the LLM's label (#87) as a suggestion.
-  - Mode `measure` is a random draw, the only kind that gives a precision. `teach` (the cases a model
-    is least sure of) is not built yet.
+  - Mode `measure` is a random draw, the only kind that gives a precision. Mode `teach` draws the
+    values whose confidence is closest to the bar the coordinator shows them from (websites 0.35,
+    everything else 0.50): the cases a rule or model is least sure of, where a verdict teaches the
+    most. Only for `shown` and `refused` (a gap has no confidence), never counted in a precision.
+    Its verdicts still become votes, so a model judged on held-out votes also sees these harder
+    cases: its score can only come out lower.
 - **A task** keeps the value, its confidence, evidence flags and method as they were when drawn.
   A round draws at most one task per company: `feedback_observations` keeps one vote per person,
   company and field, so a second value of the same company would overwrite the first one's verdict.
@@ -47,11 +51,19 @@ draw a round  ──►  review_tasks  ──►  a person judges in the app  �
 
 ## Draw a round
 
+**In Airflow** (local and play): trigger the DAG `review_round` with "Trigger DAG w/ config" and fill in
+the form: field, kind, source (for `shown`/`refused`), size (at most 1,000), mode, and optionally the
+version and a title. One run draws one round; it is never retried, since a retry would draw a second
+one. The run's log names the round.
+
+**From a shell**, the same with arguments:
+
 ```bash
 PYTHONPATH=airflow/dags PG_DSN="host=localhost port=5433 dbname=unternehmensdatenbank user=writer password=writer" \
   python -m review_round.draw --field technology_field --kind gap --size 150
 python -m review_round.draw --source branch_classifier --field technology_field --kind shown
 python -m review_round.draw --source website_discovery --field candidate_url --kind refused
+python -m review_round.draw --source website_discovery --field candidate_url --kind refused --mode teach
 ```
 
 On play, in the pipelines image: `docker run --rm --entrypoint python --network unternehmensdatenbank
