@@ -106,6 +106,7 @@ jobs:
           context: ${{ matrix.image.context }}
           file: ${{ matrix.image.file }}
           platforms: linux/amd64
+          build-args: CODE_VERSION=${{ needs.tag.outputs.tag }}
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
