@@ -1,0 +1,21 @@
+table:
+  name: v_review_round_results
+  schema: public
+configuration:
+  custom_name: review_round_results
+select_permissions:
+  # Counts only: progress and precision per review round (#153).
+  - role: user
+    permission:
+      columns:
+        - round_id
+        - tasks
+        - judged
+        - correct
+        - wrong
+        - unsure
+        - corrected
+        - suggestion_judged
+        - suggestion_taken
+        - precision
+      filter: {}

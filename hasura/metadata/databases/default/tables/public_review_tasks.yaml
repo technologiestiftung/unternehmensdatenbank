@@ -1,0 +1,45 @@
+table:
+  name: review_tasks
+  schema: public
+configuration:
+  custom_name: review_tasks
+object_relationships:
+  - name: company
+    using:
+      manual_configuration:
+        remote_table:
+          name: v_company_profile
+          schema: public
+        column_mapping:
+          company_id: id
+  - name: verdict
+    using:
+      manual_configuration:
+        remote_table:
+          name: review_verdicts
+          schema: public
+        column_mapping:
+          id: task_id
+select_permissions:
+  # Read-only; drawn by the writer (airflow/dags/review_round/draw.py). Only while the queue is on (#153).
+  # Plain values, email and phone included: decided for the research phase (2026-11-05).
+  - role: user
+    permission:
+      columns:
+        - id
+        - round_id
+        - position
+        - company_id
+        - value
+        - confidence
+        - evidence
+        - method
+        - suggestion
+      filter:
+        _exists:
+          _table:
+            name: review_settings
+            schema: public
+          _where:
+            enabled:
+              _eq: true

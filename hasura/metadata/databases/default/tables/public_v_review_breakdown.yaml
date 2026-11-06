@@ -1,0 +1,16 @@
+table:
+  name: v_review_breakdown
+  schema: public
+configuration:
+  custom_name: review_breakdown
+select_permissions:
+  # Counts only: wrong answers by reason, confidence band and evidence flag (#153).
+  - role: user
+    permission:
+      columns:
+        - round_id
+        - dimension
+        - bucket
+        - correct
+        - wrong
+      filter: {}

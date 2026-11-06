@@ -1,0 +1,48 @@
+table:
+  name: review_verdicts
+  schema: public
+configuration:
+  custom_name: review_verdicts
+insert_permissions:
+  # author_id comes from the JWT, never from the client. One verdict per task: the app upserts.
+  - role: user
+    permission:
+      check: {}
+      set:
+        author_id: x-hasura-User-Id
+      columns:
+        - task_id
+        - verdict
+        - reason
+        - correction
+select_permissions:
+  - role: user
+    permission:
+      columns:
+        - task_id
+        - verdict
+        - reason
+        - correction
+        - author_id
+        - updated_at
+      filter: {}
+update_permissions:
+  # Only your own verdict: the upsert behind "change my answer".
+  - role: user
+    permission:
+      columns:
+        - verdict
+        - reason
+        - correction
+      filter:
+        author_id:
+          _eq: x-hasura-User-Id
+      check:
+        author_id:
+          _eq: x-hasura-User-Id
+delete_permissions:
+  - role: user
+    permission:
+      filter:
+        author_id:
+          _eq: x-hasura-User-Id
