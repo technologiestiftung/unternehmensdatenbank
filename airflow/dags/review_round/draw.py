@@ -102,7 +102,7 @@ def _technology_field_gaps(cur: Any, *, size: int, salt: str) -> list[dict[str, 
     from enrichment import branch_classifier as bc
     from llm_labels.main import SOURCE_KEY as LLM_SOURCE, _gaps
 
-    gaps = sorted(_gaps(cur, bc.load_taxonomy()))
+    gaps = sorted(cid for cid, (_, _, outcome) in _gaps(cur, bc.load_taxonomy()).items() if outcome == "no_keyword")
     cur.execute(
         """
         SELECT id FROM unnest(%s::text[]) AS id ORDER BY md5(id || %s) LIMIT %s
