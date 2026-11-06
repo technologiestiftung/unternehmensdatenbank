@@ -109,8 +109,17 @@ def _with_secrets(run: Callable[[], Any], names: tuple[str, ...]) -> Callable[[]
     return call
 
 
+def _with_env(run: Callable[[], Any]) -> Callable[..., Any]:
+    """`run`, with the rendered `env` set in this worker's environment first (the "python" runner)."""
+    def call(templates_dict: Optional[Mapping[str, str]] = None, **_: Any) -> Any:
+        os.environ.update(templates_dict or {})
+        return run()
+
+    return call
+
+
 def pipeline_task(task_id: str, run: Callable[[], Any], *, returns: bool = False, retries: int = RETRIES,
-                  secrets: tuple[str, ...] = ()) -> Any:
+                  secrets: tuple[str, ...] = (), env: Optional[Mapping[str, str]] = None) -> Any:
     """A `PythonOperator` calling `run`, or a pod running the same function from the pipelines image.
 
     `returns=True` makes `run`'s return value the task's XCom on the hub too: the pod writes it to
@@ -120,14 +129,22 @@ def pipeline_task(task_id: str, run: Callable[[], Any], *, returns: bool = False
     `retries=0` for a task that must not run again by itself, such as one under a request limit.
 
     `secrets`: the API keys the task needs, by Airflow variable name (see the module docstring).
+
+    `env`: environment variables for the task, Jinja-templated, rendered when the task runs: how a DAG
+    started by hand passes its form's inputs (`{"REVIEW_FIELD": "{{ params.field }}"}`). The task reads
+    them with `os.getenv`, on every runner. Never a secret: a rendered value shows in the UI.
     """
+    env = dict(env or {})
     retry = {"retries": retries, "retry_delay": RETRY_DELAY}
     runner = _setting("pipeline_runner", "python")
     if runner == "docker":
-        return _docker_task(task_id, run, returns, retry, secrets)
+        return _docker_task(task_id, run, returns, retry, secrets, env)
     if runner != "kubernetes":
         from airflow.providers.standard.operators.python import PythonOperator
 
+        if env:
+            return PythonOperator(task_id=task_id, python_callable=_with_env(_with_secrets(run, secrets)),
+                                  templates_dict=env, **retry)
         return PythonOperator(task_id=task_id, python_callable=_with_secrets(run, secrets), **retry)
 
     from airflow.providers.cncf.kubernetes.operators.pod import KubernetesPodOperator
@@ -141,7 +158,7 @@ def pipeline_task(task_id: str, run: Callable[[], Any], *, returns: bool = False
         namespace="{{ var.value.pipeline_namespace }}",
         arguments=[task_target(run)],
         env_from=[k8s.V1EnvFromSource(secret_ref=k8s.V1SecretEnvSource(name=_setting("pipeline_secret")))],
-        env_vars=LAST_TRY_ENV,
+        env_vars={**LAST_TRY_ENV, **env},
         get_logs=True,
         do_xcom_push=returns,
         **retry,
@@ -149,7 +166,7 @@ def pipeline_task(task_id: str, run: Callable[[], Any], *, returns: bool = False
 
 
 def _docker_task(task_id: str, run: Callable[[], Any], returns: bool, retry: dict[str, Any],
-                 secrets: tuple[str, ...]) -> Any:
+                 secrets: tuple[str, ...], env: dict[str, str]) -> Any:
     from airflow.providers.docker.operators.docker import DockerOperator
 
     class PipelineDockerOperator(DockerOperator):
@@ -167,7 +184,7 @@ def _docker_task(task_id: str, run: Callable[[], Any], returns: bool, retry: dic
         # `:main` is re-tagged on every merge; without a pull the host keeps running the old image.
         force_pull=True,
         command=[task_target(run)],
-        environment=LAST_TRY_ENV,
+        environment={**LAST_TRY_ENV, **env},
         network_mode=_setting("pipeline_network") or None,
         # The worker's /tmp is not the Docker host's when Docker is reached over a proxy.
         mount_tmp_dir=False,

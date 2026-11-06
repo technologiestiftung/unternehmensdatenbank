@@ -35,6 +35,8 @@ def test_email_and_phone_are_never_refused_because_they_are_never_resolved() -> 
     for field in ("email", "phone"):
         with pytest.raises(ValueError, match="never resolved"):
             draw(None, source="impressum_contacts", field=field, kind="refused")
+        with pytest.raises(ValueError, match="no bar"):
+            draw(None, source="impressum_contacts", field=field, kind="shown", mode="teach")
 
 
 class _UnnestCursor:
@@ -63,3 +65,75 @@ def test_the_technology_field_gap_round_draws_only_companies_the_keywords_left_e
     })
     tasks = _technology_field_gaps(_UnnestCursor(), size=10, salt="round")
     assert [task["company_id"] for task in tasks] == ["empty-co"]
+
+
+def test_teach_draws_closest_to_the_bar_and_never_a_gap() -> None:
+    from review_round.draw import bar
+
+    assert bar("candidate_url") == bar("website") == 0.35
+    assert bar("technology_field") == 0.50
+    with pytest.raises(ValueError, match="gap has no confidence"):
+        draw(None, field="technology_field", kind="gap", mode="teach")
+    with pytest.raises(ValueError, match="mode one of"):
+        draw(None, field="technology_field", kind="shown", source="branch_classifier", mode="guess")
+    with pytest.raises(ValueError, match="size must be"):
+        draw(None, field="technology_field", kind="shown", source="branch_classifier", size=0)
+
+
+class _ObservationCursor:
+    """Records the parameters of the observation draw, then stops before anything is written."""
+
+    def __init__(self) -> None:
+        self.params: dict = {}
+
+    def execute(self, sql: str, params) -> None:
+        self.params = params
+
+    def fetchall(self) -> list[tuple]:
+        return []
+
+
+def test_a_teach_round_sorts_by_distance_from_the_fields_bar() -> None:
+    cur = _ObservationCursor()
+    with pytest.raises(ValueError, match="nothing to draw"):
+        draw(cur, source="website_discovery", field="candidate_url", kind="refused", mode="teach")
+    assert (cur.params["teach"], cur.params["bar"]) == (True, 0.35)
+    with pytest.raises(ValueError, match="nothing to draw"):
+        draw(cur, source="branch_classifier", field="technology_field", kind="shown")
+    assert cur.params["teach"] is False
+
+
+def test_the_dag_form_becomes_the_draws_arguments() -> None:
+    from review_round.draw import DEFAULT_SIZE, draw_args
+
+    form = {"REVIEW_FIELD": "candidate_url", "REVIEW_KIND": "refused", "REVIEW_SOURCE": "website_discovery",
+            "REVIEW_SIZE": "150", "REVIEW_MODE": "teach", "REVIEW_VERSION": "", "REVIEW_TITLE": " "}
+    assert draw_args(form) == {"field": "candidate_url", "kind": "refused", "source": "website_discovery",
+                               "size": 150, "mode": "teach", "version": None, "title": None}
+    assert draw_args({"REVIEW_FIELD": "website", "REVIEW_KIND": "gap"})["size"] == DEFAULT_SIZE
+    assert draw_args({"REVIEW_FIELD": "website", "REVIEW_KIND": "gap", "REVIEW_SOURCE": ""})["source"] is None
+    with pytest.raises(ValueError, match="required"):
+        draw_args({"REVIEW_KIND": "gap"})
+    with pytest.raises(ValueError, match="whole number"):
+        draw_args({"REVIEW_FIELD": "website", "REVIEW_KIND": "gap", "REVIEW_SIZE": "1; DROP"})
+
+
+def test_a_python_runner_task_sees_its_rendered_inputs_as_environment(monkeypatch) -> None:
+    import inspect
+    import os
+
+    from pipeline_task import _with_env, _with_secrets
+
+    monkeypatch.delenv("REVIEW_FIELD", raising=False)
+
+    def run_draw() -> str:
+        return os.environ["REVIEW_FIELD"]
+
+    call = _with_env(_with_secrets(run_draw, ()))
+    # Airflow's PythonOperator hands the callable only the context keys its signature names (or all,
+    # for **kwargs); here the context offers `templates_dict` and `ti`.
+    context = {"templates_dict": {"REVIEW_FIELD": "website"}, "ti": None}
+    params = inspect.signature(call).parameters.values()
+    if not any(p.kind is inspect.Parameter.VAR_KEYWORD for p in params):
+        context = {k: v for k, v in context.items() if k in inspect.signature(call).parameters}
+    assert call(**context) == "website"
