@@ -37,21 +37,17 @@ CREATE FUNCTION public.search_companies(search text)
            '%' || replace(replace(replace(lower(trim(search)), '\', '\\'), '%', '\%'), '_', '\_') || '%' AS pattern
   ),
   hits AS (
-    SELECT p.*, public.similarity(q.term, lower(p.name)) AS score
+    SELECT p, p.name, p.id, public.similarity(q.term, lower(p.name)) AS score
     FROM public.v_company_profile p, q
     WHERE public.company_search_text(p.name, p.registration_number, p.website, p.address) LIKE q.pattern
   ),
   near AS (
-    SELECT p.*, public.word_similarity(q.term, lower(p.name)) AS score
+    SELECT p, p.name, p.id, public.word_similarity(q.term, lower(p.name)) AS score
     FROM public.v_company_profile p, q
     WHERE NOT EXISTS (SELECT 1 FROM hits)
       AND q.term OPERATOR(public.<%) public.company_search_text(p.name, p.registration_number, p.website, p.address)
   )
-  SELECT id, name, registration_number, employee_count, revenue, funding_count, funding_total_eur, wz_code,
-         established_at, address, postcode, city, legal_form, technology_field, website, management,
-         business_purpose, deeptech_class, deeptech_confidence, is_ai, register_status, updated_at,
-         activity_keywords, register_announcement, register_announcement_date, source_keys, established_year,
-         wz_division_estimated
+  SELECT (r.p).*
   FROM (SELECT * FROM hits UNION ALL SELECT * FROM near) r
   ORDER BY score DESC, name, id
 $$;

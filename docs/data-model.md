@@ -337,7 +337,11 @@ every run and by the grant DAGs and imports after they load.
 
 **A new profile column** means dropping and rebuilding `company_profile_mv` and `v_company_profile`
 after adding it at the end of `v_company_profile_live`: the stored copy froze its columns when it was
-created. The activity-keywords migration (V8 in git history) shows how.
+created. The activity-keywords migration (V8 in git history) shows how. `DROP ... CASCADE` also drops
+everything built on the stored copy; create all of it again in the same migration: `v_company_profile`,
+`v_review_results`, the search function `search_companies`, the view `v_website_tlds` and the search
+index `company_profile_mv_search_trgm` (all three from `V5__company_search.sql`). Hasura tracks the
+function and `v_website_tlds`, so a missing one breaks the app's search or website filter.
 
 ## Website contacts and keywords (V8)
 

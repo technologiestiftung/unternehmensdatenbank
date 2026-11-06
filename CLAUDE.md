@@ -155,7 +155,9 @@ hub as the app's initContainer ([release](docs/release.md)).
   changes companies or published values ends with `refresh_company_profile()` (the coordinator does).
   A filter on the live view took up to 45 s.
 - **A new profile column means rebuilding `company_profile_mv`:** it froze `p.*`, so
-  `CREATE OR REPLACE` on `v_company_profile_live` alone never reaches the app.
+  `CREATE OR REPLACE` on `v_company_profile_live` alone never reaches the app. Its `DROP ... CASCADE`
+  also drops `v_company_profile`, `v_review_results`, `search_companies`, `v_website_tlds` and the
+  index `company_profile_mv_search_trgm` (V5): create all five again in the same migration.
 - **Grant links are a table**, refreshed by `refresh_company_funding_links()`. Linking on read made
   the company list take 71 s.
 - **The sources page reads stored counts** (`source_stats_mv`, `source_field_stats_mv`), refreshed by `refresh_company_profile()`. Counts
