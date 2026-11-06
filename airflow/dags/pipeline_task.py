@@ -111,7 +111,6 @@ def _with_secrets(run: Callable[[], Any], names: tuple[str, ...]) -> Callable[[]
 
 def _with_env(run: Callable[[], Any]) -> Callable[..., Any]:
     """`run`, with the rendered `env` set in this worker's environment first (the "python" runner)."""
-    @functools.wraps(run)
     def call(templates_dict: Optional[Mapping[str, str]] = None, **_: Any) -> Any:
         os.environ.update(templates_dict or {})
         return run()

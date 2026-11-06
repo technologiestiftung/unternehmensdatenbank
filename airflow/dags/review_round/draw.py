@@ -173,6 +173,8 @@ def draw(cur: Any, *, field: str, kind: str, source: str | None = None, size: in
         raise ValueError(f"a {kind} round needs --source")
     if kind == "refused" and field in NEVER_RESOLVED:
         raise ValueError(f"{field} is never resolved, so nothing is refused: draw it as shown")
+    if mode == "teach" and field in NEVER_RESOLVED:
+        raise ValueError(f"{field} is never resolved, so it has no bar to teach near: draw it as measure")
     if kind == "gap" and field != "technology_field" and field not in PROFILE_GAPS:
         raise ValueError(f"no gap rule for {field!r}; known: technology_field, {', '.join(sorted(PROFILE_GAPS))}")
     round_id = str(uuid.uuid4())

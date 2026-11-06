@@ -35,6 +35,8 @@ def test_email_and_phone_are_never_refused_because_they_are_never_resolved() -> 
     for field in ("email", "phone"):
         with pytest.raises(ValueError, match="never resolved"):
             draw(None, source="impressum_contacts", field=field, kind="refused")
+        with pytest.raises(ValueError, match="no bar"):
+            draw(None, source="impressum_contacts", field=field, kind="shown", mode="teach")
 
 
 class _UnnestCursor:
@@ -117,10 +119,21 @@ def test_the_dag_form_becomes_the_draws_arguments() -> None:
 
 
 def test_a_python_runner_task_sees_its_rendered_inputs_as_environment(monkeypatch) -> None:
+    import inspect
     import os
 
-    from pipeline_task import _with_env
+    from pipeline_task import _with_env, _with_secrets
 
     monkeypatch.delenv("REVIEW_FIELD", raising=False)
-    call = _with_env(lambda: os.environ["REVIEW_FIELD"])
-    assert call(templates_dict={"REVIEW_FIELD": "website"}, ti=None) == "website"
+
+    def run_draw() -> str:
+        return os.environ["REVIEW_FIELD"]
+
+    call = _with_env(_with_secrets(run_draw, ()))
+    # Airflow's PythonOperator hands the callable only the context keys its signature names (or all,
+    # for **kwargs); here the context offers `templates_dict` and `ti`.
+    context = {"templates_dict": {"REVIEW_FIELD": "website"}, "ti": None}
+    params = inspect.signature(call).parameters.values()
+    if not any(p.kind is inspect.Parameter.VAR_KEYWORD for p in params):
+        context = {k: v for k, v in context.items() if k in inspect.signature(call).parameters}
+    assert call(**context) == "website"

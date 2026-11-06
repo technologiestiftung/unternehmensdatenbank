@@ -29,7 +29,8 @@ draw a round  ──►  review_tasks  ──►  a person judges in the app  �
   - Mode `measure` is a random draw, the only kind that gives a precision. Mode `teach` draws the
     values whose confidence is closest to the bar the coordinator shows them from (websites 0.35,
     everything else 0.50): the cases a rule or model is least sure of, where a verdict teaches the
-    most. Only for `shown` and `refused` (a gap has no confidence), never counted in a precision.
+    most. Only for `shown` and `refused` (a gap has no confidence), never for `email` or `phone` (never
+    resolved, so no bar), never counted in a precision.
     Its verdicts still become votes, so a model judged on held-out votes also sees these harder
     cases: its score can only come out lower.
 - **A task** keeps the value, its confidence, evidence flags and method as they were when drawn.
