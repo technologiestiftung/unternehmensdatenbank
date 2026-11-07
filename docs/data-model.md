@@ -350,8 +350,11 @@ function and `v_website_tlds`, so a missing one breaks the app's search or websi
 Two DAGs read more from a website `website_discovery` has proven to be the company's.
 
 - **`website_contacts`** (source `impressum_contacts`) writes `email` and `phone` observations from
-  the Impressum. An email counts only at the website's own domain and only when its mailbox is not
-  shaped like a person. First 37 websites: 27 emails, all role mailboxes, and 25 phones. **Nothing
+  the Impressum. Since `V7__email_kinds.sql` it keeps every address, labelled in `metadata.method`:
+  `role` (website's own domain, not shaped like a person, confidence 0.6), `person` (own domain,
+  shaped like a person, 0.4) or `other_domain` (agency, host, parent company, 0.2). The confidences
+  are guesses until a Prüfen round of `email` measures them per kind. Locally, 200 companies read
+  under the new rule: 126 role, 12 person and 43 other-domain addresses. **Nothing
   resolves them**, so they reach neither `v_company_profile` nor `v_field_provenance`. Emails reach
   the app's company page through `v_company_emails` (`V6__company_emails.sql`): every stored address per company, for the
   research phase (decided 2026-11-07), also one that may be a person's. Phones stay unshown. To close
