@@ -13,8 +13,9 @@ file out of git: it names companies, and the verdicts are a person's work.
 
     python scripts/wirtschaftsatlas_layers_sample.py score sample.csv
 
-prints the precision, as for the LLM labels (`llm_labels_sample.score`). Only with that number does a
-layer write anything: the precision goes into #148 and docs/branch-classification.md.
+prints the precision, as for the LLM labels (`llm_labels_sample.score`). The layers are shown before
+this check (developer's decision, 2026-11-07, #148); the precision goes into #148 and
+docs/branch-classification.md, and `LAYER_FIELD_CONFIDENCE` goes down if it is poor.
 """
 from __future__ import annotations
 

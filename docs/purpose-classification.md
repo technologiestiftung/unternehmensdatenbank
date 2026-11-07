@@ -14,7 +14,8 @@ file assumes you know what a Technologiefeld is.
 
 ## Why a third column
 
-The Technologiefeld requires a downloaded website. Filling it from register purposes would quietly undo
+The Technologiefeld requires a downloaded website (one exception: the Wirtschaftsatlas layers, #148,
+see [branch-classification](branch-classification.md)). Filling it from register purposes would quietly undo
 that rule. So the register gets its own column with its own outcome names, and the two can be compared
 instead of merged.
 
