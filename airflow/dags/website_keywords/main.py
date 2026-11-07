@@ -103,6 +103,7 @@ def read_site(website: str, company_name: str) -> dict[str, Any]:
 
 
 def run_read() -> None:
+    site_description._nlp()
     connection = get_connection()
     try:
         with connection, connection.cursor() as cur:

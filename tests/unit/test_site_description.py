@@ -30,6 +30,27 @@ def test_a_person_name_drops_the_text() -> None:
     assert sd.rejection(text, names=lambda t, c: ["Erika Muster"]) == "person_name"
 
 
+def test_names_are_excused_only_as_whole_words_of_the_company_name(monkeypatch) -> None:
+    from types import SimpleNamespace
+
+    doc = SimpleNamespace(ents=[SimpleNamespace(text="Anna", label_="PER")])
+    monkeypatch.setattr(sd, "_nlp", lambda: lambda text: doc)
+    assert sd.person_names("Anna berät Sie", "Hannah Design GmbH") == ["Anna"]
+    assert sd.person_names("Anna berät Sie", "Anna Design GmbH") == []
+
+
+def test_spacy_drops_real_names_and_keeps_the_company_name() -> None:
+    import pytest
+
+    pytest.importorskip("de_core_news_md")
+    run_by = sd.read('<meta name="description" content="Eine Agentur in Berlin, geführt von Sol Bondy und Fred Burle.">',
+                     "Beispiel Agentur GmbH")
+    assert run_by["description_dropped"] == "person_name"
+    own = "Marcus Mahlke Immobilien vermittelt Wohnungen in Berlin"
+    assert sd.read(f'<meta name="description" content="{own}">', "Marcus Mahlke Immobilien GmbH") == {
+        "description": own, "description_dropped": None}
+
+
 def test_long_texts_are_cut_at_a_word() -> None:
     text = "Wort " * 100
     short = sd.shorten(text.strip())

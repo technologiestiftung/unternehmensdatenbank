@@ -62,9 +62,11 @@ def _nlp() -> Any:
 
 def person_names(text: str, company_name: str = "") -> list[str]:
     """The person names spaCy finds in the text, except those inside the company's own name
-    ("Marcus Mahlke Immobilien" names its owner; it is still the company's name)."""
-    name = company_name.lower()
-    return [e.text for e in _nlp()(text).ents if e.label_ == "PER" and e.text.lower() not in name]
+    ("Marcus Mahlke Immobilien" names its owner; it is still the company's name). Whole words only:
+    "Anna" is not inside "Hannah Design GmbH"."""
+    own = set(re.findall(r"\w+", company_name.lower()))
+    return [e.text for e in _nlp()(text).ents
+            if e.label_ == "PER" and not set(re.findall(r"\w+", e.text.lower())) <= own]
 
 
 def shorten(text: str) -> str:
