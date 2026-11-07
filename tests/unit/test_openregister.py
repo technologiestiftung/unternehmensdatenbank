@@ -1,9 +1,18 @@
-"""`openregister.main`: search results as register entries, and where the next search starts (#88)."""
+"""`openregister.main`: search results as register entries, and where the next search starts (#88), and the walk back by founding year (#143)."""
 from __future__ import annotations
 
 from datetime import date
 
-from openregister.main import entry_for, next_state, search_body
+from openregister import main
+from openregister.main import (
+    backlog_bounds,
+    entry_for,
+    first_backlog,
+    next_backlog,
+    next_search,
+    next_state,
+    search_body,
+)
 
 
 def item(**values: object) -> dict[str, object]:
@@ -56,3 +65,36 @@ def test_the_next_run_continues_the_pass_then_starts_a_new_one() -> None:
 def test_a_one_page_pass_starts_the_next_from_its_own_day() -> None:
     assert next_state({"incorporated_from": "30-01-2026", "page": 1}, 1, date(2026, 11, 4)) == {
         "incorporated_from": "04-10-2026", "page": 1}
+
+
+def test_the_backlog_reads_one_founding_year_and_ends_the_day_before_the_first_pass() -> None:
+    assert first_backlog() == {"year": 2018, "page": 1}
+    assert backlog_bounds(2018) == ("01-01-2018", "31-12-2018")
+    low, high = backlog_bounds(2017)
+    body = search_body(low, 2, high)
+    assert {"field": "incorporated_at", "min": "01-01-2017", "max": "31-12-2017"} in body["filters"]
+
+
+def test_a_first_pass_from_mid_year_leaves_no_gap(monkeypatch) -> None:
+    monkeypatch.setattr(main, "INCORPORATED_FROM", "15-06-2019")
+    assert main.first_backlog() == {"year": 2019, "page": 1}
+    assert main.backlog_bounds(2019) == ("01-01-2019", "14-06-2019")
+
+
+def test_the_backlog_walks_back_year_by_year_and_ends_at_the_oldest() -> None:
+    assert next_backlog({"year": 2018, "page": 1}, 3) == {"year": 2018, "page": 2}
+    assert next_backlog({"year": 2018, "page": 3}, 3) == {"year": 2017, "page": 1}
+    assert next_backlog({"year": 2005, "page": 1}, 0) == {"year": 2004, "page": 1}  # a year with nobody
+    assert next_backlog({"year": main.OLDEST_YEAR, "page": 1}, 1) is None
+
+
+def test_new_companies_come_first_then_the_backlog() -> None:
+    state = {"incorporated_from": "30-01-2026", "page": 2}
+    new = next_search(state, {"year": 2018, "page": 4}, new_pass_done=False)
+    assert {"field": "incorporated_at", "min": "30-01-2026"} in new["filters"] and new["pagination"]["page"] == 2
+    old = next_search(state, {"year": 2018, "page": 4}, new_pass_done=True)
+    assert {"field": "incorporated_at", "min": "01-01-2018", "max": "31-12-2018"} in old["filters"]
+    assert old["pagination"]["page"] == 4
+    assert next_search(state, None, new_pass_done=True) is None
+    # Until this run has read the new pass to its end, a finished backlog does not stop it.
+    assert next_search(state, None, new_pass_done=False) is not None
