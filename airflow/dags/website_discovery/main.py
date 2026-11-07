@@ -5,7 +5,10 @@ Each run does two things, then lets `pipeline_coordinator` publish the result:
 1. **rescore_websites.** Every stored website observation is scored again against the current
    identity rule (`confidence.identifies_company`), from the evidence stored with it. One that no
    longer qualifies drops to `UNVERIFIED_CAP`, below the bar, and the coordinator un-publishes it.
-   This is how the rule of 2026-10-28 reaches the websites found before it. Cheap and idempotent.
+   This is how the rule of 2026-10-28 reaches the websites found before it. It also takes away a dissolved
+   company's stale register number on another company's page (#168), for every source's websites.
+   Cheap and idempotent. `pipeline_coordinator` runs the same rescore before it publishes, so a
+   source that writes such a website back (a recheck, Common Crawl) never gets it shown.
 2. **discover.** One batch of companies this source has not looked at yet: guess domains from the
    name and up to 3 former names (`url_patterns`), download the
    page and its Impressum, and check whose they are, including whether a Geschäftsführer on the
@@ -34,11 +37,16 @@ from datetime import datetime, timezone
 from typing import Any
 from urllib.parse import urlparse
 
-from enrichment import confidence as conf
 from enrichment import name_frequency, pipeline
 from enrichment.officers import load_officers
 from enrichment.register_names import load_former_names
-from enrichment.observations import SOURCE_KEY, SOURCE_NAME, WEBSITE_SOURCE_KEYS, write_company_result
+from enrichment.observations import (
+    RULE,
+    SOURCE_KEY,
+    SOURCE_NAME,
+    rescore_websites,
+    write_company_result,
+)
 from source_enrichment_common import (
     SourceDetails,
     ensure_source,
@@ -68,55 +76,9 @@ BATCH_SIZE = int(os.getenv("WEBSITE_DISCOVERY_BATCH_SIZE", "50"))
 WORKERS = int(os.getenv("WEBSITE_DISCOVERY_WORKERS", "8"))
 #: A company is checked again once its last check is older than this: sites appear, move and close.
 RECHECK_AFTER_DAYS = int(os.getenv("WEBSITE_DISCOVERY_RECHECK_DAYS", "90"))
-RULE = "identity-2026-10-28"
 
 
 # --- rescore --------------------------------------------------------------------------------
-
-
-def demotion(metadata: dict[str, Any], confidence: float | None) -> float | None:
-    """The confidence a stored website drops to under the identity rule, or None when it stays.
-
-    Pure, so the guard can test it. Judged on the evidence stored with the observation; a website
-    whose page never identified the company falls to the unverified cap, below the bar.
-    """
-    evidence = set(metadata.get("evidence") or [])
-    if conf.identifies_company(evidence):
-        return None
-    if confidence is None or confidence <= conf.UNVERIFIED_CAP:
-        return None
-    return conf.UNVERIFIED_CAP
-
-
-def rescore_websites(cur: Any) -> int:
-    """Apply the identity rule to every stored website observation. Returns how many dropped."""
-    cur.execute(
-        """
-        SELECT o.id, o.confidence, o.metadata
-        FROM public.company_field_observations o
-        JOIN public.sources s ON s.id = o.source_id
-        WHERE o.field_name = 'website' AND s.key = ANY(%s)
-        """,
-        (list(WEBSITE_SOURCE_KEYS),),
-    )
-    dropped = 0
-    for obs_id, confidence, metadata in cur.fetchall():
-        new = demotion(metadata or {}, float(confidence) if confidence is not None else None)
-        if new is None:
-            continue
-        cur.execute(
-            """
-            UPDATE public.company_field_observations
-            SET confidence = %s,
-                metadata = metadata || jsonb_build_object(
-                  'rescored', jsonb_build_object('rule', %s, 'was', confidence, 'at', now())),
-                updated_at = now()
-            WHERE id = %s
-            """,
-            (new, RULE, obs_id),
-        )
-        dropped += 1
-    return dropped
 
 
 def run_rescore() -> None:
