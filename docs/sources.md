@@ -76,7 +76,7 @@ The goal is one record per Berlin company with 20 columns. Counts are from the l
 | 9 | Cluster (n=5) | — | removed with #47; comes back with a classifier | — |
 | 10 | Technologiefeld | `technology_field` | `branch_classifier` | 194 |
 | 11 | Website | `website` | `website_discovery`, `wikidata`, `common_crawl`, `wirtschaftsatlas`, `register_crosslink`, `web_search` | 6,090 |
-| 12 | Geschäftsführung / Kontakt | `management` | register officers (`import_register_managers.py`), `spacy_ner`; email and phone from `impressum_contacts`, stored, not shown | names 111,374 |
+| 12 | Geschäftsführung / Kontakt | `management` | register officers (`import_register_managers.py`), `spacy_ner`; email and phone from `impressum_contacts`, stored, never resolved; emails listed on the company page (V6), phones not shown | names 111,374 |
 | 13 | Tätigkeitsbeschreibung | `business_purpose`, `activity_keywords` | `website_keywords` (published once 500 companies are read); the purpose from `openregister`; OffeneRegister has no purpose | purpose 0 |
 | 14 | Kommentar | `comments` | people in the app | — |
 | 15 | DeepTech Klassifikation | `deeptech_class` | no classifier yet; corrections from the app can fill it | 0 |

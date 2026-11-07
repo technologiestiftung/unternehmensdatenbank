@@ -1,0 +1,10 @@
+table:
+  name: v_company_emails
+  schema: public
+configuration:
+  custom_name: company_emails
+select_permissions:
+  - role: user
+    permission:
+      columns: "*"
+      filter: {}

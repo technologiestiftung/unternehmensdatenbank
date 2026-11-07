@@ -45,6 +45,14 @@ array_relationships:
           schema: public
         column_mapping:
           id: company_id
+  - name: emails
+    using:
+      manual_configuration:
+        remote_table:
+          name: v_company_emails
+          schema: public
+        column_mapping:
+          id: company_id
   - name: fundings
     using:
       manual_configuration:

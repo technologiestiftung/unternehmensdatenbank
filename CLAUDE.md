@@ -82,8 +82,9 @@ field claim, with a confidence) → `pipeline_coordinator` → `company_canonica
 
 [docs/dags.md](docs/dags.md).
 
-- **`email` and `phone` are stored, never resolved.** A resolved value reaches the app and
-  `v_field_provenance`.
+- **`email` and `phone` are stored, never resolved.** A resolved value reaches the history and
+  `v_field_provenance`. Emails reach the company page only through `v_company_emails` (V6, research
+  phase, decided 2026-11-07, all of them, also a person's); phone never. Privacy review before production.
 - **A correction is a source, shown only when people agree.** `feedback_observations` writes
   `user_feedback` (priority 50): one person 0.30, never shown as the field's value (but listed in the
   claims toggle); two 0.60. A field no other source
