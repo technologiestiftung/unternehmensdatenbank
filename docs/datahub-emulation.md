@@ -59,6 +59,9 @@ first only: it re-reads the database, not the files.
 role `user` (every Keycloak realm role becomes a Hasura role; requests without a token are refused):
 
 - `companies`: `v_company_profile`, read-only, with `comments`, `fundings`, `feedback`, `provenance`
+- `search_companies(args: {search})` (and `_aggregate`): the list's fuzzy search, returning
+  `companies` rows under the same permissions (V5)
+- `website_tlds`: `v_website_tlds`, each website top-level domain with its company count, read-only
 - `comments`: `company_comments`; insert `company_id` and `body` only, Hasura sets `author_id`
   from the token. No update, no delete.
 - `fundings`: `v_company_fundings`, read-only

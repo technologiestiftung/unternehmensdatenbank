@@ -126,10 +126,12 @@ docker compose --profile tools run --rm flyway migrate
 database. Tested on a copy without extensions: every table's row count matched, the restore took
 3 minutes. Three things a plain dump gets wrong: the local image has PostGIS and pgvector, which a
 plain `postgres:15` lacks (the schema uses neither), so leave out PostGIS's `spatial_ref_sys`; the
-dump creates `public` itself; and it carries neither database-level nor PUBLIC rights.
+dump creates `public` itself; and it carries neither database-level nor PUBLIC rights. A dump of one
+schema leaves out extensions, but the search index (V5) needs `pg_trgm`, hence `--extension=pg_trgm`
+(it lands in `public`, after the dump has created it).
 
 ```bash
-pg_dump -U app -Fc -n public --exclude-table=public.spatial_ref_sys -f udb.dump unternehmensdatenbank
+pg_dump -U app -Fc -n public --extension=pg_trgm --exclude-table=public.spatial_ref_sys -f udb.dump unternehmensdatenbank
 # on the server, as postgres, into a new database owned by app:
 psql -d unternehmensdatenbank -c "DROP SCHEMA public"
 pg_restore -l udb.dump | grep -v "MATERIALIZED VIEW DATA" > udb.list   # refreshed below, after ANALYZE
@@ -337,7 +339,11 @@ every run and by the grant DAGs and imports after they load.
 
 **A new profile column** means dropping and rebuilding `company_profile_mv` and `v_company_profile`
 after adding it at the end of `v_company_profile_live`: the stored copy froze its columns when it was
-created. The activity-keywords migration (V8 in git history) shows how.
+created. The activity-keywords migration (V8 in git history) shows how. `DROP ... CASCADE` also drops
+everything built on the stored copy; create all of it again in the same migration: `v_company_profile`,
+`v_review_results`, the search function `search_companies`, the view `v_website_tlds` and the search
+index `company_profile_mv_search_trgm` (all three from `V5__company_search.sql`). Hasura tracks the
+function and `v_website_tlds`, so a missing one breaks the app's search or website filter.
 
 ## Website contacts and keywords (V8)
 

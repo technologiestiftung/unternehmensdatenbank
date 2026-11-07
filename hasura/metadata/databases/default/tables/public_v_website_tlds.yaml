@@ -1,0 +1,13 @@
+table:
+  name: v_website_tlds
+  schema: public
+configuration:
+  custom_name: website_tlds
+# Read-only (#164): each top-level domain of a company website with its count, the app's website filter options.
+select_permissions:
+  - role: user
+    permission:
+      columns:
+        - tld
+        - company_count
+      filter: {}

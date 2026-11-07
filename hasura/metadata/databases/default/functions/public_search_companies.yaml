@@ -1,0 +1,5 @@
+# The app's fuzzy search (#164). Returns `companies` rows, so `search_companies` and
+# `search_companies_aggregate` take the same `where` and inherit its select permission.
+function:
+  name: search_companies
+  schema: public

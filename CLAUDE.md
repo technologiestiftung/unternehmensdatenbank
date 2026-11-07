@@ -145,7 +145,7 @@ purpose, so for Berlin only the Technologiefeld can be filled today.
 
 `V1__baseline.sql` is the whole schema as of 2026-11-04, squashed five times (last: V1-V9, from the
 play server's schema), schema only; the reference rows are `V1.1__reference_data.sql`. The next
-migration is V5. Numbers like "(V3)" in comments and docs name the
+migration is V6. Numbers like "(V3)" in comments and docs name the
 pre-squash migration, to find its reasoning in git history. A database migrated before the squash needs its Flyway history reset once
 ([data-model](docs/data-model.md), "Migration strategy"). **Forward-only:** never edit a migration
 that ran anywhere shared. Flyway runs under `--profile tools`, not with `docker compose up`; on the
@@ -155,7 +155,9 @@ hub as the app's initContainer ([release](docs/release.md)).
   changes companies or published values ends with `refresh_company_profile()` (the coordinator does).
   A filter on the live view took up to 45 s.
 - **A new profile column means rebuilding `company_profile_mv`:** it froze `p.*`, so
-  `CREATE OR REPLACE` on `v_company_profile_live` alone never reaches the app.
+  `CREATE OR REPLACE` on `v_company_profile_live` alone never reaches the app. Its `DROP ... CASCADE`
+  also drops `v_company_profile`, `v_review_results`, `search_companies`, `v_website_tlds` and the
+  index `company_profile_mv_search_trgm` (V5): create all five again in the same migration.
 - **Grant links are a table**, refreshed by `refresh_company_funding_links()`. Linking on read made
   the company list take 71 s.
 - **The sources page reads stored counts** (`source_stats_mv`, `source_field_stats_mv`), refreshed by `refresh_company_profile()`. Counts
