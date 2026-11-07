@@ -62,17 +62,20 @@ from source_enrichment_common import (
 
 #: The bar `pipeline_coordinator` applies before a website observation may become a company's
 #: official website. Imported, never re-typed: two copies of a threshold drift apart.
+from enrichment import confidence as conf
 from enrichment.confidence import UNVERIFIED_CAP, WEBSITE_MIN_CONFIDENCE
 
 log = logging.getLogger(__name__)
 
 #: The source this write path files under. `website_discovery` since the identity rule of 2026-10-28
 #: (issue #18); rows written before it stay under `combined_discovery` as history, re-scored to the
-#: new rule by `website_discovery.main.rescore_websites`.
+#: new rule by `rescore_websites`.
 SOURCE_KEY = "website_discovery"
 SOURCE_NAME = "Website discovery (URL patterns, checked against the Impressum)"
 #: Every source this write path has filed websites under, for re-scoring.
 WEBSITE_SOURCE_KEYS = ("combined_discovery", SOURCE_KEY)
+#: The identity rule `rescore_websites` applies, stamped on every observation it lowers.
+RULE = "identity-2026-10-28"
 
 #: Evidence names that mean "this is a page about the company, not the company's page".
 _THIRD_PARTY_EVIDENCE = frozenset({"directory_host", "host_name_mismatch"})
@@ -271,3 +274,75 @@ def write_company_result(
         )
 
     return was_created
+
+
+# --- rescore --------------------------------------------------------------------------------
+
+
+def demotion(
+    metadata: dict[str, Any], confidence: float | None, *, dissolved: bool = False,
+    others_on_page: list[list[str]] | None = None,
+) -> float | None:
+    """The confidence a stored website drops to under the identity rule, or None when it stays.
+
+    Pure, so the guard can test it. Judged on the evidence stored with the observation; a website
+    whose page never identified the company falls to the unverified cap, below the bar. So does a
+    dissolved company's stale register number on another company's page
+    (`conf.is_stale_register_number`, #168).
+    """
+    evidence = set(metadata.get("evidence") or [])
+    stale = conf.is_stale_register_number(evidence, dissolved=dissolved, others_on_page=others_on_page or [])
+    if conf.identifies_company(evidence, stale_register_number=stale):
+        return None
+    if confidence is None or confidence <= conf.UNVERIFIED_CAP:
+        return None
+    return conf.UNVERIFIED_CAP
+
+
+def rescore_websites(cur: Any) -> int:
+    """Apply the identity rule to every stored website observation. Returns how many dropped.
+
+    Discovery's own observations, plus any other source's website proven by a register number
+    (Common Crawl, Wikidata, Wirtschaftsatlas store the same evidence), for the stale-number case.
+    `holders`: every company holding the same website above the cap, with its evidence.
+    """
+    cur.execute(
+        """
+        WITH site AS (  -- grouped once: a subquery per website scanned the table each time
+          SELECT value_text, jsonb_agg(jsonb_build_array(company_id, metadata -> 'evidence')) AS holders
+          FROM public.company_field_observations
+          WHERE field_name = 'website' AND confidence > %s AND metadata ? 'evidence'
+          GROUP BY value_text
+        )
+        SELECT o.id, o.confidence, o.metadata, o.company_id::text,
+               st.value_text = 'dissolved' AS dissolved, site.holders
+        FROM public.company_field_observations o
+        JOIN public.sources s ON s.id = o.source_id
+        LEFT JOIN site ON site.value_text = o.value_text
+        LEFT JOIN public.company_field_observations st
+          ON st.company_id = o.company_id AND st.field_name = 'register_status' AND st.is_canonical
+        WHERE o.field_name = 'website'
+          AND (s.key = ANY(%s) OR o.metadata -> 'evidence' ? %s)
+        """,
+        (conf.UNVERIFIED_CAP, list(WEBSITE_SOURCE_KEYS), conf.REGISTER_MATCH),
+    )
+    dropped = 0
+    for obs_id, confidence, metadata, company_id, dissolved, holders in cur.fetchall():
+        others = [evidence for holder, evidence in holders or [] if holder != company_id]
+        new = demotion(metadata or {}, float(confidence) if confidence is not None else None,
+                       dissolved=bool(dissolved), others_on_page=others)
+        if new is None:
+            continue
+        cur.execute(
+            """
+            UPDATE public.company_field_observations
+            SET confidence = %s,
+                metadata = metadata || jsonb_build_object(
+                  'rescored', jsonb_build_object('rule', %s, 'was', confidence, 'at', now())),
+                updated_at = now()
+            WHERE id = %s
+            """,
+            (new, RULE, obs_id),
+        )
+        dropped += 1
+    return dropped

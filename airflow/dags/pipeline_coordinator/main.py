@@ -22,6 +22,7 @@ from resolver import (
     resolve_website,
     resolve_wz_division_estimated,
 )
+from enrichment.observations import rescore_websites
 from source_enrichment_common import get_connection
 
 log = logging.getLogger(__name__)
@@ -41,6 +42,7 @@ def run_pipeline_coordinator() -> None:
             _log_coverage("BEFORE", report_field_coverage(cur))
 
         with conn, conn.cursor() as cur:
+            log.info("Websites re-scored below the bar: %d", rescore_websites(cur))
             changed = {
                 "website": resolve_website(cur),
                 "revenue": resolve_revenue(cur),

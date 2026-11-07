@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from enrichment import confidence as conf
 from enrichment.officers import officer_keys
-from website_discovery.main import demotion
+from enrichment.observations import demotion
 
 
 def test_a_website_the_page_never_identified_drops_below_the_bar() -> None:

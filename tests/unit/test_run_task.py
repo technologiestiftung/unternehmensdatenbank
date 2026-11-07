@@ -20,7 +20,7 @@ def test_the_pod_command_resolves_back_to_the_same_function() -> None:
 
 @pytest.mark.parametrize("target", [
     "os:system",                          # not one of our DAG packages
-    "website_discovery.main:demotion",    # ours, but not a task
+    "website_discovery.main:is_full_batch",  # ours, but not a task
     "website_discovery.main:run_nothing", # no such task
     "website_discovery.main",             # no function at all
     "website_discovery.nothing:run_x",    # no such module

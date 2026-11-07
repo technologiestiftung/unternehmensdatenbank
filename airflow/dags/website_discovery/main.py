@@ -7,7 +7,8 @@ Each run does two things, then lets `pipeline_coordinator` publish the result:
    longer qualifies drops to `UNVERIFIED_CAP`, below the bar, and the coordinator un-publishes it.
    This is how the rule of 2026-10-28 reaches the websites found before it. It also takes away a dissolved
    company's stale register number on another company's page (#168), for every source's websites.
-   Cheap and idempotent.
+   Cheap and idempotent. `pipeline_coordinator` runs the same rescore before it publishes, so a
+   source that writes such a website back (a recheck, Common Crawl) never gets it shown.
 2. **discover.** One batch of companies this source has not looked at yet: guess domains from the
    name and up to 3 former names (`url_patterns`), download the
    page and its Impressum, and check whose they are, including whether a Geschäftsführer on the
@@ -36,11 +37,16 @@ from datetime import datetime, timezone
 from typing import Any
 from urllib.parse import urlparse
 
-from enrichment import confidence as conf
 from enrichment import name_frequency, pipeline
 from enrichment.officers import load_officers
 from enrichment.register_names import load_former_names
-from enrichment.observations import SOURCE_KEY, SOURCE_NAME, WEBSITE_SOURCE_KEYS, write_company_result
+from enrichment.observations import (
+    RULE,
+    SOURCE_KEY,
+    SOURCE_NAME,
+    rescore_websites,
+    write_company_result,
+)
 from source_enrichment_common import (
     SourceDetails,
     ensure_source,
@@ -70,79 +76,9 @@ BATCH_SIZE = int(os.getenv("WEBSITE_DISCOVERY_BATCH_SIZE", "50"))
 WORKERS = int(os.getenv("WEBSITE_DISCOVERY_WORKERS", "8"))
 #: A company is checked again once its last check is older than this: sites appear, move and close.
 RECHECK_AFTER_DAYS = int(os.getenv("WEBSITE_DISCOVERY_RECHECK_DAYS", "90"))
-RULE = "identity-2026-10-28"
 
 
 # --- rescore --------------------------------------------------------------------------------
-
-
-def demotion(
-    metadata: dict[str, Any], confidence: float | None, *, dissolved: bool = False,
-    others_on_page: list[list[str]] | None = None,
-) -> float | None:
-    """The confidence a stored website drops to under the identity rule, or None when it stays.
-
-    Pure, so the guard can test it. Judged on the evidence stored with the observation; a website
-    whose page never identified the company falls to the unverified cap, below the bar. So does a
-    dissolved company's stale register number on another company's page
-    (`conf.is_stale_register_number`, #168).
-    """
-    evidence = set(metadata.get("evidence") or [])
-    stale = conf.is_stale_register_number(evidence, dissolved=dissolved, others_on_page=others_on_page or [])
-    if conf.identifies_company(evidence, stale_register_number=stale):
-        return None
-    if confidence is None or confidence <= conf.UNVERIFIED_CAP:
-        return None
-    return conf.UNVERIFIED_CAP
-
-
-def rescore_websites(cur: Any) -> int:
-    """Apply the identity rule to every stored website observation. Returns how many dropped.
-
-    Discovery's own observations, plus any other source's website proven by a register number
-    (Common Crawl, Wikidata, Wirtschaftsatlas store the same evidence), for the stale-number case.
-    `holders`: every company holding the same website above the cap, with its evidence.
-    """
-    cur.execute(
-        """
-        WITH site AS (  -- grouped once: a subquery per website scanned the table each time
-          SELECT value_text, jsonb_agg(jsonb_build_array(company_id, metadata -> 'evidence')) AS holders
-          FROM public.company_field_observations
-          WHERE field_name = 'website' AND confidence > %s AND metadata ? 'evidence'
-          GROUP BY value_text
-        )
-        SELECT o.id, o.confidence, o.metadata, o.company_id::text,
-               st.value_text = 'dissolved' AS dissolved, site.holders
-        FROM public.company_field_observations o
-        JOIN public.sources s ON s.id = o.source_id
-        LEFT JOIN site ON site.value_text = o.value_text
-        LEFT JOIN public.company_field_observations st
-          ON st.company_id = o.company_id AND st.field_name = 'register_status' AND st.is_canonical
-        WHERE o.field_name = 'website'
-          AND (s.key = ANY(%s) OR o.metadata -> 'evidence' ? %s)
-        """,
-        (conf.UNVERIFIED_CAP, list(WEBSITE_SOURCE_KEYS), conf.REGISTER_MATCH),
-    )
-    dropped = 0
-    for obs_id, confidence, metadata, company_id, dissolved, holders in cur.fetchall():
-        others = [evidence for holder, evidence in holders or [] if holder != company_id]
-        new = demotion(metadata or {}, float(confidence) if confidence is not None else None,
-                       dissolved=bool(dissolved), others_on_page=others)
-        if new is None:
-            continue
-        cur.execute(
-            """
-            UPDATE public.company_field_observations
-            SET confidence = %s,
-                metadata = metadata || jsonb_build_object(
-                  'rescored', jsonb_build_object('rule', %s, 'was', confidence, 'at', now())),
-                updated_at = now()
-            WHERE id = %s
-            """,
-            (new, RULE, obs_id),
-        )
-        dropped += 1
-    return dropped
 
 
 def run_rescore() -> None:
