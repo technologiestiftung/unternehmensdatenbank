@@ -12,6 +12,7 @@ from openregister.main import (
     next_backlog,
     next_search,
     next_state,
+    page_year,
     search_body,
 )
 
@@ -115,3 +116,14 @@ def test_a_page_with_mostly_new_register_numbers_means_the_year_bound_was_ignore
     assert ignores_year([hrb(198_000), hrb(230_000), hrb(260_000)])
     assert not ignores_year([hrb(198_000), hrb(230_000)])  # half is not more than half
     assert not ignores_year([item(register_type="VR", register_number="35000 B")])  # no HRB: cannot tell
+
+
+def test_one_suspect_backlog_page_stops_every_later_year_but_never_the_new_pass() -> None:
+    backlog = {"year": 2016, "page": 3}
+    honest, suspect = [hrb(150_000), hrb(180_000)], [hrb(230_000), hrb(260_000)]
+    assert page_year(backlog, True, False, honest) == (2016, False)
+    assert page_year(backlog, True, False, suspect) == (None, True)
+    # Once untrusted, an honest-looking page writes no year either: an older window hides an ignored bound.
+    assert page_year(backlog, True, True, honest) == (None, True)
+    # The new-companies pass has no year to write and does not judge its pages.
+    assert page_year(backlog, False, False, suspect) == (None, False)
