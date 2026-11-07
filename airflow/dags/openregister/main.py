@@ -26,10 +26,24 @@ read. Rough size: 100,000+ older companies at 100 per search, so 10,000+ credits
 free plan. The search's `max` bound on `incorporated_at` is from OpenRegister's filter guide
 (docs.openregister.de/filtering, read 2026-11-07), not yet tried against the live API.
 
+**The founding year comes with the backlog (#137).** A search result does not carry the incorporation
+date; only the company's detail page does, at 10 credits per company. But a backlog page holds only
+companies incorporated in its year, so that year is written as `founding_year`, free. The new-companies
+pass has no upper bound, so it writes none. In case the API ignores `max`, a backlog page where more than
+half of the HRB numbers lie above `HRB_SNAPSHOT_LINE` sets `years_untrusted` in `pipeline_state`: from that
+page on, no backlog page writes a year (all other fields still), each logs a warning, and only a person
+deleting the key trusts the years again. A false alarm loses years; years from pages read before the first
+suspect page stay. Measured in
+GLEIF's golden copy of 2026-11-07 (Berlin HRB entries with a creation date): of 6,519 founded in 2018 or
+before, 418 (6.4 %) have a number above HRB 203,000 (moves and conversions, at most 11 % in any one
+year); of those founded in 2019 to 2026, 94 % or more per year. So a 2018 page without its upper bound
+would be about 85 % above the line.
+
 **What a run writes**, per company, like `gleif` (`enrichment.register_match.write_entry`): a source
 record (`external_id` = OpenRegister's company id), linked by register number, then a unique live name in
 the same city, else a new company (only when active); name, legal form (read from the end of the name),
-address, postcode, city, status and business purpose as observations dated by the run.
+address, postcode, city, status and business purpose as observations dated by the run, and on a
+backlog page the founding year.
 
 Needs `OPENREGISTER_API_KEY`, an Airflow variable (Admin → Variables; `pipeline_task`, "API keys"). No personal data is requested: the search does not return
 officers.
@@ -85,6 +99,8 @@ PER_PAGE = int(os.getenv("OPENREGISTER_PER_PAGE", "100"))
 INCORPORATED_FROM = os.getenv("OPENREGISTER_INCORPORATED_FROM", "01-01-2019")
 #: The backlog walks back one founding year at a time down to this one, then stops.
 OLDEST_YEAR = 1900
+#: Berlin HRB numbers above this were registered after OffeneRegister's snapshot (#113): mostly 2019 or later.
+HRB_SNAPSHOT_LINE = 203_000
 SEARCH_COST = 10
 TIMEOUT_S = 60
 _STATE = ("openregister", "search")
@@ -102,9 +118,9 @@ def search_body(incorporated_from: str, page: int, incorporated_to: str | None =
     }
 
 
-def entry_for(item: dict[str, Any], today: str) -> RegisterEntry | None:
+def entry_for(item: dict[str, Any], today: str, founding_year: int | None = None) -> RegisterEntry | None:
     """A search result as the register entry `write_entry` writes, or None when it is not a Berlin entry
-    we can read."""
+    we can read. `founding_year`: the backlog year whose search found it (#137)."""
     number = _REGISTER.search(str(item.get("register_number") or ""))
     kind = str(item.get("register_type") or "").strip()
     if item.get("register_court") != BERLIN_COURT or not number or kind not in {"HRA", "HRB", "VR", "GnR", "PR"}:
@@ -121,6 +137,7 @@ def entry_for(item: dict[str, Any], today: str) -> RegisterEntry | None:
         "postcode": postcode, "city": city,
         "register_status": ACTIVE if active is True else DISSOLVED if active is False else None,
         "business_purpose": (item.get("purpose") or "").strip() or None,
+        "founding_year": str(founding_year) if founding_year else None,
     }
     registers = identifier_values(kind, number[1])
     return RegisterEntry(
@@ -129,6 +146,24 @@ def entry_for(item: dict[str, Any], today: str) -> RegisterEntry | None:
         fields={k: v for k, v in fields.items() if v},
         payload={"company_id": item["company_id"], "register": registers[0], "active": active},
     )
+
+
+def ignores_year(results: list[dict[str, Any]]) -> bool:
+    """A backlog page that looks like the search ignored its upper bound: more than half of its HRB numbers
+    above `HRB_SNAPSHOT_LINE`. A page without HRB entries cannot tell, so it passes."""
+    numbers = [int(m[1]) for item in results if item.get("register_type") == "HRB"
+               and (m := _REGISTER.search(str(item.get("register_number") or "")))]
+    return 2 * sum(n > HRB_SNAPSHOT_LINE for n in numbers) > len(numbers)
+
+
+def page_year(backlog: dict[str, int], new_pass_done: bool, years_untrusted: bool,
+              results: list[dict[str, Any]]) -> tuple[int | None, bool]:
+    """The founding year a page writes, and whether years are untrusted from now on: a backlog page writes
+    its year until one page `ignores_year`, then no backlog page does again (#137)."""
+    if not new_pass_done:
+        return None, years_untrusted
+    years_untrusted = years_untrusted or ignores_year(results)
+    return (None if years_untrusted else backlog["year"]), years_untrusted
 
 
 def next_state(state: dict[str, Any] | None, total_pages: int, today: date) -> dict[str, Any]:
@@ -210,6 +245,7 @@ def run_search() -> int:
             state = dict(row[0]) if row else {"incorporated_from": INCORPORATED_FROM, "page": 1}
             # A state from before #143 has no backlog: it starts with the first year (None: all read).
             backlog = state.pop("backlog", first_backlog())
+            years_untrusted = bool(state.pop("years_untrusted", False))
             source_id = ensure_source(cur, key=SOURCE_KEY, name="OpenRegister (Handelsregister API)",
                                       source_type="register_api", metadata={"dag_id": DAG_ID, "base_url": API}, details=DETAILS)
             sync_run_id = start_sync_run(cur, source_id=source_id)
@@ -234,9 +270,17 @@ def run_search() -> int:
             pagination = data["pagination"]
             total_pages = int(pagination["total_pages"])
             # Each page in its own transaction: a later failure must not undo pages whose credits are spent.
+            year, years_untrusted = page_year(backlog, new_pass_done, years_untrusted, data["results"])
+            if new_pass_done and years_untrusted:
+                log.warning(
+                    "The %s backlog page %s is written without the founding year: a backlog page had mostly HRB "
+                    "numbers above %s, so the search may ignore its upper date bound. Check the filter, then delete "
+                    "years_untrusted from pipeline_state.", backlog["year"], body["pagination"]["page"],
+                    HRB_SNAPSHOT_LINE,
+                )
             with connection, connection.cursor() as cur:
                 for item in data["results"]:
-                    entry = entry_for(item, today.isoformat())
+                    entry = entry_for(item, today.isoformat(), year)
                     method = write_entry(cur, entry, source_id=source_id, sync_run_id=sync_run_id,
                                          created_by=SOURCE_KEY) if entry else "unreadable"
                     methods[method] = methods.get(method, 0) + 1
@@ -252,7 +296,8 @@ def run_search() -> int:
                     INSERT INTO public.pipeline_state (pipeline, key, value) VALUES (%s, %s, %s)
                     ON CONFLICT (pipeline, key) DO UPDATE SET value = EXCLUDED.value, updated_at = now()
                     """,
-                    (*_STATE, Json({**state, "backlog": backlog})),
+                    (*_STATE, Json({**state, "backlog": backlog}
+                                   | ({"years_untrusted": True} if years_untrusted else {}))),
                 )
         written = sum(v for k, v in methods.items() if k not in {"skipped", "unreadable"})
         with connection, connection.cursor() as cur:
