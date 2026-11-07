@@ -7,15 +7,19 @@ Each run reads one batch of companies that have a published website and have not
 source yet, and writes what it finds as `email` and `phone` observations of the source
 `impressum_contacts`.
 
-**An email address counts only when it is the company's, not a person's:**
+**Every address on the Impressum is kept (research phase, decided 2026-11-07), each with a kind and
+the confidence of that kind** (`EMAIL_CONFIDENCE`, in the observation's `method` and `evidence`):
 
-- its domain is the website's domain (or one is a subdomain of the other). An address at another
-  domain belongs to the web agency, a host or a parent company as often as to the company;
-- its local part is not shaped like a person: `max.mustermann@`, `m.mustermann@` (two words with a
-  dot, hyphen or underscore between them) are left out, and so is any address whose local part
-  contains a word of a name the same Impressum lists as a manager. `info@`, `kontakt@`, `office@`
-  pass. This is a shape, not a list of words, and it errs towards leaving an address out:
-  `vertrieb-berlin@` is dropped too.
+- `role`: at the website's domain (or one a subdomain of the other) and not shaped like a person:
+  `info@`, `kontakt@`, `office@`. The company's own address, as far as we can tell;
+- `person`: at the website's domain but shaped like a person: `max.mustermann@`, `m.mustermann@`
+  (two words joined by a dot, hyphen or underscore), or a word of a manager's name the same
+  Impressum lists. A shape, not a list of words: `vertrieb-berlin@` lands here too;
+- `other_domain`: any other domain. The web agency, a host, a data-protection officer or a parent
+  company as often as the company.
+
+The confidences are guesses until people have judged them: a Prüfen round of `email` (`review_round`)
+breaks its precision down by confidence and by evidence, that is by kind.
 
 **Not published.** A phone number, and a role address of a sole trader, are still personal data.
 So `email` and `phone` are stored, never resolved: nothing in `pipeline_coordinator` resolves
@@ -23,8 +27,9 @@ them, and they reach neither the history nor `v_field_provenance`. Emails alone 
 app's company page through the view `v_company_emails` (`V6__company_emails.sql`, research phase,
 needs a privacy review before production); phones are never shown.
 
-Each company is read once, like `manager_ner`: `email` and `phone` have no upsert key, so reading
-again would append a second copy. A read that failed (the site did not answer, or no Impressum was
+Each company is read once per `READ_KEY`: `email` and `phone` have no upsert key, so a read first
+deletes what this source stored for the company before, and writes it again. A company read under an
+older rule (its record lacks `READ_KEY`) is read again. A read that failed (the site did not answer, or no Impressum was
 found) does not count: it is marked `failed` and tried again on a later run, at most
 `MAX_READ_ATTEMPTS` times. A company whose website changes keeps the contacts read from the
 old one until that key exists (a migration plus `insert_text_observation`, same commit).
@@ -57,16 +62,20 @@ SOURCE_KEY = "impressum_contacts"
 #: What the app's source page says about this source (German).
 DETAILS = SourceDetails(
     description=(
-        "E-Mail-Adresse und Telefonnummer der Firma aus dem Impressum ihrer belegten Website. "
-        "Gespeichert, nie angezeigt."
+        "Alle E-Mail-Adressen und die Telefonnummer aus dem Impressum der belegten Website. "
+        "Jede Adresse mit Art und Sicherheit: Firmenadresse, Personenadresse oder andere Domain. "
+        "E-Mails stehen auf der Firmenseite, Telefonnummern nicht."
     ),
     schedule="nach der Website-Suche",
 )
 BATCH_SIZE = int(os.getenv("WEBSITE_CONTACTS_BATCH_SIZE", "50"))
-#: Nothing has measured how often these are right. 0.6 is what `manager_ner` gives an unmeasured
-#: Impressum reading: above the resolver's 0.5 floor, below anything with register evidence.
-CONFIDENCE = 0.6
-RULE = "own-domain-no-person-2026-10-28"
+#: Nothing has measured how often these are right; Prüfen rounds will. `role` keeps the 0.6
+#: `manager_ner` gives an unmeasured Impressum reading; the other kinds are guessed lower.
+EMAIL_CONFIDENCE = {"role": 0.6, "person": 0.4, "other_domain": 0.2}
+PHONE_CONFIDENCE = 0.6
+RULE = "all-emails-2026-11-07"
+#: The payload key of a read under this rule: a record without it is read again.
+READ_KEY = "emails"
 
 #: The separators that join a first and a last name in a mailbox: `max.mustermann`, `m_mustermann`.
 _LOCAL_PART_SPLIT = re.compile(r"[._\-]")
@@ -101,27 +110,26 @@ def looks_personal(local_part: str, names_on_page: list[str]) -> bool:
     return False
 
 
-def company_email(emails: list[str], website: str, names_on_page: list[str]) -> str | None:
-    """The first address on the page that is at the website's domain and not a person's."""
-    domain = site_domain(website)
-    for address in emails:
-        local_part, _, email_domain = address.partition("@")
-        if same_domain(email_domain, domain) and not looks_personal(local_part, names_on_page):
-            return address
-    return None
+def email_kind(address: str, website: str, names_on_page: list[str]) -> str:
+    """`role`, `person` or `other_domain` (see the module docstring)."""
+    local_part, _, email_domain = address.partition("@")
+    if not same_domain(email_domain, site_domain(website)):
+        return "other_domain"
+    return "person" if looks_personal(local_part, names_on_page) else "role"
 
 
-def contacts_from_impressum(text: str, website: str) -> dict[str, str]:
-    """The company email and phone on one Impressum's plain text; a key is absent when not found."""
+def contacts_from_impressum(text: str, website: str) -> list[tuple[str, str, str, float]]:
+    """Every email and the phone on one Impressum's plain text: (field, value, kind, confidence)."""
     from enrichment.imprint_extractor import extract_ceo_names, extract_emails, extract_phone
 
-    found: dict[str, str] = {}
-    email = company_email(extract_emails(text), website, extract_ceo_names(text))
-    if email:
-        found["email"] = email
+    names = extract_ceo_names(text)
+    found = []
+    for address in extract_emails(text):
+        kind = email_kind(address, website, names)
+        found.append(("email", address, kind, EMAIL_CONFIDENCE[kind]))
     phone = extract_phone(text)
     if phone:
-        found["phone"] = phone
+        found.append(("phone", phone, "impressum", PHONE_CONFIDENCE))
     return found
 
 
@@ -142,18 +150,22 @@ def run_read() -> None:
                 cur, key=SOURCE_KEY, name="Impressum contacts", source_type="website",
                 metadata={"dag_id": DAG_ID, "rule": RULE}, details=DETAILS)
             sync_run_id = start_sync_run(cur, source_id=source_id)
-            companies = companies_with_website_to_read(cur, source_id=source_id, limit=BATCH_SIZE)
+            companies = companies_with_website_to_read(cur, source_id=source_id, limit=BATCH_SIZE,
+                                                       read_key=READ_KEY)
 
         written = failed = 0
         for company_id, company_name, website, attempts in companies:
             text, imprint_url = "", None
             try:
                 text, imprint_url = read_impressum(website)
-                found = contacts_from_impressum(text, website) if text else {}
+                found = contacts_from_impressum(text, website) if text else []
             except Exception as exc:  # noqa: BLE001  one unreachable site must not stop the batch
                 log.warning("Impressum not readable for %s: %s", company_id, type(exc).__name__)
-                text, found = "", {}
-            payload = {"rule": RULE, "imprint_url": imprint_url, "found": sorted(found)}
+                text, found = "", []
+            # Counts only: the addresses themselves stay in the observations.
+            payload = {"rule": RULE, "imprint_url": imprint_url,
+                       READ_KEY: sum(1 for f in found if f[0] == "email"),
+                       "phone": any(f[0] == "phone" for f in found)}
             if not text:
                 payload, failed = failed_read_payload(payload, attempts), failed + 1
             with connection, connection.cursor() as cur:
@@ -167,11 +179,19 @@ def run_read() -> None:
                 if imprint_url:
                     corpus.record_document(cur, company_id=company_id, source_id=source_id, kind="webpage",
                                            url=imprint_url, namespace="page")
-                for field_name, value in found.items():
+                if text:
+                    # A new read replaces the last one: these fields have no upsert key.
+                    cur.execute(
+                        "DELETE FROM public.company_field_observations"
+                        " WHERE company_id = %s AND source_id = %s AND field_name IN ('email', 'phone')",
+                        (company_id, source_id),
+                    )
+                for field_name, value, kind, confidence in found:
                     insert_text_observation(
                         cur, company_id=company_id, source_record_id=record_id, source_id=source_id,
                         sync_run_id=sync_run_id, field_name=field_name, value_text=value,
-                        confidence=CONFIDENCE, metadata={"rule": RULE, "imprint_url": imprint_url},
+                        confidence=confidence,
+                        metadata={"rule": RULE, "imprint_url": imprint_url, "method": kind, "evidence": [kind]},
                     )
                     written += 1
 
