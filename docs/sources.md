@@ -74,7 +74,7 @@ The goal is one record per Berlin company with 20 columns. Counts are from the l
 | 7 | Adresse | `address`, `postcode`, `city` | OffeneRegister, `gleif` (the legal address, newer), `impressum` (the address on the company's own Impressum); seat from `handelsregister_lookup` | city 296,897; street and postcode 116,527 |
 | 8 | Rechtsform | `legal_form` | OffeneRegister, `gleif` (both read from the end of the name) | 257,244 |
 | 9 | Cluster (n=5) | — | removed with #47; comes back with a classifier | — |
-| 10 | Technologiefeld | `technology_field` | `branch_classifier` | 194 |
+| 10 | Technologiefeld | `technology_field` | `branch_classifier`, `wirtschaftsatlas` (#148) | 194 |
 | 11 | Website | `website` | `website_discovery`, `wikidata`, `common_crawl`, `wirtschaftsatlas`, `register_crosslink`, `web_search` | 6,090 |
 | 12 | Geschäftsführung / Kontakt | `management` | register officers (`import_register_managers.py`), `spacy_ner`; email and phone from `impressum_contacts`, stored, never resolved; emails listed on the company page (`V6__company_emails.sql`), phones not shown | names 111,374 |
 | 13 | Tätigkeitsbeschreibung | `business_purpose`, `activity_keywords`, `activity_description` | `website_keywords` (keywords published once 500 companies are read); `activity_description` ("Tätigkeit laut Website", #152): the homepage's meta or og:description, without person names or contact data, cut at 300 characters; the purpose from `openregister`; OffeneRegister has no purpose | purpose 0; description 0 until `website_keywords` re-reads (local copy of play, 2026-11-07: 300 of 482 stored homepages would get one, 46 of 50 hand-checked say what the company does) |

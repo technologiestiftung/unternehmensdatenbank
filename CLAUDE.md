@@ -132,7 +132,8 @@ Details: [branch-classification](docs/branch-classification.md),
 purpose, so for Berlin only the Technologiefeld can be filled today.
 
 1. **A WZ code may never fill the Technologiefeld.** `classify()` has no WZ parameter; a guard checks it.
-2. **A Technologiefeld requires a downloaded website**, and the gate is Postgres, not a file.
+2. **A Technologiefeld requires a downloaded website**, and the gate is Postgres, not a file. One
+   exception: Wirtschaftsatlas layers (#148), Berlin Partner's own sorting, below the keywords.
 3. **`NONE` has four reasons kept apart:** `no_website`, `torn`, `no_keyword`, `no_text`.
 4. **Never match a keyword inside a German compound.** `BRANCH_HYPHEN_IS_BOUNDARY` is **off**, measured.
 5. **The fields and keywords are tables** (`technology_fields`, `technology_field_keywords`,

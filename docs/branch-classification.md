@@ -122,12 +122,17 @@ Locally, 2026-11-04: 205 companies with `no_keyword` on a published website, 189
 **Wirtschaftsatlas layers (#148).** Berlin Partner's Wirtschaftsatlas sorts companies into layers
 (Künstliche Intelligenz, FinTech, Photonik, ...). `wirtschaftsatlas_layer_fields` (V2) maps the 20
 layers that name exactly one of the 77 fields; the rest (Startups, Life Sciences, Digital economy, ...)
-span several or none. Like the LLM labels, a layer stays a signal in the source record until a person
-has checked a sample (`scripts/wirtschaftsatlas_layers_sample.py`, 100 companies); only 2 of the
-companies are in `review_sample`, too few to measure there. Not measured yet. Locally, 2026-11-04:
+span several or none. **Shown since 2026-11-07** (developer's decision): a company whose mapped
+layers name exactly one field gets it as a `technology_field` observation of the source
+`wirtschaftsatlas` at 0.56, a policy, not a measurement: above the models (0.52-0.55), below the
+keywords (0.60), which still win. It is the one Technologiefeld that needs no downloaded website:
+Berlin Partner sorted the company, we did not guess it from text. Precision is measured in the app's
+review (Prüfen, #153), not before; the confidence goes down if it is poor. Only 2 of the companies are
+in `review_sample`, too few to measure there. Locally, 2026-11-04:
 1,234 matched companies have a mapped layer, 146 of them in layers naming different fields (left out);
 6 also have a keyword field, and they agree in 0 of 6 (in 3 the layer looked right and the keyword
-wrong, in 2 the fields were neighbours: Robotics and Drones; in 1 the layer was wrong).
+wrong, in 2 the fields were neighbours: Robotics and Drones; in 1 the layer was wrong). The keyword
+still wins there, so 3 of the 6 show the wrong field. Written locally, 2026-11-07: 1,088 companies.
 
 ### `NONE` has four reasons, never added together
 

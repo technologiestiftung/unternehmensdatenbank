@@ -353,9 +353,9 @@ def resolve_technology_field(cur: Any) -> int:
     `directory_url` uses. Adding it here, or to any other `obs_field_names` array, would publish
     every withheld row at once and no threshold change could take it back.
 
-    `branch_classifier` is currently the only source writing this name, so there is no priority
-    contest and no agreement bonus; the resolution is a formality that exists so the column reaches
-    `v_companies_enriched` through the same path as every other field.
+    `branch_classifier` and `wirtschaftsatlas` (#148, its layers, at 0.56) write this name, both at
+    priority 100, so confidence decides: the keywords (0.60) beat a layer, a layer beats the models
+    (0.52-0.55).
     """
     return _apply_canonical(
         cur,

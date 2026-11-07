@@ -23,10 +23,15 @@ it trigger itself without a new decision.
    websites get. The atlas only proposes; the page proves. A run does not start itself again: a
    person runs it again to verify the rest (matching is skipped then, see `REFRESH_HOURS`).
 
-The layers (Künstliche Intelligenz, FinTech, Robotik, ...) stay in the record's payload. They are a
-Technologiefeld signal, but nothing writes them as an observation yet: `wirtschaftsatlas_layer_fields`
-(V2, #148) maps the layers that name one field, and a person checks a sample of them first
-(`scripts/wirtschaftsatlas_layers_sample.py`).
+**The layers become a Technologiefeld (#148).** The layers (Künstliche Intelligenz, FinTech,
+Robotik, ...) stay in the record's payload; `wirtschaftsatlas_layer_fields` (V2) maps the 20 that
+name one field. A company whose mapped layers name exactly one field gets it as a `technology_field`
+observation at `LAYER_FIELD_CONFIDENCE`, so the app shows it; a company in layers of two or more
+fields gets none, like the keywords' `torn`. The developer decided on 2026-11-07 to show them before
+a hand check and to measure them in the app's review (Prüfen) instead. That lifts the website rule
+(a Technologiefeld only from a downloaded website) for this one source: Berlin Partner sorted the
+company into the layer, it is not our guess from text. Measured on the local copy (2026-11-07): 1,234
+companies are in a mapped layer, 1,088 of them in one field's layers only, 146 in several.
 """
 from __future__ import annotations
 
@@ -42,11 +47,14 @@ from psycopg2.extras import Json, execute_values
 from enrichment import confidence as conf
 from enrichment import proposals
 from enrichment.name_match import match_by_name
+from enrichment.branch_observations import DECIDED_BY_KEYWORDS, confidence_for
+from pipeline_coordinator.resolver import _FIELD_MIN_CONF
 from source_enrichment_common import (
     SourceDetails,
     ensure_source,
     finish_sync_run,
     get_connection,
+    insert_text_observation,
     schedule_label,
     start_sync_run,
 )
@@ -80,6 +88,11 @@ REFRESH_HOURS = 20
 MAX_VERIFY = int(os.getenv("WIRTSCHAFTSATLAS_MAX_VERIFY", "500"))
 WORKERS = int(os.getenv("WIRTSCHAFTSATLAS_WORKERS", "8"))
 RECHECK_AFTER_DAYS = 90
+#: A POLICY, not a measurement (#148): Berlin Partner sorted the company into the layer, so above our
+#: models' guesses (0.52-0.55), but below the keywords (0.60): where the company's own words name a
+#: field, they win. Lowered if the review (Prüfen) measures poor precision.
+LAYER_FIELD_CONFIDENCE = 0.56
+assert _FIELD_MIN_CONF < LAYER_FIELD_CONFIDENCE < confidence_for(DECIDED_BY_KEYWORDS)
 #: Parts of a layer's path in the map's content tree that are not companies.
 NOT_COMPANIES = ("Schools", "Childcare", "Science and research", "Research institutions", "Universities",
                  "Colleges", "Politics and Administration", "Associations", "Location Information.Locations")
@@ -164,7 +177,7 @@ def run_match() -> int:
                         (REFRESH_HOURS, source_id))
             if cur.fetchone()[0]:
                 log.info("Downloaded less than %d hours ago; verifying only.", REFRESH_HOURS)
-                return 0
+                return _write_fields(connection, source_id)
         rows = download()
         with connection, connection.cursor() as cur:
             sync_run_id = start_sync_run(cur, source_id=source_id)
@@ -175,9 +188,19 @@ def run_match() -> int:
         log.info("%d layer entries, %d distinct companies; %d matched one of ours and list a website,"
                  " %d matched none or list no website;"
                  " %d websites demoted.", len(rows), seen, matched, seen - matched, demoted)
-        return matched + demoted
+        return matched + demoted + _write_fields(connection, source_id)
     finally:
         connection.close()
+
+
+def _write_fields(connection: Any, source_id: str) -> int:
+    with connection, connection.cursor() as cur:
+        sync_run_id = start_sync_run(cur, source_id=source_id)
+        changed = write_layer_fields(cur, source_id=source_id, sync_run_id=sync_run_id)
+        finish_sync_run(cur, sync_run_id=sync_run_id, records_seen=changed, records_created=changed,
+                        records_updated=0, records_failed=0)
+    log.info("Technologiefeld from the layers: %d observations written or dropped.", changed)
+    return changed
 
 
 def match_entries(cur: Any, rows: list[dict[str, Any]], *, source_id: str) -> tuple[int, int, int]:
@@ -242,6 +265,51 @@ def match_entries(cur: Any, rows: list[dict[str, Any]], *, source_id: str) -> tu
                 " WHERE source_id = %s AND is_active AND NOT (external_id = ANY(%s))",
                 (source_id, [m[0] for m in matches]))
     return seen, len(matches), proposals.demote_unproven(cur, source_id=source_id, company_ids=sorted(left))
+
+
+# --- layers -> Technologiefeld (#148) -------------------------------------------------------
+
+
+def single_field(fields: set[str]) -> str | None:
+    """The company's Technologiefeld when its layers name exactly one, else None (torn or unmapped)."""
+    return next(iter(fields)) if len(fields) == 1 else None
+
+
+def write_layer_fields(cur: Any, *, source_id: str, sync_run_id: str) -> int:
+    """Write each company's layer field (module docstring); one the atlas no longer gives drops to 0.
+
+    Read from the stored records, so it needs no download. Returns how many it wrote or dropped.
+    """
+    cur.execute(
+        """
+        SELECT r.company_id::text, min(r.id::text), array_agg(DISTINCT tf.name_en), array_agg(DISTINCT m.layer)
+        FROM public.company_source_records r
+        CROSS JOIN LATERAL jsonb_array_elements_text(r.source_payload -> 'layers') AS l(layer)
+        JOIN public.wirtschaftsatlas_layer_fields m ON m.layer = l.layer
+        JOIN public.technology_fields tf ON tf.name = m.technology_field
+        WHERE r.source_id = %s AND r.is_active
+        GROUP BY r.company_id
+        """,
+        (source_id,),
+    )
+    written = []
+    for company_id, record_id, fields, layers in cur.fetchall():
+        field = single_field(set(fields))
+        if field is None:
+            continue
+        written.append(insert_text_observation(
+            cur, company_id=company_id, source_record_id=record_id, source_id=source_id,
+            sync_run_id=sync_run_id, field_name="technology_field", value_text=field,
+            metadata={"layers": sorted(layers)}, confidence=LAYER_FIELD_CONFIDENCE,
+        ))
+    cur.execute(
+        """
+        UPDATE public.company_field_observations SET confidence = 0, updated_at = now()
+        WHERE source_id = %s AND field_name = 'technology_field' AND confidence > 0 AND NOT (id = ANY(%s::uuid[]))
+        """,
+        (source_id, written),
+    )
+    return len(written) + cur.rowcount
 
 
 # --- verify ---------------------------------------------------------------------------------
