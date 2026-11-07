@@ -15,7 +15,7 @@ SELECT DISTINCT ON (o.company_id, lower(o.value_text))
   JOIN public.sources s ON s.id = o.source_id
  WHERE o.field_name = 'email'
    AND o.value_text IS NOT NULL
- ORDER BY o.company_id, lower(o.value_text), o.observed_at DESC;
+ ORDER BY o.company_id, lower(o.value_text), o.observed_at DESC, s.name;
 
 COMMENT ON VIEW public.v_company_emails IS 'Every stored email per company, newest read per address. Shown on the app''s company page for research (2026-11-07); email is still never resolved. Remove: drop this view and its Hasura entry.';
 

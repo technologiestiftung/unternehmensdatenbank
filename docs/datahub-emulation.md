@@ -66,7 +66,7 @@ role `user` (every Keycloak realm role becomes a Hasura role; requests without a
   from the token. No update, no delete.
 - `fundings`: `v_company_fundings`, read-only
 - `company_emails` (and `companies.emails`): `v_company_emails`, every stored email per company,
-  read-only (V6, research phase; never resolved, no history)
+  read-only (`V6__company_emails.sql`, research phase; never resolved, no history)
 - `feedback`: `extraction_feedback`, votes and corrections; a user changes only their own
 - `provenance`: `v_field_provenance`, where each shown value came from
 - `source_overview` / `source_fields`: counts per source, for the app's `/sources` page

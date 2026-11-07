@@ -83,7 +83,7 @@ field claim, with a confidence) → `pipeline_coordinator` → `company_canonica
 [docs/dags.md](docs/dags.md).
 
 - **`email` and `phone` are stored, never resolved.** A resolved value reaches the history and
-  `v_field_provenance`. Emails reach the company page only through `v_company_emails` (V6, research
+  `v_field_provenance`. Emails reach the company page only through `v_company_emails` (`V6__company_emails.sql`, research
   phase, decided 2026-11-07, all of them, also a person's); phone never. Privacy review before production.
 - **A correction is a source, shown only when people agree.** `feedback_observations` writes
   `user_feedback` (priority 50): one person 0.30, never shown as the field's value (but listed in the
@@ -146,7 +146,7 @@ purpose, so for Berlin only the Technologiefeld can be filled today.
 
 `V1__baseline.sql` is the whole schema as of 2026-11-04, squashed five times (last: V1-V9, from the
 play server's schema), schema only; the reference rows are `V1.1__reference_data.sql`. The next
-migration is V6. Numbers like "(V3)" in comments and docs name the
+migration is V7. Numbers like "(V3)" in comments and docs name the
 pre-squash migration, to find its reasoning in git history. A database migrated before the squash needs its Flyway history reset once
 ([data-model](docs/data-model.md), "Migration strategy"). **Forward-only:** never edit a migration
 that ran anywhere shared. Flyway runs under `--profile tools`, not with `docker compose up`; on the
