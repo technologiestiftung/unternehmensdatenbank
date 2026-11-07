@@ -28,7 +28,12 @@ entity was created, written as `established_at` and its year as `founding_year` 
 entity's date, not the business's: Mister Spex SE says 2021, the year it became an SE (Wikidata: 2007).
 Measured 2026-11-04 on the first 10,000 Berlin LEIs of GLEIF's API (it pages no further): 9,647 have the
 date, 101 of them equal to the day the LEI was issued; the year follows the order of the HRB numbers, and
-142 (1.5 %) are later than the register number allows, so some dates are wrong. Status: `ACTIVE` is `active`, `INACTIVE` is `dissolved` (the user's decision of
+142 (1.5 %) are later than the register number allows, so some dates are wrong. The **successor** is
+GLEIF's `SuccessorEntity` (#167): the LEI of the entity a merged or restructured one went into, written as
+`successor_lei` and shown through `v_company_successor` when we hold that LEI. It is recorded by the LEI
+issuer from the restructuring, so it is proof, not a guess from a similar name. Measured 2026-11-07 on
+GLEIF's API: of the 524 companies GLEIF makes `dissolved`, 180 name a successor, 95 by LEI (66 of them in
+our database) and 85 by name only, which is not written. None names more than one. Status: `ACTIVE` is `active`, `INACTIVE` is `dissolved` (the user's decision of
 2026-11-04). A value GLEIF no longer gives drops to confidence 0. The legal form is read from the end of
 the name, as for the other register sources (`enrichment.register_names`). A name that differs from
 another source's only in case or punctuation is not written: GLEIF often writes capitals. Once GLEIF's
@@ -78,7 +83,7 @@ DETAILS = SourceDetails(
     description=(
         "Die offenen Daten der Global Legal Entity Identifier Foundation: jede Firma mit einer LEI-"
         "Kennung am Amtsgericht Charlottenburg, mit Name, Rechtsform, Adresse, Status und dem Tag, an dem "
-        "die heutige Rechtsperson entstand (Gründungsdatum). Über die "
+        "die heutige Rechtsperson entstand (Gründungsdatum); nach einer Verschmelzung die Nachfolgerin. Über die "
         "Registernummer zugeordnet; fehlt die Firma bei uns, wird sie angelegt."
     ),
     schedule=schedule_label(SCHEDULE),
@@ -88,9 +93,9 @@ DETAILS = SourceDetails(
 LATEST = "https://goldencopy.gleif.org/api/v2/golden-copies/publishes/latest"
 #: GLEIF's id for the Handelsregister at Amtsgericht Berlin (Charlottenburg).
 BERLIN_REGISTER = "RA000217"
-#: The key changes when a run must read the full file again: "last_run_v2" since the founding date (#137),
-#: which records no change file covers would otherwise never get.
-_STATE = ("gleif", "last_run_v2")
+#: The key changes when a run must read the full file again: "last_run_v3" since the successor (#167),
+#: which records no change file covers would otherwise never get (v2: the founding date, #137).
+_STATE = ("gleif", "last_run_v3")
 #: The change file a run reads, by days since the last good run; older than all of them: the full file.
 DELTAS = ((5, "LastWeek"), (28, "LastMonth"))
 TIMEOUT_S = 600
@@ -104,7 +109,10 @@ COLUMNS = {
     "street": "Entity.LegalAddress.FirstAddressLine", "postcode": "Entity.LegalAddress.PostalCode",
     "city": "Entity.LegalAddress.City", "updated": "Registration.LastUpdateDate",
     "created": "Entity.EntityCreationDate",
+    # Up to five; none of our 524 dissolved companies names a second (2026-11-07).
+    "successor": "Entity.SuccessorEntity.1.SuccessorLEI", "registration": "Registration.RegistrationStatus",
 }
+
 
 
 @dataclass(frozen=True)
@@ -120,13 +128,16 @@ class LeiRecord:
     updated: str
     #: The day the legal entity was created, 'YYYY-MM-DD' (#137).
     created: str | None = None
+    #: The LEI of the entity this one went into, from a merger or restructuring (#167).
+    successor: str | None = None
 
     def fields(self) -> dict[str, str]:
         """The register fields this record states, as our observations hold them."""
         address = ", ".join(p for p in (self.street, " ".join(p for p in (self.postcode, self.city) if p)) if p)
         values = {"name": self.name, "legal_form": legal_form(self.name), "address": address or None,
                   "postcode": self.postcode, "city": self.city, "register_status": self.status,
-                  "established_at": self.created, "founding_year": self.created and self.created[:4]}
+                  "established_at": self.created, "founding_year": self.created and self.created[:4],
+                  "successor_lei": self.successor}
         return {field: value for field, value in values.items() if value}
 
 
@@ -150,6 +161,14 @@ def creation_day(raw: str | None, today: date | None = None) -> str | None:
     return day.isoformat() if date(1800, 1, 1) <= day <= (today or date.today()) else None
 
 
+def successor_of(row: dict[str, str]) -> str | None:
+    """The successor LEI of an inactive entity, else None. A DUPLICATE registration names the same entity
+    under its real LEI, not a successor: 40 of the 269 Berlin rows with a successor (full file, 2026-11-07)."""
+    if row.get(COLUMNS["status"]) != "INACTIVE" or row.get(COLUMNS["registration"]) == "DUPLICATE":
+        return None
+    return (row.get(COLUMNS["successor"]) or "").strip() or None
+
+
 def parse_row(row: dict[str, str]) -> LeiRecord | None:
     """One CSV row, or None when it is not a Berlin register entry we can read.
 
@@ -171,7 +190,7 @@ def parse_row(row: dict[str, str]) -> LeiRecord | None:
         lei=row[COLUMNS["lei"]], name=clean("name") or "", status=STATUS.get(row.get(COLUMNS["status"]) or ""),
         registers=identifier_values(match[1].upper().replace("GNR", "GnR"), match[2]),
         street=clean("street"), postcode=clean("postcode"), city=city, updated=row[COLUMNS["updated"]],
-        created=creation_day(row.get(COLUMNS["created"])),
+        created=creation_day(row.get(COLUMNS["created"])), successor=successor_of(row),
     )
 
 

@@ -412,6 +412,7 @@ def resolve_register_announcement(cur: Any) -> int:
 REGISTER_FIELDS = (
     "name", "legal_form", "address", "postcode", "city",
     "register_status", "established_at", "business_purpose", "wz_code",
+    "successor_lei",  # GLEIF's successor (#167); `v_company_successor` shows it, not v_companies_enriched
 )
 
 

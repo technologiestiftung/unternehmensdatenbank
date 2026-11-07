@@ -32,6 +32,17 @@ def test_the_creation_date_is_the_founding_date_and_its_year() -> None:
     assert creation_day("") is None and creation_day("unknown") is None
 
 
+def test_a_retired_entity_names_its_successor_but_a_duplicate_does_not() -> None:
+    successor = "5299009F9ITWOZQY6L09"
+    retired = parse_row(row(status="INACTIVE", registration="RETIRED", successor=successor))
+    assert retired.fields()["successor_lei"] == successor
+    # A DUPLICATE names the same entity under its real LEI (EntityStatus empty), not a successor.
+    assert "successor_lei" not in parse_row(row(status="", registration="DUPLICATE", successor=successor)).fields()
+    assert "successor_lei" not in parse_row(row(status="INACTIVE", registration="DUPLICATE",
+                                                successor=successor)).fields()
+    assert "successor_lei" not in parse_row(row(registration="ISSUED", successor=successor)).fields()
+
+
 def test_inactive_is_dissolved_and_a_glued_b_is_read() -> None:
     record = parse_row(row(status="INACTIVE", register="HRB 1898B"))
     assert record.status == "dissolved"
