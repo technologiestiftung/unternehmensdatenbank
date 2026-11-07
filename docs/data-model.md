@@ -352,7 +352,10 @@ Two DAGs read more from a website `website_discovery` has proven to be the compa
 - **`website_contacts`** (source `impressum_contacts`) writes `email` and `phone` observations from
   the Impressum. An email counts only at the website's own domain and only when its mailbox is not
   shaped like a person. First 37 websites: 27 emails, all role mailboxes, and 25 phones. **Nothing
-  resolves them**, so they reach neither `v_company_profile` nor `v_field_provenance`.
+  resolves them**, so they reach neither `v_company_profile` nor `v_field_provenance`. Emails reach
+  the app's company page through `v_company_emails` (`V6__company_emails.sql`): every stored address per company, for the
+  research phase (decided 2026-11-07), also one that may be a person's. Phones stay unshown. To close
+  it: drop the view and its Hasura entry. Needs a privacy review before production.
 - **`website_keywords`** (source `website_keywords`) stores keyword-shaped headings of the services
   and products pages and the meta keywords; a second task measures which terms are generic and writes
   one `activity_keywords` observation per company. Nothing is published before 500 companies are

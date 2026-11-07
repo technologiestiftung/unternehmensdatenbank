@@ -58,13 +58,15 @@ first only: it re-reads the database, not the files.
 `hasura/metadata/` is applied on every Hasura start, so the GraphQL API lives in git. Exposed to the
 role `user` (every Keycloak realm role becomes a Hasura role; requests without a token are refused):
 
-- `companies`: `v_company_profile`, read-only, with `comments`, `fundings`, `feedback`, `provenance`
+- `companies`: `v_company_profile`, read-only, with `comments`, `fundings`, `emails`, `feedback`, `provenance`
 - `search_companies(args: {search})` (and `_aggregate`): the list's fuzzy search, returning
   `companies` rows under the same permissions (V5)
 - `website_tlds`: `v_website_tlds`, each website top-level domain with its company count, read-only
 - `comments`: `company_comments`; insert `company_id` and `body` only, Hasura sets `author_id`
   from the token. No update, no delete.
 - `fundings`: `v_company_fundings`, read-only
+- `company_emails` (and `companies.emails`): `v_company_emails`, every stored email per company,
+  read-only (`V6__company_emails.sql`, research phase; never resolved, no history)
 - `feedback`: `extraction_feedback`, votes and corrections; a user changes only their own
 - `provenance`: `v_field_provenance`, where each shown value came from
 - `source_overview` / `source_fields`: counts per source, for the app's `/sources` page
