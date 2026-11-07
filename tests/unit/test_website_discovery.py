@@ -126,3 +126,21 @@ def test_a_former_name_domain_becomes_the_website_when_the_page_proves_the_compa
 def test_a_former_name_domain_without_proof_is_not_the_website(monkeypatch) -> None:
     result, _ = _discover_with_former_name(monkeypatch, "HRB 999")
     assert result.website is None
+
+
+def test_a_dissolved_companys_stale_number_on_another_companys_page_is_not_proof() -> None:
+    """#168, the artprojekt.de shape: two register numbers on one page, one company named on it."""
+    stale = {"evidence": ["register_number_match", "postcode_match", "imprint_found"]}
+    named_other = [["register_number_match", "company_name_on_page", "postcode_match"]]
+
+    assert demotion(stale, 0.99, dissolved=True, others_on_page=named_other) == conf.UNVERIFIED_CAP
+    # An active company (general partner, sister company on a group Impressum) keeps its match.
+    assert demotion(stale, 0.99, dissolved=False, others_on_page=named_other) is None
+    # No other company named on the page: nothing says the number is stale.
+    assert demotion(stale, 0.99, dissolved=True, others_on_page=[["register_number_match"]]) is None
+    assert demotion(stale, 0.99, dissolved=True) is None
+    # Its own name on the page, or one of its officers, still proves it.
+    assert demotion({"evidence": ["register_number_match", "company_name_on_page"]}, 0.99,
+                    dissolved=True, others_on_page=named_other) is None
+    assert demotion({"evidence": ["register_number_match", "officer_name_on_imprint"]}, 0.99,
+                    dissolved=True, others_on_page=named_other) is None

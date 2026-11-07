@@ -239,10 +239,42 @@ _NAME_EVIDENCE = frozenset({NAME_ON_PAGE, JSONLD_NAME_MATCH})
 _PLACE_EVIDENCE = frozenset({POSTCODE_MATCH, JSONLD_POSTCODE_MATCH})
 
 
-def identifies_company(evidence: set[str] | frozenset[str]) -> bool:
-    """True when the evidence ties the page to THIS company (see the rule above)."""
+def identifies_company(evidence: set[str] | frozenset[str], *, stale_register_number: bool = False) -> bool:
+    """True when the evidence ties the page to THIS company (see the rule above).
+
+    `stale_register_number` (see `is_stale_register_number`) takes the register match away; an
+    officer, or name and postcode, can still prove the page.
+    """
     evidence = set(evidence)
+    if stale_register_number:
+        evidence.discard(REGISTER_MATCH)
     return bool(evidence & _PROOF_EVIDENCE) or bool(evidence & _NAME_EVIDENCE and evidence & _PLACE_EVIDENCE)
+
+
+def names_company(evidence: set[str] | frozenset[str] | list[str]) -> bool:
+    """Does the page name the company (in its text or its structured data)?"""
+    return bool(set(evidence) & _NAME_EVIDENCE)
+
+
+def is_stale_register_number(
+    evidence: set[str] | frozenset[str] | list[str], *, dissolved: bool, others_on_page: list[list[str]]
+) -> bool:
+    """Is this register match a dissolved company's old number on another company's live page (#168)?
+
+    artprojekt.de names Artprojekt Real Estate GmbH and prints its number, and further down the
+    number of Artprojekt Entwicklungen GmbH, dissolved, whose name is nowhere on the page. Both got
+    the site at 0.99. True when all three hold: this company is dissolved, its name is not on the
+    page, and another of our companies is proven by the same page with its name on it
+    (`others_on_page`: their evidence). A general partner or sister company on a group Impressum
+    is active, so it keeps its match. Measured on the local copy of play (2026-11-07): of 425
+    companies sharing a website, 31 lacked their name on the page, and only this one was dissolved.
+    """
+    return (
+        dissolved
+        and REGISTER_MATCH in evidence
+        and not names_company(evidence)
+        and any(names_company(other) and identifies_company(set(other)) for other in others_on_page)
+    )
 
 
 def register_digits(text: str | None) -> str:
