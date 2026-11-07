@@ -411,6 +411,13 @@ court keeps each up for 8 weeks, so a weekly run misses none. It reads only the 
   the company is created and each candidate becomes a `match_candidates` row. A deleted company is
   never linked by name, since its name may be reused. Without this rule, 14 of 425 created companies
   duplicated one we had and 66 grant links would have been lost.
+- **The name key** (`normalize_company_name`, SQL) is the name in lower case without punctuation and
+  legal forms, with umlaut spellings folded (`V8__name_key_umlauts.sql`, #154): "Geräte", "Geraete"
+  and "GERATE" give one key, as do "ß" and "ss". Measured on play (2026-11-07): 15 more CORDIS and
+  11 more Förderkatalog names linked, all 15 CORDIS links checked by hand. The cost: 38 companies
+  now share their key with another company in the same city ("Aerea" and "Area"), so no name match
+  picks them alone; 2 grant links went. The plain transliteration (ä to ae only) linked 3 and 10.
+  Two keys must still be exactly equal: there is no similarity matching.
 - **A company we do not have is created** (`match_method = 'created'`): its register number and
   identifier, and name, legal form and city as observations of this source, the legal form read by
   `enrichment.register_names` like the OffeneRegister import.

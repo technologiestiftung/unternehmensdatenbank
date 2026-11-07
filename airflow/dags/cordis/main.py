@@ -10,7 +10,8 @@ PRC) with 1,198 project participations and EUR 748 million of EU contribution. T
 1. Name match only, on the play server (our test server with the current data), 2026-11-04: 299 of
    the 523 match exactly one company of ours by name key and Berlin, 7 several, 217 none: mostly firms
    founded after the OffeneRegister snapshot, and names CORDIS writes without umlauts
-   ("INGENIEURBURO"), which the name key keeps apart from "Ingenieurbüro".
+   ("INGENIEURBURO"), which the name key kept apart from "Ingenieurbüro" until V8 (#154): it now
+   treats them alike, and 15 more CORDIS names link on play (2026-11-07).
 2. The full load with the existing linking, on the local database copy, rolled back: 1,188
    participations of 518 companies, 761 of them linked to 319 companies, EUR 248 million.
 
