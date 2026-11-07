@@ -93,6 +93,8 @@ FIELDS: dict[str, tuple[str, str]] = {
     "deeptech": ("deeptech_class", "text"),
     "is_ai": ("is_ai", "boolean"),
     "activity_keywords": ("activity_keywords", "text"),
+    # "Tätigkeit (laut Website)" (#152): the homepage's own description.
+    "activity_description": ("activity_description", "text"),
     # "WZ (geschätzt)" (#158): two digits, never the official wz_code.
     "wz_division_estimated": ("wz_division_estimated", "wz_division"),
 }

@@ -370,9 +370,11 @@ Two DAGs read more from a website `website_discovery` has proven to be the compa
 - **`website_keywords`** (source `website_keywords`) stores keyword-shaped headings of the services
   and products pages and the meta keywords; a second task measures which terms are generic and writes
   one `activity_keywords` observation per company. Nothing is published before 500 companies are
-  read. A company whose published website changed loses its keywords.
+  read. A company whose published website changed loses its keywords. The same task writes the
+  homepage's own description as `activity_description` (#152, rules in `enrichment.site_description`);
+  a record read before #152 has no description and is read again.
 
-Both read each company once. A failed read is stored with `failed: true` and an `attempts` count and
+Both read each company once (`website_keywords` again only for a missing description). A failed read is stored with `failed: true` and an `attempts` count and
 retried on later runs, 3 times at most; it counts for nothing, including the 500.
 
 ## Technologiefelder and WZ divisions (V3, #84)
