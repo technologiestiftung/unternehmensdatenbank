@@ -12,6 +12,14 @@ object_relationships:
           schema: public
         column_mapping:
           id: company_id
+  - name: successor
+    using:
+      manual_configuration:
+        remote_table:
+          name: v_company_successor
+          schema: public
+        column_mapping:
+          id: company_id
 array_relationships:
   - name: comments
     using:

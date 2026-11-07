@@ -154,7 +154,7 @@ def record_match(cur: Any, *, record_id: str, method: str, candidates: list[tupl
 
 #: The register facts a register source may state. A value a source no longer states drops to 0.
 ENTRY_FIELDS = ("name", "legal_form", "address", "postcode", "city", "register_status", "business_purpose",
-                "established_at", "founding_year")
+                "established_at", "founding_year", "successor_lei")
 
 
 def same_name(a: str, b: str) -> bool:

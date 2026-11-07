@@ -4,6 +4,7 @@
 - "!include public_company_tags.yaml"
 - "!include public_v_company_fundings.yaml"
 - "!include public_v_company_emails.yaml"
+- "!include public_v_company_successor.yaml"
 - "!include public_v_company_history.yaml"
 - "!include public_v_company_claims.yaml"
 - "!include public_extraction_feedback.yaml"

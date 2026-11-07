@@ -189,6 +189,14 @@ So nothing is merged: `merged_into` means one company, and a successor is anothe
 linked either: name, address and officers can suggest a successor but not prove one. The app tells
 them apart by the register number next to the name.
 
+**One exception: GLEIF's successor (#167, `V10__gleif_successor.sql`).** When an entity with an LEI
+merges into another, the LEI issuer records the successor's LEI. That is proof, not a guess, so the
+`gleif` DAG writes it as the register field `successor_lei`, and `v_company_successor` links the two
+when we hold the successor's LEI (Hasura: `companies.successor`). It is a link between two companies,
+never a merge: `merged_into` stays untouched. Measured 2026-11-07: of the 524 companies GLEIF makes
+`dissolved`, 180 name a successor, 95 by LEI (66 of those are in our database) and 85 by name only
+(not written: a name would have to be matched).
+
 ## Age: older values weigh less (V6, #49)
 
 Every observation knows when its **source** read the value: `source_updated_at`, else

@@ -1,0 +1,10 @@
+table:
+  name: v_company_successor
+  schema: public
+configuration:
+  custom_name: company_successor
+select_permissions:
+  - role: user
+    permission:
+      columns: "*"
+      filter: {}
