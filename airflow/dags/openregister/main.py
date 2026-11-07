@@ -3,7 +3,7 @@
 OpenRegister (openregister.de) serves the Handelsregister as an API, updated at least monthly. Its
 company search returns, per company, the register entry, name, legal form, current address, business
 purpose and whether it is active, without officers. OffeneRegister is a 2017–2019 snapshot, so this
-adds the companies founded since and the business purpose OffeneRegister never had.
+adds the companies founded since and, for older ones too, the business purpose OffeneRegister never had.
 
 **Started by hand only, never scheduled** (the developer's decision of 2026-11-04). Whether OpenRegister
 allows storing its results and retrieving them regularly was asked of its operators and is not answered
