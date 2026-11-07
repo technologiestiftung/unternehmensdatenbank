@@ -13,7 +13,7 @@ show `active`, GLEIF says inactive.
 
 **What a run reads.** GLEIF publishes the full file (485 MB zipped, 5 GB of CSV) and change files: every
 record changed in the last day, week or month. The first run reads the full file; later ones the change
-file that covers the time since the last good run (`pipeline_state` gleif / last_run_v2). The DAG runs
+file that covers the time since the last good run (`pipeline_state` gleif / last_run_v3). The DAG runs
 daily: up to 5 days without a good run the weekly change file, up to 28 the monthly one, else the full
 file again (each change file covers 7 or about 30 days; the margin absorbs a late run). Each is streamed out of its zip, keeping only `RA000217` rows.
 
@@ -112,7 +112,6 @@ COLUMNS = {
     # Up to five; none of our 524 dissolved companies names a second (2026-11-07).
     "successor": "Entity.SuccessorEntity.1.SuccessorLEI", "registration": "Registration.RegistrationStatus",
 }
-
 
 
 @dataclass(frozen=True)
