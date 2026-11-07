@@ -32,7 +32,8 @@ companies incorporated in its year, so that year is written as `founding_year`, 
 pass has no upper bound, so it writes none. In case the API ignores `max`, a backlog page where more than
 half of the HRB numbers lie above `HRB_SNAPSHOT_LINE` sets `years_untrusted` in `pipeline_state`: from that
 page on, no backlog page writes a year (all other fields still), each logs a warning, and only a person
-deleting the key trusts the years again. A false alarm loses years; a wrong year is never written. Measured in
+deleting the key trusts the years again. A false alarm loses years; years from pages read before the first
+suspect page stay. Measured in
 GLEIF's golden copy of 2026-11-07 (Berlin HRB entries with a creation date): of 6,519 founded in 2018 or
 before, 418 (6.4 %) have a number above HRB 203,000 (moves and conversions, at most 11 % in any one
 year); of those founded in 2019 to 2026, 94 % or more per year. So a 2018 page without its upper bound
