@@ -9,6 +9,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from datetime import datetime, timezone
 from resolver import (
     report_field_coverage,
+    resolve_activity_description,
     resolve_activity_keywords,
     resolve_ceo_contact,
     resolve_deeptech_and_ai,
@@ -51,6 +52,7 @@ def run_pipeline_coordinator() -> None:
                 "technology_field": resolve_technology_field(cur),
                 "purpose_field": resolve_purpose_field(cur),
                 "activity_keywords": resolve_activity_keywords(cur),
+                "activity_description": resolve_activity_description(cur),
                 "register_announcement": resolve_register_announcement(cur),
                 "register fields": resolve_register_fields(cur),
                 "deeptech/is_ai": resolve_deeptech_and_ai(cur),

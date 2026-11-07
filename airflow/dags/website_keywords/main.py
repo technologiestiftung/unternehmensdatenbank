@@ -1,17 +1,22 @@
 """Website keywords: what a company offers, in the words its own website uses.
 
-Target column 7.1 ("Stichworte zur Tätigkeit und Produkte / Dienstleistungen"). The rule for what
-counts as a keyword lives in `enrichment.activity_keywords`; this file runs it. Each run does two
+Target column 7.1 ("Stichworte zur Tätigkeit und Produkte / Dienstleistungen"), and column 13
+("Tätigkeitsbeschreibung", #152) from the same homepage: its own one- or two-sentence description,
+`activity_description`. The rule for what counts as a keyword lives in `enrichment.activity_keywords`,
+the one for the description in `enrichment.site_description`; this file runs them. Each run does two
 things, then lets `pipeline_coordinator` publish the result:
 
 1. **read.** One batch of companies with a published website that this source has not read yet:
    the homepage, and the services and products pages it links to. Every keyword-shaped term goes
-   into the company's source record (`source_payload.candidates`). Nothing is published here,
+   into the company's source record (`source_payload.candidates`), the homepage's description
+   into `source_payload.description` (a record from before #152 has none and is read again). Nothing is published here,
    because whether a term is generic is not known from one company. A site whose homepage did not
    load is marked `failed` and tried again on a later run, at most `MAX_READ_ATTEMPTS` times.
 2. **publish.** No downloads. Counts every stored company's candidates, drops the terms too common
    to say anything (`activity_keywords.generic_terms`), and writes one `activity_keywords`
    observation per company: the keywords joined by "; ", the list itself in `metadata.keywords`.
+   The same for `activity_description`: one per company, unless the same text is on other
+   companies' homepages too (`site_description.generic`).
    Failed reads count for nothing, and a company whose published website is no longer the one we
    read gets no keywords. Re-run every time, so a term that becomes generic as more companies are read leaves the
    companies read before it too. A company left with no keywords drops to confidence 0 and the
@@ -20,7 +25,8 @@ things, then lets `pipeline_coordinator` publish the result:
 **No state outside Postgres**, as in `website_discovery`: "already read" is the company's source
 record, so every task can run in a fresh pod on the Data Hub.
 
-Nothing here has been hand-checked. 0.6 is the same unmeasured confidence `manager_ner` uses.
+The keywords have not been hand-checked. The descriptions were: 46 of 50 say what the company does
+(`enrichment.site_description`). 0.6 is the same unmeasured confidence `manager_ner` uses, for both.
 """
 from __future__ import annotations
 
@@ -33,6 +39,7 @@ from psycopg2.extras import Json
 
 from enrichment import activity_keywords as ak
 from enrichment import corpus
+from enrichment import site_description
 from source_enrichment_common import (
     SourceDetails,
     companies_with_website_to_read,
@@ -53,11 +60,14 @@ SOURCE_KEY = "website_keywords"
 DETAILS = SourceDetails(
     description=(
         "Stichworte aus Meta-Tags und Überschriften der Leistungs- und Produktseiten der belegten "
-        "Website. Zu häufige Wörter werden über alle Firmen herausgerechnet."
+        "Website. Zu häufige Wörter werden über alle Firmen herausgerechnet. Dazu die "
+        "Beschreibung, die die Startseite von sich selbst gibt (Meta-Beschreibung), ohne "
+        "Personennamen und Kontaktdaten, gekürzt auf 300 Zeichen."
     ),
     schedule="nach der Website-Suche",
 )
 FIELD_NAME = "activity_keywords"
+DESCRIPTION_FIELD = "activity_description"
 BATCH_SIZE = int(os.getenv("WEBSITE_KEYWORDS_BATCH_SIZE", "50"))
 CONFIDENCE = 0.6
 
@@ -88,6 +98,7 @@ def read_site(website: str, company_name: str) -> dict[str, Any]:
         "candidates": ak.candidates(homepage, offer_html, company_name),
         "pages": pages,
         "homepage_loaded": bool(homepage),
+        **site_description.read(homepage, company_name),
     }
 
 
@@ -97,7 +108,8 @@ def run_read() -> None:
         with connection, connection.cursor() as cur:
             source_id = _source_id(cur)
             sync_run_id = start_sync_run(cur, source_id=source_id)
-            companies = companies_with_website_to_read(cur, source_id=source_id, limit=BATCH_SIZE)
+            companies = companies_with_website_to_read(cur, source_id=source_id, limit=BATCH_SIZE,
+                                                       read_key="description")
 
         with_terms = failed = 0
         for company_id, company_name, website, attempts in companies:
@@ -105,7 +117,7 @@ def run_read() -> None:
                 payload = read_site(website, company_name)
             except Exception as exc:  # noqa: BLE001  one unreachable site must not stop the batch
                 log.warning("Website not readable for %s: %s", company_id, type(exc).__name__)
-                payload = {"candidates": [], "pages": [], "error": type(exc).__name__}
+                payload = {"candidates": [], "pages": [], "description": None, "error": type(exc).__name__}
             if not payload.get("homepage_loaded"):
                 payload, failed = failed_read_payload(payload, attempts), failed + 1
             with_terms += bool(payload["candidates"])
@@ -143,14 +155,20 @@ def planned_write(
     confidence 0, below the coordinator's bar.
     """
     found = ak.keywords(terms, generic)
-    value = "; ".join(found)
+    action = planned_change("; ".join(found), existing)
+    return (action, found) if action else None
+
+
+def planned_change(value: str, existing: tuple[str, float] | None) -> str | None:
+    """"insert", "update", "drop" or None for one company's new value ("" for none) against the
+    stored observation's value and confidence. Shared by the keywords and the description."""
     if existing is None:
-        return ("insert", found) if found else None
+        return "insert" if value else None
     old_value, old_confidence = existing
-    if not found:
-        return ("drop", []) if old_confidence > 0 else None
+    if not value:
+        return "drop" if old_confidence > 0 else None
     if value != old_value or old_confidence != CONFIDENCE:
-        return ("update", found)
+        return "update"
     return None
 
 
@@ -165,7 +183,8 @@ def run_publish() -> None:
                 SELECT r.company_id::text, r.id, r.external_url,
                        COALESCE(r.source_payload -> 'candidates', '[]'::jsonb),
                        COALESCE(r.source_payload -> 'pages', '[]'::jsonb),
-                       e.website_url IS NOT DISTINCT FROM r.external_url
+                       e.website_url IS NOT DISTINCT FROM r.external_url,
+                       r.source_payload ->> 'description'
                 FROM public.company_source_records r
                 LEFT JOIN public.v_companies_enriched e ON e.id = r.company_id
                 WHERE r.source_id = %s
@@ -176,15 +195,18 @@ def run_publish() -> None:
             records = cur.fetchall()
             cur.execute(
                 """
-                SELECT company_id::text, id, value_text, COALESCE(confidence, 0)
+                SELECT field_name, company_id::text, id, value_text, COALESCE(confidence, 0)
                 FROM public.company_field_observations
-                WHERE source_id = %s AND field_name = %s
+                WHERE source_id = %s AND field_name IN (%s, %s)
                 """,
-                (source_id, FIELD_NAME),
+                (source_id, FIELD_NAME, DESCRIPTION_FIELD),
             )
-            existing = {row[0]: (row[1], row[2], float(row[3])) for row in cur.fetchall()}
+            existing: dict[str, dict[str, tuple[str, str, float]]] = {FIELD_NAME: {}, DESCRIPTION_FIELD: {}}
+            for field, company_id, obs_id, value, confidence in cur.fetchall():
+                existing[field][company_id] = (obs_id, value, float(confidence))
 
-            generic = ak.generic_terms(terms for _, _, _, terms, _, _ in records)
+            generic = ak.generic_terms(terms for _, _, _, terms, _, _, _ in records)
+            shared_texts = site_description.generic(text for *_, text in records)
             if len(records) < ak.MIN_CORPUS:
                 log.info("Only %d companies read; %d needed to measure genericness. Nothing published.",
                          len(records), ak.MIN_CORPUS)
@@ -193,41 +215,55 @@ def run_publish() -> None:
                 return
 
             counts = {"insert": 0, "update": 0, "drop": 0}
-            for company_id, record_id, website, terms, pages, still_published in records:
-                stored = existing.get(company_id)
+            for company_id, record_id, website, terms, pages, still_published, text in records:
+                stored = existing[FIELD_NAME].get(company_id)
                 plan = planned_write(terms if still_published else [], generic, stored[1:] if stored else None)
-                if plan is None:
-                    continue
-                action, found = plan
-                counts[action] += 1
-                metadata = {"keywords": found, "matched_url": pages[0] if pages else website,
-                            "pages": pages, "generic_measured_over": len(records)}
-                if action == "insert":
-                    insert_text_observation(
-                        cur, company_id=company_id, source_record_id=record_id, source_id=source_id,
-                        sync_run_id=sync_run_id, field_name=FIELD_NAME, value_text="; ".join(found),
-                        confidence=CONFIDENCE, metadata=metadata,
-                    )
-                else:
-                    # Updated in place: `activity_keywords` has no upsert key, and one row per
-                    # company is the point.
-                    cur.execute(
-                        """
-                        UPDATE public.company_field_observations
-                        SET value_text = COALESCE(NULLIF(%s, ''), value_text), confidence = %s,
-                            metadata = %s, updated_at = now()
-                        WHERE id = %s
-                        """,
-                        ("; ".join(found), CONFIDENCE if found else 0, Json(metadata), stored[0]),
-                    )
+                if plan is not None:
+                    action, found = plan
+                    counts[action] += 1
+                    _write(cur, action, stored, company_id=company_id, record_id=record_id, source_id=source_id,
+                           sync_run_id=sync_run_id, field_name=FIELD_NAME, value="; ".join(found),
+                           metadata={"keywords": found, "matched_url": pages[0] if pages else website,
+                                     "pages": pages, "generic_measured_over": len(records)})
+                description = text if still_published and text not in shared_texts else ""
+                stored = existing[DESCRIPTION_FIELD].get(company_id)
+                action = planned_change(description or "", stored[1:] if stored else None)
+                if action is not None:
+                    counts[action] += 1
+                    _write(cur, action, stored, company_id=company_id, record_id=record_id, source_id=source_id,
+                           sync_run_id=sync_run_id, field_name=DESCRIPTION_FIELD, value=description or "",
+                           metadata={"matched_url": website, "generic_measured_over": len(records)})
 
             finish_sync_run(cur, sync_run_id=sync_run_id, records_seen=len(records),
                             records_created=counts["insert"],
                             records_updated=counts["update"] + counts["drop"], records_failed=0)
-        log.info("Keywords over %d companies (%d generic terms): %d new, %d changed, %d dropped.",
-                 len(records), len(generic), counts["insert"], counts["update"], counts["drop"])
+        log.info("Keywords and descriptions over %d companies (%d generic terms, %d shared texts): "
+                 "%d new, %d changed, %d dropped.", len(records), len(generic), len(shared_texts),
+                 counts["insert"], counts["update"], counts["drop"])
     finally:
         connection.close()
+
+
+def _write(cur: Any, action: str, stored: tuple[str, str, float] | None, *, company_id: str, record_id: str,
+           source_id: str, sync_run_id: str, field_name: str, value: str, metadata: dict[str, Any]) -> None:
+    """Insert the company's one observation of this field, or update it in place: neither field has an
+    upsert key, and one row per company is the point. An empty value keeps the old text at confidence 0."""
+    if action == "insert":
+        insert_text_observation(
+            cur, company_id=company_id, source_record_id=record_id, source_id=source_id,
+            sync_run_id=sync_run_id, field_name=field_name, value_text=value,
+            confidence=CONFIDENCE, metadata=metadata,
+        )
+        return
+    cur.execute(
+        """
+        UPDATE public.company_field_observations
+        SET value_text = COALESCE(NULLIF(%s, ''), value_text), confidence = %s,
+            metadata = %s, updated_at = now()
+        WHERE id = %s
+        """,
+        (value, CONFIDENCE if value else 0, Json(metadata), stored[0]),
+    )
 
 
 # --- DAG ------------------------------------------------------------------------------------
@@ -243,7 +279,7 @@ def _make_dag():  # noqa: ANN201
 
     with DAG(
         dag_id=DAG_ID,
-        description="Product and service keywords from the company's own website",
+        description="Product and service keywords and the self-description from the company's own website",
         schedule=None, start_date=datetime(2026, 10, 1, tzinfo=timezone.utc), catchup=False,
         max_active_runs=1, tags=["sources", "websites", "keywords"],
     ) as dag:

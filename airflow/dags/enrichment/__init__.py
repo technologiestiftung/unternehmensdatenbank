@@ -26,6 +26,7 @@ Reading pages
   corpus.py                          the company corpus: every text read, once, in S3 (#61)
   model_store.py                     trained models and their metrics, in the corpus's S3 bucket
   activity_keywords.py               product/service keywords from meta tags and services-page headings
+  site_description.py                the homepage's own description (meta/og), without names or contact data (#152)
 
 Register
   register_names.py                  name key and legal form, shared with the OffeneRegister import

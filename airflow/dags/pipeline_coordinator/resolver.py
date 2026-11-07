@@ -13,6 +13,7 @@ Logical field names → observation field_name aliases:
   technology_field  ← technology_field  (Berlin's 77 fields in English, website-gated)
   purpose_field     ← purpose_field     (the same 77, from the register purpose)
   activity_keywords ← activity_keywords (product/service words from the website)
+  activity_description ← activity_description (the homepage's own description, #152)
   register_announcement ← register_announcement (latest kind of court announcement; a hint, not the status)
   REGISTER_FIELDS   name, legal_form, address, postcode, city, register_status, ... (V3)
   deeptech_class, is_ai (only corrections from the app fill them so far)
@@ -390,6 +391,18 @@ def resolve_activity_keywords(cur: Any) -> int:
         cur,
         logical_field="activity_keywords",
         obs_field_names=["activity_keywords"],
+        value_col="value_text",
+        min_confidence=_FIELD_MIN_CONF,
+    )
+
+
+def resolve_activity_description(cur: Any) -> int:
+    """What the company says it does, from its homepage's description (`website_keywords`, #152). Its
+    own field: never `business_purpose`, the register's Unternehmensgegenstand."""
+    return _apply_canonical(
+        cur,
+        logical_field="activity_description",
+        obs_field_names=["activity_description"],
         value_col="value_text",
         min_confidence=_FIELD_MIN_CONF,
     )
