@@ -19,7 +19,9 @@ source yet, and writes what it finds as `email` and `phone` observations of the 
 
 **Not published.** A phone number, and a role address of a sole trader, are still personal data.
 So `email` and `phone` are stored, never resolved: nothing in `pipeline_coordinator` resolves
-them, and they reach neither the app nor `v_field_provenance`.
+them, and they reach neither the history nor `v_field_provenance`. Emails alone are listed on the
+app's company page through the view `v_company_emails` (`V6__company_emails.sql`, research phase,
+needs a privacy review before production); phones are never shown.
 
 Each company is read once, like `manager_ner`: `email` and `phone` have no upsert key, so reading
 again would append a second copy. A read that failed (the site did not answer, or no Impressum was
