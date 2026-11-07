@@ -57,3 +57,20 @@ def test_an_atlas_website_nothing_on_the_page_confirms_stays_below_the_bar() -> 
     verdict = score(methods=[METHOD_WIRTSCHAFTSATLAS], evidence=set(), name_uniqueness=1.0)
     assert verdict.value <= UNVERIFIED_CAP < WEBSITE_MIN_CONFIDENCE
     assert verdict.methods == [METHOD_WIRTSCHAFTSATLAS]
+
+
+def test_a_layer_gives_a_technologiefeld_only_when_its_layers_name_one_field() -> None:
+    from wirtschaftsatlas.main import single_field
+
+    assert single_field({"Artificial Intelligence"}) == "Artificial Intelligence"
+    assert single_field({"Robotics", "Drones"}) is None  # torn: the layers disagree
+    assert single_field(set()) is None
+
+
+def test_a_layer_ranks_between_the_models_and_the_keywords() -> None:
+    from enrichment.branch_observations import DECIDED_BY_KEYWORDS, DECIDED_BY_MODEL_TIEBREAK, confidence_for
+    from pipeline_coordinator.resolver import _FIELD_MIN_CONF
+    from wirtschaftsatlas.main import LAYER_FIELD_CONFIDENCE
+
+    assert _FIELD_MIN_CONF < confidence_for(DECIDED_BY_MODEL_TIEBREAK) < LAYER_FIELD_CONFIDENCE
+    assert LAYER_FIELD_CONFIDENCE < confidence_for(DECIDED_BY_KEYWORDS)
