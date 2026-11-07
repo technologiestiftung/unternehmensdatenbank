@@ -39,10 +39,11 @@ Words used below:
    another of our companies that *is* named (`confidence.is_stale_register_number`). The
    re-scoring step (`observations.rescore_websites`) applies it to every website proven by a
    register number, whatever the source. `pipeline_coordinator` runs it before it publishes, so a
-   source that writes the site back at 0.99 (a recheck after 90 days) never gets it shown again. Measured on the local copy of play (2026-11-07): 194 websites are shared by
-   425 companies; 31 of those companies are not named on the page, and all 31 were checked by hand.
-   They were mostly general partners of a GmbH & Co. KG or sister companies on a group Impressum,
-   and all of those are active. The rule removes 1 website, Artprojekt Entwicklungen's, in 2.8 s.
+   source that writes the site back at 0.99 (a recheck after 90 days) never gets it shown again.
+   Measured on the local copy of play (2026-11-07): 194 websites are shared by 425 companies; 31
+   of those companies are not named on the page, and all 31 were checked by hand. They were mostly
+   general partners of a GmbH & Co. KG or sister companies on a group Impressum, and all of those
+   are active. The rule removes 1 website, Artprojekt Entwicklungen's, in 2.8 s.
 
 **Genericness is measured, never listed.** `name_frequency.common_words` counts which words are common
 in company names, `common_email_domains` which email domains are shared. Never grow a list of bad
