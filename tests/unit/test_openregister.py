@@ -8,9 +8,11 @@ from openregister.main import (
     backlog_bounds,
     entry_for,
     first_backlog,
+    ignores_year,
     next_backlog,
     next_search,
     next_state,
+    page_year,
     search_body,
 )
 
@@ -98,3 +100,30 @@ def test_new_companies_come_first_then_the_backlog() -> None:
     assert next_search(state, None, new_pass_done=True) is None
     # Until this run has read the new pass to its end, a finished backlog does not stop it.
     assert next_search(state, None, new_pass_done=False) is not None
+
+
+def test_a_backlog_year_becomes_the_founding_year_and_the_new_pass_writes_none() -> None:
+    assert entry_for(item(), "2026-11-07", 2017).fields["founding_year"] == "2017"
+    assert "founding_year" not in entry_for(item(), "2026-11-07").fields
+
+
+def hrb(number: int) -> dict[str, object]:
+    return item(register_type="HRB", register_number=f"{number} B")
+
+
+def test_a_page_with_mostly_new_register_numbers_means_the_year_bound_was_ignored() -> None:
+    assert not ignores_year([hrb(198_000), hrb(197_500), hrb(215_000)])  # a moved company or two is normal
+    assert ignores_year([hrb(198_000), hrb(230_000), hrb(260_000)])
+    assert not ignores_year([hrb(198_000), hrb(230_000)])  # half is not more than half
+    assert not ignores_year([item(register_type="VR", register_number="35000 B")])  # no HRB: cannot tell
+
+
+def test_one_suspect_backlog_page_stops_every_later_year_but_never_the_new_pass() -> None:
+    backlog = {"year": 2016, "page": 3}
+    honest, suspect = [hrb(150_000), hrb(180_000)], [hrb(230_000), hrb(260_000)]
+    assert page_year(backlog, True, False, honest) == (2016, False)
+    assert page_year(backlog, True, False, suspect) == (None, True)
+    # Once untrusted, an honest-looking page writes no year either: an older window hides an ignored bound.
+    assert page_year(backlog, True, True, honest) == (None, True)
+    # The new-companies pass has no year to write and does not judge its pages.
+    assert page_year(backlog, False, False, suspect) == (None, False)
