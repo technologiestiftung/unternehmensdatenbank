@@ -4,15 +4,15 @@ Wikidata is free (CC0) and needs no key. One SPARQL query returns every item who
 (P159) lies in Berlin (Q64, districts included through P131*) and which has an official website
 (P856), with its German label and, where known, its German register number (P12012).
 
-Measured on 2026-10-29: 4,174 items, 380 with a register number.
+Measured on 2026-10-29: 4,174 items, 380 with a register number. The register number is mostly the
+bare digits (`165662`), sometimes an association register entry (`VR 36562 B`) we do not have.
 
 A second query (`FIGURES_QUERY`, #138/#139) reads the same items' number of employees and revenue.
 Measured on 2026-11-08: 353 items have an employee count, 327 a revenue (all but 3 in euros); 820 of
 899 and 1,041 of 1,048 statements carry the date they are for. Of the items the local Berlin database
 matches, 66 have an employee count and 34 a revenue. Read by hand: mostly the group's figure, not the
 registered entity's alone (Zalando SE, HELIOS Kliniken GmbH), and at least one plainly wrong value
-(a small Kreuzberg UG with 98 million euros revenue). So they get an unmeasured, middling confidence. The register number is mostly the
-bare digits (`165662`), sometimes an association register entry (`VR 36562 B`) we do not have.
+(a small Kreuzberg UG with 98 million euros revenue). So they get an unmeasured, middling confidence.
 
 A listed website is a **proposal**. Wikidata itself warns that a URL may be dead or hijacked, so
 every one goes through the same verification as a guessed domain (`pipeline.verify_proposed`).
