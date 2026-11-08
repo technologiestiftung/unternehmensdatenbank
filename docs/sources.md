@@ -65,8 +65,8 @@ The goal is one record per Berlin company with 20 columns. Counts are from the l
 | # | Column | `v_company_profile` | Filled by | Today |
 |---|---|---|---|---|
 | 1 | Name | `name` | OffeneRegister, `handelsregister_lookup`, `gleif` (companies with an LEI; a name differing only in case or punctuation is not written) | 296,897 |
-| 2 | Mitarbeiter | `employee_count` | no source yet | 0 |
-| 3 | Umsatz | `revenue` | no source yet | 0 |
+| 2 | Mitarbeiter | `employee_count` | `wikidata` (P1128, with its date, #138): often the group's figure, unchecked, confidence 0.6 | 0 until `wikidata` runs (local, 2026-11-08: 66 matched companies have one) |
+| 3 | Umsatz | `revenue` | `wikidata` (P2139, euros only, with its date, #139): often the group's figure, unchecked, confidence 0.6 | 0 until `wikidata` runs (local, 2026-11-08: 34 matched companies have one) |
 | 4 | Förderungen | `funding_count`, `funding_total_eur`, `fundings` | `foerderkatalog`, `berlin_zuwendungen`, `cordis` | 5,189 companies with a grant |
 | 5 | WZ-Nummer | `wz_code` | no source yet: OffeneRegister has none | 0 |
 | 5a | WZ (geschätzt) | `wz_division_estimated` | `wz_textcat` (`wz_estimate`): an estimate from the website text, never the official number (#158) | 0: no model trained yet |

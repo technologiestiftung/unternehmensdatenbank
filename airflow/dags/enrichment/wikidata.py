@@ -4,7 +4,14 @@ Wikidata is free (CC0) and needs no key. One SPARQL query returns every item who
 (P159) lies in Berlin (Q64, districts included through P131*) and which has an official website
 (P856), with its German label and, where known, its German register number (P12012).
 
-Measured on 2026-10-29: 4,174 items, 380 with a register number. The register number is mostly the
+Measured on 2026-10-29: 4,174 items, 380 with a register number.
+
+A second query (`FIGURES_QUERY`, #138/#139) reads the same items' number of employees and revenue.
+Measured on 2026-11-08: 353 items have an employee count, 327 a revenue (all but 3 in euros); 820 of
+899 and 1,041 of 1,048 statements carry the date they are for. Of the items the local Berlin database
+matches, 66 have an employee count and 34 a revenue. Read by hand: mostly the group's figure, not the
+registered entity's alone (Zalando SE, HELIOS Kliniken GmbH), and at least one plainly wrong value
+(a small Kreuzberg UG with 98 million euros revenue). So they get an unmeasured, middling confidence. The register number is mostly the
 bare digits (`165662`), sometimes an association register entry (`VR 36562 B`) we do not have.
 
 A listed website is a **proposal**. Wikidata itself warns that a URL may be dead or hijacked, so
@@ -97,3 +104,63 @@ def wikipedia_text(article_url: str) -> str | None:
     response.raise_for_status()
     pages = response.json().get("query", {}).get("pages", [])
     return (pages[0].get("extract") or None) if pages else None
+
+
+# --- employees and revenue (#138, #139) -------------------------------------------------------
+
+#: The same Berlin items, their number of employees (P1128) and total revenue (P2139), with the date
+#: each figure is for (P585); best-ranked statements only (preferred, else normal; never deprecated).
+#: A separate query: in the main one each figure would multiply the rows.
+FIGURES_QUERY = """
+SELECT ?item ?prop ?amount ?unit ?date WHERE {
+  ?item wdt:P159 ?hq . ?hq wdt:P131* wd:Q64 . ?item wdt:P856 ?website .
+  { ?item p:P1128 ?st . ?st a wikibase:BestRank ; psv:P1128 ?v . BIND("P1128" AS ?prop) }
+  UNION
+  { ?item p:P2139 ?st . ?st a wikibase:BestRank ; psv:P2139 ?v . BIND("P2139" AS ?prop) }
+  ?v wikibase:quantityAmount ?amount .
+  OPTIONAL { ?v wikibase:quantityUnit ?unit }
+  OPTIONAL { ?st pq:P585 ?date }
+}
+"""
+#: Wikidata property -> our observation field.
+FIGURE_FIELDS = {"P1128": "employee_count", "P2139": "revenue"}
+#: Revenue is kept in euros only: converting another currency would need a rate for the figure's year.
+EURO = "http://www.wikidata.org/entity/Q4916"
+
+
+@dataclass(frozen=True)
+class Figure:
+    field: str
+    amount: float
+    #: The date the figure is for ("2023-12-31"), None when Wikidata gives none.
+    as_of: str | None
+
+
+def parse_figures(bindings: Iterable[dict[str, Any]]) -> dict[str, dict[str, Figure]]:
+    """SPARQL rows -> per Wikidata id, the newest figure per field. A dated figure beats an undated
+    one, then the larger (deterministic); revenue not in euros and amounts that are not positive are left out."""
+    newest: dict[str, dict[str, Figure]] = {}
+    for row in bindings:
+        field = FIGURE_FIELDS.get(row["prop"]["value"])
+        amount = float(row["amount"]["value"])
+        if field is None or amount <= 0:
+            continue
+        if field == "revenue" and (row.get("unit") or {}).get("value") != EURO:
+            continue
+        date = (row.get("date") or {}).get("value", "")[:10]
+        figure = Figure(field, amount, date if re.fullmatch(r"\d{4}-\d{2}-\d{2}", date) else None)
+        qid = row["item"]["value"].rsplit("/", 1)[-1]
+        old = newest.setdefault(qid, {}).get(field)
+        if old is None or (figure.as_of or "", figure.amount) > (old.as_of or "", old.amount):
+            newest[qid][field] = figure
+    return newest
+
+
+def fetch_figures() -> dict[str, dict[str, Figure]]:
+    """One query to Wikidata's public endpoint. Raises on an HTTP error."""
+    from enrichment.http_client import session
+
+    response = session().get(ENDPOINT, params={"query": FIGURES_QUERY}, timeout=120,
+                             headers={"Accept": "application/sparql-results+json", "User-Agent": USER_AGENT})
+    response.raise_for_status()
+    return parse_figures(response.json()["results"]["bindings"])

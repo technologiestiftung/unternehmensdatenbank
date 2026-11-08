@@ -58,6 +58,8 @@ HALF_LIVES: dict[str, float] = {
     "address": 5, "postcode": 5, "city": 5,
     "register_status": 2,
     "name": 10, "legal_form": 10,
+    # A figure for a year (#138, #139): the age runs from the date it is for, not when it was read.
+    "employee_count": 2, "revenue": 2,
 }
 
 #: The source key of people's corrections (`feedback_observations`). A correction stands until another

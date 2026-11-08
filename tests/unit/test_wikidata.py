@@ -57,3 +57,52 @@ def test_a_url_the_page_no_longer_proves_drops_unless_another_record_proves_it()
     ]
     proven = {("c", "https://b.de"), ("d", "https://a.de")}
     assert unproven(observations, proven, frozenset({"new-candidate"})) == ["old-website", "down"]
+
+
+def figure_row(qid: str, prop: str, amount: str, date: str | None = None, unit: str | None = None) -> dict:
+    out = {"item": {"value": f"http://www.wikidata.org/entity/{qid}"}, "prop": {"value": prop},
+           "amount": {"value": amount}}
+    if date:
+        out["date"] = {"value": f"{date}T00:00:00Z"}
+    if unit:
+        out["unit"] = {"value": unit}
+    return out
+
+
+def test_the_newest_dated_figure_per_field_is_kept() -> None:
+    from enrichment.wikidata import EURO, Figure, parse_figures
+
+    figures = parse_figures([
+        figure_row("Q1", "P1128", "+900"),
+        figure_row("Q1", "P1128", "+1200", "2023-12-31"),
+        figure_row("Q1", "P1128", "+1000", "2021-12-31"),
+        figure_row("Q1", "P2139", "+5000000", "2023-01-01", EURO),
+    ])
+    assert figures == {"Q1": {"employee_count": Figure("employee_count", 1200.0, "2023-12-31"),
+                              "revenue": Figure("revenue", 5000000.0, "2023-01-01")}}
+
+
+def test_revenue_not_in_euros_and_non_positive_amounts_are_left_out() -> None:
+    from enrichment.wikidata import parse_figures
+
+    assert parse_figures([
+        figure_row("Q1", "P2139", "+5000000", "2023-01-01", "http://www.wikidata.org/entity/Q4917"),
+        figure_row("Q2", "P1128", "0", "2023-01-01"),
+    ]) == {}
+
+
+def test_figures_are_inserted_updated_and_dropped() -> None:
+    from wikidata.main import FIGURE_CONFIDENCE, planned_figures
+
+    current = {("c1", "revenue"): ("r1", 5.0, "2023-01-01"), ("c2", "employee_count"): ("r2", 10.0, None)}
+    stored = {
+        ("c2", "employee_count"): ("o2", 10.0, FIGURE_CONFIDENCE, None),  # unchanged
+        ("c3", "revenue"): ("o3", 7.0, FIGURE_CONFIDENCE, "2020-01-01"),  # item no longer matches
+        ("c4", "revenue"): ("o4", 7.0, 0.0, "2020-01-01"),  # already dropped
+    }
+    assert planned_figures(current, stored) == [
+        ("insert", ("c1", "revenue"), ("r1", 5.0, "2023-01-01")),
+        ("drop", ("c3", "revenue"), None),
+    ]
+    stored[("c1", "revenue")] = ("o1", 4.0, FIGURE_CONFIDENCE, "2022-01-01")
+    assert ("update", ("c1", "revenue"), ("r1", 5.0, "2023-01-01")) in planned_figures(current, stored)
