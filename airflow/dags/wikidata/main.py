@@ -233,10 +233,13 @@ def write_figures(cur: Any, figures: dict[str, dict[str, wikidata.Figure]] | Non
         return 0
     cur.execute("SELECT id::text, company_id::text, external_id FROM public.company_source_records"
                 " WHERE source_id = %s AND is_active ORDER BY external_id", (source_id,))
-    current = {}
+    best: dict[tuple[str, str], tuple[str, wikidata.Figure]] = {}
     for record_id, company_id, qid in cur.fetchall():
         for field, figure in figures.get(qid, {}).items():
-            current[(company_id, field)] = (record_id, figure.amount, figure.as_of)
+            old = best.get((company_id, field))
+            if wikidata.is_newer(figure, old and old[1]):
+                best[(company_id, field)] = (record_id, figure)
+    current = {key: (record_id, figure.amount, figure.as_of) for key, (record_id, figure) in best.items()}
     cur.execute(
         """
         SELECT company_id::text, field_name, id::text, value_number::float, COALESCE(confidence, 0),

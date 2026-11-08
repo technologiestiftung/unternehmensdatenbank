@@ -106,3 +106,30 @@ def test_figures_are_inserted_updated_and_dropped() -> None:
     ]
     stored[("c1", "revenue")] = ("o1", 4.0, FIGURE_CONFIDENCE, "2022-01-01")
     assert ("update", ("c1", "revenue"), ("r1", 5.0, "2023-01-01")) in planned_figures(current, stored)
+
+
+class FakeCursor:
+    """Answers write_figures' two SELECTs in order and records every statement."""
+
+    def __init__(self, *results: list[tuple]) -> None:
+        self.results, self.statements = list(results), []
+
+    def execute(self, sql: str, params: tuple) -> None:
+        self.statements.append((sql, params))
+
+    def fetchall(self) -> list[tuple]:
+        return self.results.pop(0)
+
+
+def test_two_items_on_one_company_write_the_newest_figure() -> None:
+    from enrichment.wikidata import Figure
+    from wikidata.main import write_figures
+
+    # Records come sorted by external_id as text, so Q10 (2024) before Q9 (2016): the 2024 figure must win.
+    records = [("r10", "c1", "Q10"), ("r9", "c1", "Q9")]
+    figures = {"Q10": {"revenue": Figure("revenue", 9.0, "2024-12-31")},
+               "Q9": {"revenue": Figure("revenue", 5.0, "2016-12-31")}}
+    cur = FakeCursor(records, [])
+    assert write_figures(cur, figures, source_id="s", sync_run_id="run") == 1
+    insert = [params for sql, params in cur.statements if "INSERT" in sql]
+    assert [(p[0], p[1], p[4], p[5], p[6]) for p in insert] == [("c1", "r10", "revenue", 9.0, "2024-12-31")]

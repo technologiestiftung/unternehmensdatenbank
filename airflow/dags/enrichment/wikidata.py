@@ -136,6 +136,12 @@ class Figure:
     as_of: str | None
 
 
+def is_newer(figure: Figure, old: Figure | None) -> bool:
+    """Whether `figure` beats `old` of the same field: a dated figure beats an undated one, a newer date
+    an older one, then the larger amount (deterministic)."""
+    return old is None or (figure.as_of or "", figure.amount) > (old.as_of or "", old.amount)
+
+
 def parse_figures(bindings: Iterable[dict[str, Any]]) -> dict[str, dict[str, Figure]]:
     """SPARQL rows -> per Wikidata id, the newest figure per field. A dated figure beats an undated
     one, then the larger (deterministic); revenue not in euros and amounts that are not positive are left out."""
@@ -150,8 +156,7 @@ def parse_figures(bindings: Iterable[dict[str, Any]]) -> dict[str, dict[str, Fig
         date = (row.get("date") or {}).get("value", "")[:10]
         figure = Figure(field, amount, date if re.fullmatch(r"\d{4}-\d{2}-\d{2}", date) else None)
         qid = row["item"]["value"].rsplit("/", 1)[-1]
-        old = newest.setdefault(qid, {}).get(field)
-        if old is None or (figure.as_of or "", figure.amount) > (old.as_of or "", old.amount):
+        if is_newer(figure, newest.setdefault(qid, {}).get(field)):
             newest[qid][field] = figure
     return newest
 
