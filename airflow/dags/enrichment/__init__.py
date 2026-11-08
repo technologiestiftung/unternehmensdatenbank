@@ -1,7 +1,7 @@
 """The building blocks that fill a company's fields from the open web. No API, no key, no bill.
 
 This package is a library, not a DAG. `website_discovery`, `wikidata`, `common_crawl`, `register_crosslink`,
-`wirtschaftsatlas`, `website_contacts`, `impressum_address`, `website_keywords`, `technology_field`, `register_announcements`, `gleif`,
+`wirtschaftsatlas`, `website_contacts`, `impressum_address`, `website_keywords`, `technology_field`, `purpose_field`, `register_announcements`, `gleif`,
 `berlin_zuwendungen`, `ba_jobsuche` and `manager_ner` run it.
 
 Website discovery

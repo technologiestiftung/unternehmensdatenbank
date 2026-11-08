@@ -129,7 +129,7 @@ Read [website-verification](docs/website-verification.md) before touching `confi
 
 Details: [branch-classification](docs/branch-classification.md),
 [purpose-classification](docs/purpose-classification.md). OffeneRegister has no WZ code and no
-purpose, so for Berlin only the Technologiefeld can be filled today.
+purpose; the purpose comes from OpenRegister, and the `purpose_field` DAG (#178) classifies it.
 
 1. **A WZ code may never fill the Technologiefeld.** `classify()` has no WZ parameter; a guard checks it.
 2. **A Technologiefeld requires a downloaded website**, and the gate is Postgres, not a file. One

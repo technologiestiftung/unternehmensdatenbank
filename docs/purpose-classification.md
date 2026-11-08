@@ -9,8 +9,11 @@ fields, or a recorded non-answer. Read [branch-classification](branch-classifica
 file assumes you know what a Technologiefeld is.
 
 > The numbers below were measured on an earlier example data set (14,443 companies, 2026-08/09),
-> since replaced by the Berlin data. OffeneRegister has no business purpose, so for Berlin this column cannot be filled
-> today.
+> since replaced by the Berlin data. OffeneRegister has no business purpose; OpenRegister does (#88,
+> #143), and the `purpose_field` DAG (#178) classifies it. First look, a dry run on the local copy of
+> play (2026-11-08, only 250 purposes, so a small sample): 238 readable, 25 assigned (10.5%), 6
+> `torn`, 207 `no_keyword`, 12 `no_purpose`; 22 of the 25 rest on one keyword. The DAG writes nothing
+> until 500 readable purposes exist.
 
 ## Why a third column
 
