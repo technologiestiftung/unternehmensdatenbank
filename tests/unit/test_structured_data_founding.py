@@ -7,6 +7,7 @@ import pytest
 
 from enrichment.structured_data import organizations
 from feedback_observations.main import clean
+from pipeline_coordinator.resolver import _FIELD_MIN_CONF
 from source_enrichment_common import normalize_company_name_for_search
 import structured_data.main as structured_data
 from structured_data.main import decide, founding, names_company, read_company, read_company_text, text_years
@@ -94,6 +95,7 @@ def test_a_year_in_the_text_counts_only_next_to_the_company_name() -> None:
     assert text_years("Beispiel Technologies – Gründungsjahr: 2004", KEY, TODAY) == {"2004"}
     assert text_years("Beispiel Technologies was founded in 2011 in Berlin.", KEY, TODAY) == {"2011"}
     assert text_years("Gegründet im Jahr 1975 von Beispiel Technologies", KEY, TODAY) == {"1975"}
+    assert text_years("Die Beispiel Technologies GmbH – 2024 ausgezeichnet, 1998 gegründet", KEY, TODAY) == {"1998"}
     # A client's history on the same page, the company's name nowhere near.
     assert text_years("Unser Kunde, die Kunde AG, wurde 1950 gegründet.", KEY, TODAY) == set()
 
@@ -119,4 +121,4 @@ def test_pages_whose_text_disagrees_give_nothing(monkeypatch: pytest.MonkeyPatch
 
 
 def test_the_text_year_ranks_below_structured_data_and_above_the_bar() -> None:
-    assert 0.5 < structured_data.TEXT_CONFIDENCE < structured_data.CONFIDENCE
+    assert _FIELD_MIN_CONF < structured_data.TEXT_CONFIDENCE < structured_data.CONFIDENCE

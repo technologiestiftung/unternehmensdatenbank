@@ -81,7 +81,7 @@ TEXT_SOURCE_KEY = "website_founding_text"
 TEXT_DETAILS = SourceDetails(
     description=(
         "Das Gründungsjahr, das der Text der belegten Website einer Firma nennt (\"1990 gegründet\", "
-        "\"Gründungsjahr 1990\"), nur mit dem Namen der Firma im selben Satz. Datiert oft das Geschäft, "
+        "\"Gründungsjahr 1990\"), nur mit dem Namen der Firma in der Nähe (150 Zeichen). Datiert oft das Geschäft, "
         "nicht die heutige Gesellschaft. Keine Downloads, nur gespeicherte Seiten."
     ),
     schedule=schedule_label(SCHEDULE),
@@ -93,7 +93,7 @@ NAME_WINDOW = 150
 _TEXT_YEAR = r"(1[89]\d\d|20\d\d)"
 _TEXT_PATTERNS = (
     re.compile(r"\bgegr(?:ü|ue)ndet\b[^.\n]{0,25}?\b" + _TEXT_YEAR + r"\b", re.I),
-    re.compile(r"\b" + _TEXT_YEAR + r"\b[^.\n]{0,25}?\bgegr(?:ü|ue)ndet\b", re.I),
+    re.compile(r"\b" + _TEXT_YEAR + r"\b[^.\n\d]{0,25}?\bgegr(?:ü|ue)ndet\b", re.I),
     re.compile(r"\bGr(?:ü|ue)ndung(?:sjahr)?\b[^.\n]{0,15}?\b" + _TEXT_YEAR + r"\b", re.I),
     re.compile(r"\b(?:founded|established)\b[^.\n]{0,20}?\b" + _TEXT_YEAR + r"\b", re.I),
 )
@@ -251,7 +251,7 @@ def run_read() -> int:
             companies = _pages(cur)
             sync_run_id = start_sync_run(cur, source_id=source_id)
             text_sync_run_id = start_sync_run(cur, source_id=text_source_id)
-        changed = written = text_written = 0
+        changed = text_changed = written = text_written = 0
         for company_id, company in companies.items():
             # Each page downloaded once for both readings; only its text is kept, never the HTML.
             texts: dict[str, str] = {}
@@ -270,7 +270,7 @@ def run_read() -> int:
             with connection, connection.cursor() as cur:
                 changed += write(cur, company_id=company_id, company=company, values=values, payload=payload,
                                  source_id=source_id, sync_run_id=sync_run_id)
-                changed += write(cur, company_id=company_id, company=company, values=text_values,
+                text_changed += write(cur, company_id=company_id, company=company, values=text_values,
                                  payload=text_payload, source_id=text_source_id, sync_run_id=text_sync_run_id,
                                  confidence=TEXT_CONFIDENCE, provider=TEXT_SOURCE_KEY)
                 written += bool(values)
@@ -279,10 +279,11 @@ def run_read() -> int:
             finish_sync_run(cur, sync_run_id=sync_run_id, records_seen=len(companies), records_created=written,
                             records_updated=changed, records_failed=0)
             finish_sync_run(cur, sync_run_id=text_sync_run_id, records_seen=len(companies),
-                            records_created=text_written, records_updated=0, records_failed=0)
+                            records_created=text_written, records_updated=text_changed, records_failed=0)
         log.info("%d companies with stored pages of their website; %d state a founding date or year in "
-                 "structured data, %d in the text; %d changed.", len(companies), written, text_written, changed)
-        return changed
+                 "structured data, %d in the text; %d changed.", len(companies), written, text_written,
+                 changed + text_changed)
+        return changed + text_changed
     finally:
         connection.close()
 
