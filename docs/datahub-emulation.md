@@ -63,11 +63,11 @@ role `user` (every Keycloak realm role becomes a Hasura role; requests without a
   `companies` rows under the same permissions (V5)
 - `website_tlds`: `v_website_tlds`, each website top-level domain with its company count, read-only
 - `comments`: `company_comments`; insert `company_id` and `body` only, Hasura sets `author_id`
-  from the token. No update, no delete.
+  from the token. No update, no delete. Aggregates allowed: the list sorts by the newest comment.
 - `fundings`: `v_company_fundings`, read-only
 - `company_emails` (and `companies.emails`): `v_company_emails`, every stored email per company,
   with its `kind` and `confidence` (`V7__email_kinds.sql`), read-only (`V6__company_emails.sql`,
-  research phase; never resolved, no history)
+  research phase; never resolved, no history). Aggregates allowed, so the list sorts by email.
 - `feedback`: `extraction_feedback`, votes and corrections; a user changes only their own
 - `provenance`: `v_field_provenance`, where each shown value came from
 - `source_overview` / `source_fields`: counts per source, for the app's `/sources` page
