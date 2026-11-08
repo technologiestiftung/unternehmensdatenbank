@@ -1,8 +1,8 @@
 """Websites Wikidata lists for Berlin companies, verified like a guessed domain (issue #26).
 
-Three tasks:
+Three tasks, and the figures inside match:
 
-1. **match**, at most once a day. One SPARQL query (`enrichment.wikidata`) and every item is matched
+1. **match**, at most once a day. Two SPARQL queries (`enrichment.wikidata`) and every item is matched
    to a company in SQL, with the one name key (`normalize_company_name`):
    - register digits AND the same name key -> `match_method = 'identifier'`, confidence 1.0. Wikidata
      holds the bare register number without the court, so the number alone proves nothing;
@@ -15,7 +15,14 @@ Three tasks:
    `pipeline.verify_proposed`, the same page reading and `confidence.score` as a guessed domain.
    Nothing on the page ties it to the company -> below the bar, never shown. On 2026-10-30, 229 of
    the 531 were proven, 139 of them new to website_discovery; no result was hand-checked.
-3. **store_texts**, between the two (`run_texts`): each matched item's German Wikipedia article and
+3. **figures**, inside match: each matched item's number of employees and revenue (in euros), the
+   newest of each, as `employee_count` / `revenue` observations (#138, #139). The figure's date is the
+   observation's `source_updated_at`, so the app shows which year it is for and an older figure ranks
+   below a newer one from another source (`resolver.HALF_LIVES`). Often the group's figure, not the
+   registered entity's alone, and not checked: confidence `FIGURE_CONFIDENCE`. One row per company and
+   field, updated in place; a company whose item no longer matches, or no longer has the figure, keeps
+   the row at confidence 0. A failed figures query is logged and skipped; the websites still match.
+4. **store_texts**, between the two (`run_texts`): each matched item's German Wikipedia article and
    Wikidata description go into the company corpus (`enrichment.corpus`, #61), for training.
 
 The page, not the match, proves a website. An item that no longer matches keeps its record,
@@ -43,6 +50,7 @@ from source_enrichment_common import (
     get_connection,
     schedule_label,
     start_sync_run,
+    with_code_version,
 )
 
 log = logging.getLogger(__name__)
@@ -54,7 +62,9 @@ SCHEDULE = "@daily"
 DETAILS = SourceDetails(
     description=(
         "Offizielle Websites, die Wikidata für Berliner Organisationen nennt, über Registernummer "
-        "oder eindeutigen Namen zugeordnet und wie eine geratene Domain geprüft."
+        "oder eindeutigen Namen zugeordnet und wie eine geratene Domain geprüft. Dazu Mitarbeiterzahl "
+        "und Umsatz (in Euro) mit ihrem Stichtag, wo Wikidata sie nennt: oft die Zahlen des Konzerns, "
+        "nicht nur der eingetragenen Firma, und nicht geprüft."
     ),
     schedule=schedule_label(SCHEDULE),
     base_url="https://www.wikidata.org",
@@ -62,6 +72,8 @@ DETAILS = SourceDetails(
     terms_url="https://www.wikidata.org/wiki/Wikidata:Licensing",
 )
 BATCH_SIZE = int(os.getenv("WIKIDATA_BATCH_SIZE", "100"))
+#: Unmeasured. Above the bar (0.5), so the only source shows; below a register or an annual account.
+FIGURE_CONFIDENCE = 0.6
 WORKERS = int(os.getenv("WIKIDATA_WORKERS", "8"))
 RECHECK_AFTER_DAYS = int(os.getenv("WIKIDATA_RECHECK_DAYS", "90"))
 
@@ -88,15 +100,22 @@ def run_match() -> int:
                 log.info("Matched less than 20 hours ago; not querying Wikidata again.")
                 return 0
         items = wikidata.fetch()
+        try:
+            figures = wikidata.fetch_figures()
+        except Exception as exc:  # noqa: BLE001  the figures are extra; the websites must still match
+            log.warning("Wikidata figures not read (%s); the stored figures stay as they are.", type(exc).__name__)
+            figures = None
         with connection, connection.cursor() as cur:
             sync_run_id = start_sync_run(cur, source_id=source_id)
             matched, demoted = match_items(cur, items, source_id=source_id)
+            figures_changed = write_figures(cur, figures, source_id=source_id, sync_run_id=sync_run_id)
             cur.execute("UPDATE public.sources SET last_synced_at = now() WHERE id = %s", (source_id,))
             finish_sync_run(cur, sync_run_id=sync_run_id, records_seen=len(items), records_created=matched,
                             records_updated=0, records_failed=0)
         log.info("%d Wikidata items with a Berlin headquarters and a website; %d matched a company;"
-                 " %d websites demoted.", len(items), matched, demoted)
-        return demoted
+                 " %d websites demoted; %d employee or revenue figures changed.",
+                 len(items), matched, demoted, figures_changed)
+        return demoted + figures_changed
     finally:
         connection.close()
 
@@ -181,6 +200,87 @@ def match_items(cur: Any, items: list[wikidata.Item], *, source_id: str) -> tupl
                 " WHERE source_id = %s AND is_active AND NOT (external_id = ANY(%s))",
                 (source_id, [m[0] for m in matches]))
     return len(matches), proposals.demote_unproven(cur, source_id=source_id, company_ids=sorted(left))
+
+
+def planned_figures(
+    current: dict[tuple[str, str], tuple[str, float, str | None]],
+    stored: dict[tuple[str, str], tuple[str, float, float, str | None]],
+) -> list[tuple[str, tuple[str, str], tuple[str, float, str | None] | None]]:
+    """What writing the figures does, per (company, field): ("insert" | "update" | "drop", key, figure).
+
+    Pure, so it can be tested without a database. `current` maps (company, field) to (record id,
+    amount, date) for every active match with that figure; `stored` to this source's observation
+    (id, amount, confidence, date). "drop" sets a figure nothing supports any more to confidence 0.
+    """
+    plan = []
+    for key, figure in sorted(current.items()):
+        old = stored.get(key)
+        if old is None:
+            plan.append(("insert", key, figure))
+        elif (old[1], old[2], old[3]) != (figure[1], FIGURE_CONFIDENCE, figure[2]):
+            plan.append(("update", key, figure))
+    for key, old in sorted(stored.items()):
+        if key not in current and old[2] > 0:
+            plan.append(("drop", key, None))
+    return plan
+
+
+def write_figures(cur: Any, figures: dict[str, dict[str, wikidata.Figure]] | None, *, source_id: str,
+                  sync_run_id: str) -> int:
+    """Each active match's employees and revenue as observations (see the module docstring). Returns how
+    many rows changed. `figures` None (the query failed) changes nothing."""
+    if figures is None:
+        return 0
+    cur.execute("SELECT id::text, company_id::text, external_id FROM public.company_source_records"
+                " WHERE source_id = %s AND is_active ORDER BY external_id", (source_id,))
+    best: dict[tuple[str, str], tuple[str, wikidata.Figure]] = {}
+    for record_id, company_id, qid in cur.fetchall():
+        for field, figure in figures.get(qid, {}).items():
+            old = best.get((company_id, field))
+            if wikidata.is_newer(figure, old and old[1]):
+                best[(company_id, field)] = (record_id, figure)
+    current = {key: (record_id, figure.amount, figure.as_of) for key, (record_id, figure) in best.items()}
+    cur.execute(
+        """
+        SELECT company_id::text, field_name, id::text, value_number::float, COALESCE(confidence, 0),
+               to_char(source_updated_at, 'YYYY-MM-DD')
+        FROM public.company_field_observations
+        WHERE source_id = %s AND field_name = ANY(%s)
+        """,
+        (source_id, list(wikidata.FIGURE_FIELDS.values())),
+    )
+    stored = {(c, f): (obs_id, amount, float(confidence), as_of) for c, f, obs_id, amount, confidence, as_of
+              in cur.fetchall()}
+    plan = planned_figures(current, stored)
+    for action, (company_id, field), figure in plan:
+        if action == "drop":
+            cur.execute("UPDATE public.company_field_observations SET confidence = 0, updated_at = now()"
+                        " WHERE id = %s", (stored[(company_id, field)][0],))
+            continue
+        record_id, amount, as_of = figure
+        metadata = Json(with_code_version({"as_of": as_of, "unit": "EUR" if field == "revenue" else None}))
+        if action == "insert":
+            cur.execute(
+                """
+                INSERT INTO public.company_field_observations
+                  (company_id, company_source_record_id, source_id, source_sync_run_id, field_name,
+                   value_number, observed_at, source_updated_at, confidence, metadata, created_at, updated_at)
+                VALUES (%s, %s, %s, %s, %s, %s, now(), %s::date, %s, %s, now(), now())
+                """,
+                (company_id, record_id, source_id, sync_run_id, field, amount, as_of, FIGURE_CONFIDENCE, metadata),
+            )
+        else:
+            cur.execute(
+                """
+                UPDATE public.company_field_observations
+                SET company_source_record_id = %s, source_sync_run_id = %s, value_number = %s,
+                    source_updated_at = %s::date, confidence = %s, metadata = %s, updated_at = now()
+                WHERE id = %s
+                """,
+                (record_id, sync_run_id, amount, as_of, FIGURE_CONFIDENCE, metadata,
+                 stored[(company_id, field)][0]),
+            )
+    return len(plan)
 
 
 # --- verify ---------------------------------------------------------------------------------

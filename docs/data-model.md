@@ -209,7 +209,7 @@ re-read); a correction is dated by the newest vote behind it.
   stays shown, and the ⓘ (`v_field_provenance.observed_at`) says when the source read it.
 - **Half-lives** (`resolver.HALF_LIVES`, decided 2026-10-29, starting values to be measured once a
   second register source overlaps with OffeneRegister): website 3 years; address, postcode and city 5;
-  register_status 2; name and legal_form 10. Fields not listed do not decay; the founding date never.
+  register_status, employee_count and revenue 2; name and legal_form 10. Fields not listed do not decay; the founding date never.
   Manager names are a list, every name above the bar is shown, so age does not drop one.
 - **Corrections give way to newer sources.** A correction from the app (priority 50) stands until
   another source has a qualifying value it read after the latest vote behind the correction; then

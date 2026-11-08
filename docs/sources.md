@@ -32,7 +32,7 @@ Record counts are from the local database on 2026-11-02.
 | `wirtschaftsatlas` | Berlin Partner's Wirtschaftsatlas Berlin: about 7,600 companies with website, in Berlin's industry layers (AI, FinTech, Robotik, ...) | DAG `wirtschaftsatlas`: downloads the map's company layers, matches by name and postcode, verifies each website like a Wikidata proposal. **Started by hand only**: the Impressum asks for Berlin Partner's prior consent (#105) | by hand | 2,253 (2026-11-04) |
 | `register_crosslink` | discovery's own reads: a guessed site that prints another of our companies' register number | DAG `register_crosslink`: proposes the site to that company, verified like a Common Crawl proposal (#112) | weekly | 6,048 proposals (local, 2026-11-04) |
 | `website_discovery` | the company's own website | DAG `website_discovery`: guesses domains from the name, reads the Impressum, keeps a site only if the page proves it is that company ([website-verification](website-verification.md)) | hourly batches | 65,587 |
-| `wikidata` | official websites (property P856) Wikidata lists for Berlin organisations | DAG `wikidata`: one SPARQL query, each website verified like a guessed domain | daily | 0 here (531 matched in a local copy, 2026-10-30) |
+| `wikidata` | official websites (property P856), employee counts and revenue Wikidata lists for Berlin organisations | DAG `wikidata`: two SPARQL queries, each website verified like a guessed domain | daily | 0 here (531 matched in a local copy, 2026-10-30) |
 | `common_crawl` | Impressum pages in the Common Crawl that name a Berlin register number | DAG `common_crawl`: 300 index blocks a run, each website verified like a guessed domain | weekly | 0 here (pilot: 21 websites from 5,000 pages, #56) |
 | `impressum_contacts` | email and phone from the Impressum of the proven website | DAG `website_contacts` | after discovery | 150 |
 | `impressum` | the company's current address, as its own Impressum states it, when the page names its register number and no other | DAG `impressum_address`: the page's first address, only when it is in Berlin; confidence 0.8, so it wins against OffeneRegister's 2017–2019 address but not against one a register read this year (#141) | daily | not run yet |
@@ -65,8 +65,8 @@ The goal is one record per Berlin company with 20 columns. Counts are from the l
 | # | Column | `v_company_profile` | Filled by | Today |
 |---|---|---|---|---|
 | 1 | Name | `name` | OffeneRegister, `handelsregister_lookup`, `gleif` (companies with an LEI; a name differing only in case or punctuation is not written) | 296,897 |
-| 2 | Mitarbeiter | `employee_count` | no source yet | 0 |
-| 3 | Umsatz | `revenue` | no source yet | 0 |
+| 2 | Mitarbeiter | `employee_count` | `wikidata` (P1128, with its date, #138): often the group's figure, unchecked, confidence 0.6 | 0 until `wikidata` runs (local, 2026-11-08: 66 matched companies have one) |
+| 3 | Umsatz | `revenue` | `wikidata` (P2139, euros only, with its date, #139): often the group's figure, unchecked, confidence 0.6 | 0 until `wikidata` runs (local, 2026-11-08: 34 matched companies have one) |
 | 4 | Förderungen | `funding_count`, `funding_total_eur`, `fundings` | `foerderkatalog`, `berlin_zuwendungen`, `cordis` | 5,189 companies with a grant |
 | 5 | WZ-Nummer | `wz_code` | no source yet: OffeneRegister has none | 0 |
 | 5a | WZ (geschätzt) | `wz_division_estimated` | `wz_textcat` (`wz_estimate`): an estimate from the website text, never the official number (#158) | 0: no model trained yet |
