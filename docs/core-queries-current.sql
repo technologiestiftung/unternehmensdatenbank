@@ -78,8 +78,8 @@ SELECT
   website_url,
   round(website_confidence, 4)      AS website_confidence,
   website_source,
-  technology_field,                 -- NULL until the write path lands
-  purpose_field                     -- NULL until the write path lands
+  technology_field,
+  purpose_field
 FROM public.v_companies_enriched
 WHERE website_url IS NOT NULL
 ORDER BY website_confidence DESC NULLS LAST
