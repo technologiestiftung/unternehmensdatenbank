@@ -9,7 +9,7 @@ from enrichment.structured_data import organizations
 from feedback_observations.main import clean
 from source_enrichment_common import normalize_company_name_for_search
 import structured_data.main as structured_data
-from structured_data.main import decide, founding, names_company, read_company
+from structured_data.main import decide, founding, names_company, read_company, read_company_text, text_years
 
 TODAY = date(2026, 11, 4)
 
@@ -84,3 +84,39 @@ def test_a_correction_in_the_app_keeps_the_year_only() -> None:
     assert clean("year", "2010-05-01") == "2010"
     assert clean("year", "1650") is None
     assert clean("year", "zweitausendzehn") is None
+
+
+KEY = normalize_company_name_for_search("Beispiel Technologies GmbH")
+
+
+def test_a_year_in_the_text_counts_only_next_to_the_company_name() -> None:
+    assert text_years("Die Beispiel Technologies GmbH wurde 1998 gegründet.", KEY, TODAY) == {"1998"}
+    assert text_years("Beispiel Technologies – Gründungsjahr: 2004", KEY, TODAY) == {"2004"}
+    assert text_years("Beispiel Technologies was founded in 2011 in Berlin.", KEY, TODAY) == {"2011"}
+    assert text_years("Gegründet im Jahr 1975 von Beispiel Technologies", KEY, TODAY) == {"1975"}
+    # A client's history on the same page, the company's name nowhere near.
+    assert text_years("Unser Kunde, die Kunde AG, wurde 1950 gegründet.", KEY, TODAY) == set()
+
+
+def test_seit_and_impossible_years_are_not_a_founding() -> None:
+    assert text_years("Beispiel Technologies – seit 1990 Ihr Partner", KEY, TODAY) == set()
+    assert text_years("Beispiel Technologies, gegründet 2030", KEY, TODAY) == set()
+    assert text_years("Beispiel Technologies, gegründet 1650", KEY, TODAY) == set()
+    assert text_years("Beispiel Technologies wurde 1998 gegründet", "ab", TODAY) == set()
+
+
+def test_pages_whose_text_disagrees_give_nothing(monkeypatch: pytest.MonkeyPatch) -> None:
+    html = {"a": "<p>Die Beispiel Technologies GmbH wurde 1998 gegründet.</p>",
+            "b": "<p>Beispiel Technologies – Gründungsjahr 1998</p>",
+            "c": "<p>Beispiel Technologies wurde 2001 gegründet.</p>"}
+    pages = [("https://beispiel.de/a", "a", datetime(2026, 3, 1)), ("https://beispiel.de/b", "b", datetime(2026, 5, 1))]
+    monkeypatch.setattr(structured_data, "_html", html.__getitem__)
+    values, payload = read_company_text("Beispiel Technologies GmbH", pages)
+    assert values == [("founding_year", "1998", datetime(2026, 5, 1))]
+    assert [e["stated"] for e in payload["evidence"]] == ["1998", "1998"]
+    values, _ = read_company_text("Beispiel Technologies GmbH", [*pages, ("https://beispiel.de/c", "c", datetime(2026, 6, 1))])
+    assert values == []
+
+
+def test_the_text_year_ranks_below_structured_data_and_above_the_bar() -> None:
+    assert 0.5 < structured_data.TEXT_CONFIDENCE < structured_data.CONFIDENCE
