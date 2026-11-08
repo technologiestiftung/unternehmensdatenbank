@@ -23,3 +23,5 @@ select_permissions:
         - body
         - created_at
       filter: {}
+      # Lets the company list sort by these rows; a count or max of rows the role can already read.
+      allow_aggregations: true
