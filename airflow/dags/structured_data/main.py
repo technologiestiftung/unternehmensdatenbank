@@ -27,15 +27,17 @@ with the company's own name within `NAME_WINDOW` characters ("Die Beispiel GmbH 
 gegründet"), so a client's or a partner's history does not count. Pages disagreeing on the year write
 nothing. Only `founding_year`, at `TEXT_CONFIDENCE`: above the resolver's 0.50 bar, below the
 schema.org year (0.6) and GLEIF (1.0, the current legal entity). Measured 2026-11-08 on the local
-corpus (5,332 companies with stored pages; 677 also have a GLEIF year), year within one of GLEIF's:
+corpus (5,332 companies with stored pages; 677 also have a GLEIF year), year within one of GLEIF's,
+before the "1990 gegründet" pattern stopped skipping over a nearer year:
 
 - with the name next to the phrase: 25 of 34 (74 %); without it: 29 of 62 (47 %), so it is required;
 - "seit 1990" is left out: 67 of 186 (36 %), and 391 of 1,338 companies give several years. It dates
   the trade or the family, not the company.
 
 A miss is mostly an earlier year: the page dates the business, GLEIF the current legal entity. The
-first full run (local, 2026-11-08, 5,674 companies with stored pages): 267 with a text year, 218 of
-them with no year from any other source; 18 of the 19 that also have a schema.org year agree.
+full run with the final patterns (local, 2026-11-08, 5,674 companies with stored pages): 318 with a
+text year, 261 of them with no year from any other source; 32 of 42 (76 %) within a year of GLEIF;
+18 of the 19 that also have a schema.org year agree.
 """
 from __future__ import annotations
 
@@ -86,7 +88,7 @@ TEXT_DETAILS = SourceDetails(
     ),
     schedule=schedule_label(SCHEDULE),
 )
-#: Unmeasured as a probability: 25 of 34 within a year of GLEIF (see the docstring).
+#: Unmeasured as a probability: 32 of 42 within a year of GLEIF (see the docstring).
 TEXT_CONFIDENCE = 0.55
 #: How near the company's name has to stand to the phrase, in characters either side.
 NAME_WINDOW = 150
