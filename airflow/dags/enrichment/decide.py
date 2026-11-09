@@ -79,6 +79,8 @@ def bake() -> None:
     from huggingface_hub import snapshot_download
 
     snapshot_download(MODEL_ID, revision=MODEL_REVISION)
+    # Not pinned: gliner2 resolves the encoder at "main" offline, which a cache holding only a pinned
+    # revision cannot answer. Its files are a configuration and a tokenizer, not weights.
     snapshot_download(ENCODER_ID, allow_patterns=["*.json", "*.model", "*.txt"])
     # A fresh process: huggingface_hub reads HF_HUB_OFFLINE when imported, so this one cannot test it.
     subprocess.run([sys.executable, "-c", "import sys; sys.path.insert(0, sys.argv[1]); import decide; decide.load()",

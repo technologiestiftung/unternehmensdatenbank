@@ -16,7 +16,7 @@ Logical field names → observation field_name aliases:
   activity_description ← activity_description (the homepage's own description, #152)
   register_announcement ← register_announcement (latest kind of court announcement; a hint, not the status)
   REGISTER_FIELDS   name, legal_form, address, postcode, city, register_status, ... (V3)
-  deeptech_class, is_ai (only corrections from the app fill them so far)
+  deeptech_class, is_ai ← deeptech_class, is_ai (the local classifier and corrections from the app)
   wz_division_estimated ← wz_division_estimated (a WZ division estimated from the website, #158;
                           never the official wz_code)
 

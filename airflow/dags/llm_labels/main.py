@@ -17,7 +17,7 @@ A run:
    picks up the same batch instead of paying for a new one.
 3. **writes** one source record per company and model (`external_id` = model:company id): the label,
    the WZ division, the outcome, model, prompt version and tokens.
-4. **publishes** (`publish_labels`, also its own task, which costs nothing): the newest record per company
+4. **publishes** (`publish_labels`, its own task, which costs nothing): the newest record per company
    becomes a `technology_field` and a `wz_division_estimated` observation at `CONFIDENCE` (#183, decided
    2026-11-09: Claude's answer is a guess like every other, shown with its confidence). Below the keywords
    (0.60) and the Wirtschaftsatlas layers (0.56), so it fills the gaps; above the local classifier (at most
@@ -230,7 +230,6 @@ def run_label() -> int:
                 )
             _save_state(cur, _USAGE, {"month": month, "tokens": used + tokens})
             cur.execute("DELETE FROM public.pipeline_state WHERE pipeline = %s AND key = %s", _BATCH)
-            publish(cur, source_id, sync_run_id)
             labelled = outcomes.get("labelled", 0)
             finish_sync_run(cur, sync_run_id=sync_run_id, records_seen=sum(outcomes.values()),
                             records_created=labelled, records_updated=0,
@@ -248,19 +247,25 @@ def observations_for(label: str | None, wz_division: str | None) -> list[tuple[s
 
 
 def publish(cur: Any, source_id: str, sync_run_id: str) -> int:
-    """Every company's newest Claude answer as observations (see the module docstring). Returns how many
+    """Every company's newest Claude answer as observations (see the module docstring), while the website it
+    was read off is still the company's published one; otherwise its guesses drop to 0. Returns how many
     companies have a guess."""
+    from technology_field.main import _source_id as keyword_source, read_records
+
+    websites = {cid: website for cid, *_, still_published, website in read_records(cur, keyword_source(cur))
+                if still_published}
     cur.execute(
         """
-        SELECT DISTINCT ON (company_id) id::text, company_id::text, source_payload
+        SELECT DISTINCT ON (company_id) id::text, company_id::text, external_url, source_payload
         FROM public.company_source_records WHERE source_id = %s
         ORDER BY company_id, updated_at DESC
         """,
         (source_id,),
     )
     published = 0
-    for record_id, company_id, payload in cur.fetchall():
-        guesses = dict(observations_for(payload.get("label"), payload.get("wz_division")))
+    for record_id, company_id, website, payload in cur.fetchall():
+        current = website is not None and websites.get(company_id) == website
+        guesses = dict(observations_for(payload.get("label"), payload.get("wz_division"))) if current else {}
         meta = {"model": payload.get("model"), "prompt_version": payload.get("prompt_version"), "ai_generated": True}
         for field in ("technology_field", "wz_division_estimated"):
             replace_guess(cur, company_id=company_id, source_record_id=record_id, source_id=source_id,

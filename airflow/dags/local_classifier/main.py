@@ -152,7 +152,8 @@ def _write(source_id: str, sync_run_id: str, asked: Mapping[str, Mapping[str, st
 
 
 def run_classify() -> int:
-    """Ask the model about up to `MAX_COMPANIES` companies and write its guesses. Returns how many."""
+    """Ask the model about up to `MAX_COMPANIES` companies, write its guesses and drop those of companies
+    without a published website. Returns companies answered plus guesses dropped (0: nothing changed)."""
     from technology_field.train import require_store, stored_text
 
     connection = get_connection()
@@ -170,18 +171,42 @@ def run_classify() -> int:
         chunk = todo[start:start + CHUNK]
         texts = {cid: text[:MAX_CHARS] for cid in chunk if (text := stored_text(websites[cid]))}
         require_store()
-        _write(source_id, sync_run_id, asked, websites, answer(texts, asked))
+        # A company without stored text is recorded too, with no answers, so it is not picked again every run.
+        _write(source_id, sync_run_id, asked, websites, {cid: {} for cid in chunk} | answer(texts, asked))
         written += len(texts)
         without_text += len(chunk) - len(texts)
     connection = get_connection()
     try:
         with connection, connection.cursor() as cur:
+            dropped = _drop_without_website(cur, source_id, list(asked), sorted(websites))
             finish_sync_run(cur, sync_run_id=sync_run_id, records_seen=len(todo), records_created=written,
-                            records_updated=0, records_failed=without_text)
+                            records_updated=dropped, records_failed=without_text)
     finally:
         connection.close()
-    log.info("Asked the local classifier about %d companies (%d without stored text).", written, without_text)
-    return written
+    log.info("Asked the local classifier about %d companies (%d without stored text); %d old guesses dropped.",
+             written, without_text, dropped)
+    return written + dropped
+
+
+def _drop_without_website(cur: Any, source_id: str, fields: list[str], company_ids: list[str]) -> int:
+    """Guesses at 0 for every company whose website is no longer published with text, and its cached answers
+    marked stale, so it is asked again if the website comes back. Returns how many guesses were dropped."""
+    cur.execute(
+        """
+        UPDATE public.company_field_observations SET confidence = 0, updated_at = now()
+        WHERE source_id = %s AND field_name = ANY(%s) AND confidence > 0 AND NOT (company_id = ANY(%s::uuid[]))
+        """,
+        (source_id, fields, company_ids),
+    )
+    dropped = cur.rowcount
+    cur.execute(
+        """
+        UPDATE public.company_source_records SET source_payload = source_payload - 'model'
+        WHERE source_id = %s AND source_payload ? 'model' AND NOT (company_id = ANY(%s::uuid[]))
+        """,
+        (source_id, company_ids),
+    )
+    return dropped
 
 
 def _make_dag():  # noqa: ANN201
