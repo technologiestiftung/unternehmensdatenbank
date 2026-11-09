@@ -16,7 +16,7 @@ Logical field names → observation field_name aliases:
   activity_description ← activity_description (the homepage's own description, #152)
   register_announcement ← register_announcement (latest kind of court announcement; a hint, not the status)
   REGISTER_FIELDS   name, legal_form, address, postcode, city, register_status, ... (V3)
-  deeptech_class, is_ai (only corrections from the app fill them so far)
+  deeptech_class, is_ai ← deeptech_class, is_ai (the local classifier and corrections from the app)
   wz_division_estimated ← wz_division_estimated (a WZ division estimated from the website, #158;
                           never the official wz_code)
 
@@ -44,6 +44,11 @@ log = logging.getLogger(__name__)
 
 _WEBSITE_MIN_CONF = 0.35
 _FIELD_MIN_CONF = 0.50
+#: The four classification fields show any guess, its confidence shown as a colour in the app (#183,
+#: decided 2026-11-09: a guess is better than an empty field). Above 0, never 0: superseded rows are
+#: kept at confidence 0 (`structured_data`, `wz_estimate`, the corrections) and must stay hidden.
+_GUESS_MIN_CONF = 0.01
+GUESS_FIELDS = ("technology_field", "wz_division_estimated", "deeptech_class", "is_ai")
 
 _TMP_TABLE = "_cfw_winners"
 
@@ -131,6 +136,9 @@ def _apply_canonical(
           WHERE o.field_name = ANY(%(fields)s)
             AND {not_null_check}
             AND COALESCE(o.confidence, 0) >= %(min_confidence)s
+            -- A correction needs the normal bar even where any guess is shown (#183): one person's
+            -- correction (0.30) is never the shown value; two agreeing (0.60) are.
+            AND (s.key <> %(people)s OR COALESCE(o.confidence, 0) >= %(people_min)s)
         ),
         newest AS (
           SELECT company_id, max(read_at) AS read_at FROM qualifying WHERE NOT from_people GROUP BY company_id
@@ -168,7 +176,7 @@ def _apply_canonical(
         SELECT company_id, obs_id, source_id FROM winners
         """,
         {"fields": obs_field_names, "min_confidence": min_confidence, "half_life": half_life,
-         "people": PEOPLE_SOURCE},
+         "people": PEOPLE_SOURCE, "people_min": _FIELD_MIN_CONF},
     )
     n_winners = cur.rowcount
 
@@ -357,14 +365,15 @@ def resolve_technology_field(cur: Any) -> int:
 
     `branch_classifier` and `wirtschaftsatlas` (#148, its layers, at 0.56) write this name, both at
     priority 100, so confidence decides: the keywords (0.60) beat a layer, a layer beats the models
-    (0.52-0.55).
+    (0.52-0.55) and Claude (0.55), and all of them beat the local classifier (`local_classifier`, at most
+    0.50). Any guess above 0 is shown (`_GUESS_MIN_CONF`, #183).
     """
     return _apply_canonical(
         cur,
         logical_field="technology_field",
         obs_field_names=["technology_field"],
         value_col="value_text",
-        min_confidence=_FIELD_MIN_CONF,
+        min_confidence=_GUESS_MIN_CONF,
     )
 
 
@@ -445,10 +454,11 @@ def resolve_register_fields(cur: Any) -> int:
 
 def resolve_deeptech_and_ai(cur: Any) -> int:
     """`deeptech_class` and `is_ai`. The profile has shown both since V1, but no pipeline writes them
-    yet; until one does, only people's corrections (`feedback_observations`) fill them."""
+    yet besides the local classifier (`local_classifier`, #183) and people's corrections
+    (`feedback_observations`). Any guess above 0 is shown (`_GUESS_MIN_CONF`)."""
     return sum(
         _apply_canonical(cur, logical_field=field, obs_field_names=[field], value_col="value_text",
-                         min_confidence=_FIELD_MIN_CONF)
+                         min_confidence=_GUESS_MIN_CONF)
         for field in ("deeptech_class", "is_ai")
     )
 
@@ -465,7 +475,7 @@ def resolve_wz_division_estimated(cur: Any) -> int:
     """An estimated WZ division ("62"), from the website text (`wz_estimate`, #158). Its own field:
     an estimate never fills the official `wz_code`, and the app labels it "WZ (geschätzt)"."""
     return _apply_canonical(cur, logical_field="wz_division_estimated", obs_field_names=["wz_division_estimated"],
-                            value_col="value_text", min_confidence=_FIELD_MIN_CONF)
+                            value_col="value_text", min_confidence=_GUESS_MIN_CONF)
 
 
 #: The fields the coordinator reports coverage for, one list for the SQL and the Python.

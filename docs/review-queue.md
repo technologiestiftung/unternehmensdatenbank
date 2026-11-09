@@ -27,9 +27,11 @@ draw a round  ──►  review_tasks  ──►  a person judges in the app  �
     `technology_field` these are the companies the keywords left empty on a website that was read,
     with the LLM's label (#87) as a suggestion.
   - Mode `measure` is a random draw, the only kind that gives a precision. Mode `teach` draws the
-    values whose confidence is closest to the bar the coordinator shows them from (websites 0.35,
-    everything else 0.50): the cases a rule or model is least sure of, where a verdict teaches the
-    most. Only for `shown` and `refused` (a gap has no confidence), never for `email` or `phone` (never
+    values whose confidence is closest to the bar (websites 0.35, everything else 0.50): the cases a
+    rule or model is least sure of, where a verdict teaches the most. Technologiefeld, WZ estimate,
+    DeepTech and KI are shown from any guess above 0; for them 0.50 is the edge between a red and a
+    yellow guess in the app, where it is most open whether a guess is right (decided 2026-11-09).
+    Only for `shown` and `refused` (a gap has no confidence), never for `email` or `phone` (never
     resolved, so no bar), never counted in a precision.
     Its verdicts still become votes, so a model judged on held-out votes also sees these harder
     cases: its score can only come out lower.

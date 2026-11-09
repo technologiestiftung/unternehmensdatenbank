@@ -12,3 +12,10 @@ spacy>=3.8,<3.9
 de_core_news_md @ https://github.com/explosion/spacy-models/releases/download/de_core_news_md-3.8.0/de_core_news_md-3.8.0-py3-none-any.whl
 # llm_labels (#87): the Claude API. pip-audit clean 2026-11-04.
 anthropic>=2.4,<3
+# local_classifier (#183): GLiNER2.5-multi-Decide, run on our own machines. CPU-only PyTorch: the default
+# wheel pulls several GB of GPU libraries. Always `gliner2[local]`: plain `gliner2` is a client for Fastino's
+# hosted API and would send the text away. The weights are baked into the images (enrichment/decide.py).
+# torch is installed first from the PyTorch CPU index in its own step (both Dockerfiles), so that index never
+# serves any other package. pip-audit clean 2026-11-09.
+torch>=2.5,<3
+gliner2[local]>=2.1,<3
