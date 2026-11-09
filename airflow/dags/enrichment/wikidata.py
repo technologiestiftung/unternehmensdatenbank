@@ -198,7 +198,7 @@ def parse_founding(bindings: Iterable[dict[str, Any]]) -> dict[str, int]:
     Berlin items, 2026-11-09). Dates less precise than a year, and years before 1000, are left out."""
     years: dict[str, int] = {}
     for row in bindings:
-        match = re.match(r"\+?(\d{4})-", row["date"]["value"])
+        match = re.match(r"\+?([1-9]\d{3})-", row["date"]["value"])
         if int(row["precision"]["value"]) < YEAR_PRECISION or not match:
             continue
         qid = row["item"]["value"].rsplit("/", 1)[-1]

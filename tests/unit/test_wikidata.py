@@ -147,6 +147,7 @@ def test_the_earliest_year_at_least_to_the_year_is_the_founding_year() -> None:
         founding_row("Q1", "+1998-01-01"), founding_row("Q1", "+1990-05-01", 10),
         founding_row("Q2", "+1900-01-01", 7),  # a century names no year
         founding_row("Q3", "-0500-01-01"),  # not a company's founding
+        founding_row("Q4", "0950-01-01"),  # before 1000
     ]) == {"Q1": 1990}
 
 
