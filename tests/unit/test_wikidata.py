@@ -133,3 +133,46 @@ def test_two_items_on_one_company_write_the_newest_figure() -> None:
     assert write_figures(cur, figures, source_id="s", sync_run_id="run") == 1
     insert = [params for sql, params in cur.statements if "INSERT" in sql]
     assert [(p[0], p[1], p[4], p[5], p[6]) for p in insert] == [("c1", "r10", "revenue", 9.0, "2024-12-31")]
+
+
+def founding_row(qid: str, date: str, precision: int = 9) -> dict:
+    return {"item": {"value": f"http://www.wikidata.org/entity/{qid}"},
+            "date": {"value": f"{date}T00:00:00Z"}, "precision": {"value": str(precision)}}
+
+
+def test_the_earliest_year_at_least_to_the_year_is_the_founding_year() -> None:
+    from enrichment.wikidata import parse_founding
+
+    assert parse_founding([
+        founding_row("Q1", "+1998-01-01"), founding_row("Q1", "+1990-05-01", 10),
+        founding_row("Q2", "+1900-01-01", 7),  # a century names no year
+        founding_row("Q3", "-0500-01-01"),  # not a company's founding
+    ]) == {"Q1": 1990}
+
+
+def test_founding_years_are_written_kept_and_dropped() -> None:
+    from wikidata.main import FOUNDING_CONFIDENCE, planned_founding_years
+
+    current = {"c1": ("r1", 1990), "c2": ("r2", 2005), "c5": ("r5", 2012)}
+    stored = {
+        ("c2", "2005"): FOUNDING_CONFIDENCE,  # unchanged
+        ("c3", "1999"): FOUNDING_CONFIDENCE,  # item no longer matches
+        ("c4", "1980"): 0.0,  # already dropped
+        ("c5", "2011"): FOUNDING_CONFIDENCE,  # Wikidata corrected the year
+    }
+    assert planned_founding_years(current, stored) == [
+        ("write", "c1", "1990", "r1"), ("write", "c5", "2012", "r5"),
+        ("drop", "c3", "1999", None), ("drop", "c5", "2011", None),
+    ]
+
+
+def test_two_items_on_one_company_write_the_earliest_year(monkeypatch) -> None:
+    from wikidata import main
+
+    written = []
+    monkeypatch.setattr(main, "insert_text_observation", lambda cur, **k: written.append(k))
+    cur = FakeCursor([("r10", "c1", "Q10"), ("r9", "c1", "Q9")], [])
+    assert main.write_founding_years(cur, {"Q10": 1995, "Q9": 2001}, source_id="s", sync_run_id="run") == 1
+    assert [(k["company_id"], k["source_record_id"], k["value_text"], k["confidence"]) for k in written] == [
+        ("c1", "r10", "1995", main.FOUNDING_CONFIDENCE)]
+    assert main.write_founding_years(cur, None, source_id="s", sync_run_id="run") == 0
