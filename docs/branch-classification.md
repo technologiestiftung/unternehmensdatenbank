@@ -95,9 +95,19 @@ promoted only on held-out companies people judged and the keywords left empty: a
 **LLM teacher labels (#87).** The DAG `llm_labels`, started by hand, asks the Claude API for one of
 the 77 fields or `NONE` for companies the keywords left empty (later also for ones they gave a field,
 below), from the same text with names, emails
-and phone numbers replaced (`enrichment.llm`). The labels sit in source records only, never in the
-app. They may train the text classifier only after a person has checked a sample
+and phone numbers replaced (`enrichment.llm`). Since #183 (decided 2026-11-09) each answer is also a
+guess in the app: a `technology_field` observation at 0.55, below the keywords; `NONE` writes nothing.
+They may train the text classifier only after a person has checked a sample
 (`scripts/llm_labels_sample.py`, 100 labels of companies the keywords left empty); precision and cost per label go here. Not measured yet.
+About 12,900 tokens per company (Claude Opus 5.5, 189 companies, local): the 10 million tokens a month
+label about 775 companies.
+
+**The local classifier (#183).** The DAG `local_classifier` asks GLiNER2.5-multi-Decide, run on our own
+machines, for one of the 77 fields (no `NONE`: a guess is better than an empty field), a WZ division,
+a DeepTech class (non-tech, tech, hybrid, deep tech) and whether the company is an AI company, from the
+same website text. Its confidence is scaled to at most 0.50, so every other source wins where it has an
+answer. Zero-shot it agrees with Claude on 41 % of the Technologiefelder and 34 % of the WZ divisions
+(183 companies, #182); fine-tuning on Claude's labels and people's verdicts is the next step.
 
 **Estimated WZ division (#140).** The same answer also names one of the 87 WZ divisions in
 `wz_divisions`, or `NONE`, stored as `wz_division` next to the label. It is an **estimate** of what the

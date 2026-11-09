@@ -407,6 +407,53 @@ def companies_with_website_to_read(
     return cur.fetchall()
 
 
+def replace_guess(
+    cur: Any,
+    *,
+    company_id: str,
+    source_record_id: str,
+    source_id: str,
+    sync_run_id: str,
+    field_name: str,
+    value_text: str | None,
+    confidence: float,
+    metadata: dict[str, Any] | None = None,
+) -> None:
+    """A source's one current guess for a classification field (#183): this value at this confidence, every
+    other value this source gave the company for the field at 0, so a model that changed its mind never
+    competes with itself. `value_text` None drops them all (the source has no guess any more).
+
+    Finds the row itself instead of relying on `ON CONFLICT`: `deeptech_class` and `is_ai` have no
+    upsert key, and adding one could fail on duplicate corrections already stored.
+    """
+    if value_text is not None:
+        cur.execute(
+            "SELECT id FROM public.company_field_observations"
+            " WHERE company_id = %s AND field_name = %s AND source_id = %s AND value_text = %s"
+            " ORDER BY updated_at DESC LIMIT 1",
+            (company_id, field_name, source_id, value_text),
+        )
+        row = cur.fetchone()
+        if row:
+            cur.execute(
+                "UPDATE public.company_field_observations SET confidence = %s, metadata = %s,"
+                " company_source_record_id = %s, source_sync_run_id = %s, updated_at = now() WHERE id = %s",
+                (confidence, Json(with_code_version(metadata)), source_record_id, sync_run_id, row[0]),
+            )
+        else:
+            insert_text_observation(
+                cur, company_id=company_id, source_record_id=source_record_id, source_id=source_id,
+                sync_run_id=sync_run_id, field_name=field_name, value_text=value_text,
+                confidence=confidence, metadata=metadata,
+            )
+    cur.execute(
+        "UPDATE public.company_field_observations SET confidence = 0, updated_at = now()"
+        " WHERE company_id = %s AND field_name = %s AND source_id = %s AND confidence > 0"
+        " AND value_text IS DISTINCT FROM %s",
+        (company_id, field_name, source_id, value_text),
+    )
+
+
 def insert_text_observation(
     cur: Any,
     *,

@@ -25,6 +25,11 @@ RUN pip install --no-cache-dir -r /tmp/requirements.txt
 
 COPY dags/ /opt/pipelines/
 
+# The local classifier's weights (#183), baked in and loaded once offline; tasks never download.
+ENV HF_HOME=/opt/models/hf
+RUN python /opt/pipelines/enrichment/decide.py && chmod -R a+rX /opt/models
+ENV HF_HUB_OFFLINE=1
+
 RUN useradd --uid 50000 --no-create-home pipelines
 # Where run_task leaves a task's return value. Kubernetes mounts its own folder here; Docker
 # (pipeline_runner "docker") reads the file from this one.

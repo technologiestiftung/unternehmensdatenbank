@@ -119,7 +119,8 @@ def _with_env(run: Callable[[], Any]) -> Callable[..., Any]:
 
 
 def pipeline_task(task_id: str, run: Callable[[], Any], *, returns: bool = False, retries: int = RETRIES,
-                  secrets: tuple[str, ...] = (), env: Optional[Mapping[str, str]] = None) -> Any:
+                  secrets: tuple[str, ...] = (), env: Optional[Mapping[str, str]] = None,
+                  memory: Optional[str] = None) -> Any:
     """A `PythonOperator` calling `run`, or a pod running the same function from the pipelines image.
 
     `returns=True` makes `run`'s return value the task's XCom on the hub too: the pod writes it to
@@ -133,12 +134,16 @@ def pipeline_task(task_id: str, run: Callable[[], Any], *, returns: bool = False
     `env`: environment variables for the task, Jinja-templated, rendered when the task runs: how a DAG
     started by hand passes its form's inputs (`{"REVIEW_FIELD": "{{ params.field }}"}`). The task reads
     them with `os.getenv`, on every runner. Never a secret: a rendered value shows in the UI.
+
+    `memory`: what the pod or container is given, as Kubernetes writes it ("3Gi"), requested and the limit at
+    once, for a task the namespace default would kill (`local_classifier`'s model needs about 2.1 GB). The
+    Python runner ignores it: it runs inside the worker.
     """
     env = dict(env or {})
     retry = {"retries": retries, "retry_delay": RETRY_DELAY}
     runner = _setting("pipeline_runner", "python")
     if runner == "docker":
-        return _docker_task(task_id, run, returns, retry, secrets, env)
+        return _docker_task(task_id, run, returns, retry, secrets, env, memory)
     if runner != "kubernetes":
         from airflow.providers.standard.operators.python import PythonOperator
 
@@ -161,12 +166,14 @@ def pipeline_task(task_id: str, run: Callable[[], Any], *, returns: bool = False
         env_vars={**LAST_TRY_ENV, **env},
         get_logs=True,
         do_xcom_push=returns,
+        container_resources=k8s.V1ResourceRequirements(requests={"memory": memory}, limits={"memory": memory})
+        if memory else None,
         **retry,
     )
 
 
 def _docker_task(task_id: str, run: Callable[[], Any], returns: bool, retry: dict[str, Any],
-                 secrets: tuple[str, ...], env: dict[str, str]) -> Any:
+                 secrets: tuple[str, ...], env: dict[str, str], memory: Optional[str] = None) -> Any:
     from airflow.providers.docker.operators.docker import DockerOperator
 
     class PipelineDockerOperator(DockerOperator):
@@ -191,5 +198,7 @@ def _docker_task(task_id: str, run: Callable[[], Any], returns: bool, retry: dic
         auto_remove="success",
         retrieve_output=returns,
         retrieve_output_path="/airflow/xcom/return.json" if returns else None,
+        # Docker writes sizes without the binary "i": "3Gi" -> "3g".
+        mem_limit=memory.lower().replace("gi", "g").replace("mi", "m") if memory else None,
         **retry,
     )

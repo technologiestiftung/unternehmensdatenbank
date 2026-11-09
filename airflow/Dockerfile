@@ -4,3 +4,14 @@ FROM ${AIRFLOW_BASE_IMAGE}
 COPY airflow/requirements.txt /tmp/requirements.txt
 
 RUN pip install --no-cache-dir -r /tmp/requirements.txt
+
+# The local classifier's weights (#183), baked in and loaded once offline (the DAGs are mounted, so only
+# this file is copied for the build).
+ENV HF_HOME=/opt/models/hf
+USER root
+RUN mkdir -p /opt/models && chown airflow /opt/models
+USER airflow
+COPY airflow/dags/enrichment/decide.py /tmp/decide.py
+RUN python /tmp/decide.py
+ENV HF_HUB_OFFLINE=1
+

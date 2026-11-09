@@ -16,9 +16,13 @@ A run:
    The batch id is kept in `pipeline_state` (llm_labels / batch), so a run that fails while waiting
    picks up the same batch instead of paying for a new one.
 3. **writes** one source record per company and model (`external_id` = model:company id): the label,
-   the WZ division, the outcome, model, prompt version and tokens. No observation: neither reaches
-   the app. The WZ division is an estimate, never the official `wz_code`; it trains the
-   `wz_estimate` model, whose answer is shown as "WZ (geschätzt)" (#158).
+   the WZ division, the outcome, model, prompt version and tokens.
+4. **publishes** (`publish_labels`, also its own task, which costs nothing): the newest record per company
+   becomes a `technology_field` and a `wz_division_estimated` observation at `CONFIDENCE` (#183, decided
+   2026-11-09: Claude's answer is a guess like every other, shown with its confidence). Below the keywords
+   (0.60) and the Wirtschaftsatlas layers (0.56), so it fills the gaps; above the local classifier (at most
+   0.50). `NONE` writes nothing, so another source's guess can show. The WZ division is never the official
+   `wz_code`. Both still train the models (`technology_field`, `wz_estimate`).
 
 **Budget.** At most `MAX_COMPANIES` per run, and no new batch once this month's tokens
 (`pipeline_state` llm_labels / usage) reach `MONTHLY_TOKENS`. Set a spend limit on the key in the
@@ -45,6 +49,7 @@ from source_enrichment_common import (
     finish_sync_run,
     get_connection,
     schedule_label,
+    replace_guess,
     start_sync_run,
     upsert_source_record,
 )
@@ -58,7 +63,7 @@ DETAILS = SourceDetails(
     description=(
         "KI-Vorschläge (Claude API) für das Technologiefeld, zuerst für Firmen, bei denen kein Stichwort passte, "
         "danach für Firmen mit Stichwort-Technologiefeld (für das WZ-Modell), "
-        "und eine geschätzte WZ-Abteilung. Nur zum Trainieren und Prüfen gespeichert, nie in der App angezeigt."
+        "und eine geschätzte WZ-Abteilung. In der App als Vermutung mit ihrer Sicherheit gezeigt, unter den Stichwörtern."
     ),
     schedule=schedule_label(SCHEDULE),
     base_url="https://www.anthropic.com/api",
@@ -68,6 +73,8 @@ DETAILS = SourceDetails(
     ),
 )
 MODEL = os.getenv("LLM_MODEL", "claude-opus-5-5")
+#: Unmeasured: no hand-checked sample yet (#87). Below the keywords (0.60) and the layers (0.56).
+CONFIDENCE = 0.55
 MAX_COMPANIES = int(os.getenv("LLM_MAX_COMPANIES_PER_RUN", "500"))
 MONTHLY_TOKENS = int(os.getenv("LLM_MONTHLY_TOKENS", "10000000"))
 POLL_SECONDS = 60
@@ -223,6 +230,7 @@ def run_label() -> int:
                 )
             _save_state(cur, _USAGE, {"month": month, "tokens": used + tokens})
             cur.execute("DELETE FROM public.pipeline_state WHERE pipeline = %s AND key = %s", _BATCH)
+            publish(cur, source_id, sync_run_id)
             labelled = outcomes.get("labelled", 0)
             finish_sync_run(cur, sync_run_id=sync_run_id, records_seen=sum(outcomes.values()),
                             records_created=labelled, records_updated=0,
@@ -233,20 +241,72 @@ def run_label() -> int:
         connection.close()
 
 
+def observations_for(label: str | None, wz_division: str | None) -> list[tuple[str, str]]:
+    """The (field, value) guesses one Claude answer gives. `NONE` (or nothing) gives none."""
+    return [(field, value) for field, value in (("technology_field", label), ("wz_division_estimated", wz_division))
+            if value and value != "NONE"]
+
+
+def publish(cur: Any, source_id: str, sync_run_id: str) -> int:
+    """Every company's newest Claude answer as observations (see the module docstring). Returns how many
+    companies have a guess."""
+    cur.execute(
+        """
+        SELECT DISTINCT ON (company_id) id::text, company_id::text, source_payload
+        FROM public.company_source_records WHERE source_id = %s
+        ORDER BY company_id, updated_at DESC
+        """,
+        (source_id,),
+    )
+    published = 0
+    for record_id, company_id, payload in cur.fetchall():
+        guesses = dict(observations_for(payload.get("label"), payload.get("wz_division")))
+        meta = {"model": payload.get("model"), "prompt_version": payload.get("prompt_version"), "ai_generated": True}
+        for field in ("technology_field", "wz_division_estimated"):
+            replace_guess(cur, company_id=company_id, source_record_id=record_id, source_id=source_id,
+                          sync_run_id=sync_run_id, field_name=field, value_text=guesses.get(field),
+                          confidence=CONFIDENCE, metadata=meta)
+        published += bool(guesses)
+    return published
+
+
+def run_publish() -> int:
+    """`publish` on its own: no Claude call, no cost."""
+    connection = get_connection()
+    try:
+        with connection, connection.cursor() as cur:
+            source_id = _source_id(cur)
+            sync_run_id = start_sync_run(cur, source_id=source_id)
+            published = publish(cur, source_id, sync_run_id)
+            finish_sync_run(cur, sync_run_id=sync_run_id, records_seen=published, records_created=0,
+                            records_updated=published, records_failed=0)
+        log.info("Published Claude's guesses for %d companies.", published)
+        return published
+    finally:
+        connection.close()
+
+
 def _make_dag():  # noqa: ANN201
     try:
         from airflow import DAG
+        from airflow.providers.standard.operators.trigger_dagrun import TriggerDagRunOperator
         from pipeline_task import pipeline_task
     except ImportError:
         return None
 
     with DAG(
         dag_id=DAG_ID,
-        description="By hand only: Technologiefeld teacher labels from the Claude API, never shown in the app",
+        description="By hand only: Technologiefeld and WZ guesses from the Claude API, shown with their confidence",
         schedule=SCHEDULE, start_date=datetime(2026, 11, 1, tzinfo=timezone.utc), catchup=False,
         max_active_runs=1, tags=["classifier", "llm"],
     ) as dag:
-        pipeline_task("label", run_label, returns=True, secrets=("ANTHROPIC_API_KEY",))
+        label = pipeline_task("label", run_label, returns=True, secrets=("ANTHROPIC_API_KEY",))
+        # Runs even when `label` sends nothing (budget used up): publishing costs nothing.
+        publish_labels = pipeline_task("publish_labels", run_publish)
+        publish_labels.trigger_rule = "all_done"
+        coordinate = TriggerDagRunOperator(task_id="trigger_pipeline_coordinator",
+                                           trigger_dag_id="pipeline_coordinator", wait_for_completion=False)
+        label >> publish_labels >> coordinate
     return dag
 
 
