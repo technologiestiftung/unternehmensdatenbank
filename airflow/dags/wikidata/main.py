@@ -1,8 +1,8 @@
 """Websites Wikidata lists for Berlin companies, verified like a guessed domain (issue #26).
 
-Three tasks, and the figures inside match:
+Three tasks, and the figures and founding years inside match:
 
-1. **match**, at most once a day. Two SPARQL queries (`enrichment.wikidata`) and every item is matched
+1. **match**, at most once a day. Three SPARQL queries (`enrichment.wikidata`) and every item is matched
    to a company in SQL, with the one name key (`normalize_company_name`):
    - register digits AND the same name key -> `match_method = 'identifier'`, confidence 1.0. Wikidata
      holds the bare register number without the court, so the number alone proves nothing;
