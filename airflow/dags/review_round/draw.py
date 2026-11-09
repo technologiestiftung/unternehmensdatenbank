@@ -18,11 +18,14 @@ Three kinds (V4__review_queue.sql):
 
 Two modes. `measure` (default): the order is random but fixed per round (md5 of the observation or
 company and the round id); only this gives an honest precision. `teach`: the values whose confidence
-is closest to the bar the coordinator shows them from (`resolver`: websites 0.35, everything else
-0.50), so each verdict moves a threshold or a model the most. Never counted in a precision
-(`v_review_round_results`). Only for `shown` and `refused`: a gap has no confidence. Its verdicts
-still become votes like any other, so a model judged on held-out votes (`technology_field_train`,
-`wz_estimate`) also sees these harder cases: that makes its score lower, never higher.
+is closest to the bar (`bar()`: websites 0.35, everything else 0.50), so each verdict moves a
+threshold or a model the most. For `resolver.GUESS_FIELDS` the coordinator shows any guess above 0
+(`_GUESS_MIN_CONF`); 0.50 is then the edge between a red and a yellow guess in the app, where it is
+most open whether a guess is right, and teach aims there on purpose (decided 2026-11-09). Never
+counted in a precision (`v_review_round_results`). Only for `shown` and `refused`: a gap has no
+confidence. Its verdicts still become votes like any other, so a model judged on held-out votes
+(`technology_field_train`, `wz_estimate`) also sees these harder cases: that makes its score lower,
+never higher.
 At most one task per company: `feedback_observations` keeps one vote per person, company and field.
 
 Started by hand in Airflow too: the DAG `review_round` (`run_draw`, its inputs as `REVIEW_*`).
@@ -81,7 +84,12 @@ def _accepted(cur: Any) -> set[str]:
 
 
 def bar(field: str) -> float:
-    """The confidence from which the coordinator shows a value of `field`."""
+    """The confidence a `teach` round aims at for `field`.
+
+    The coordinator's bar: websites 0.35, everything else 0.50. For `resolver.GUESS_FIELDS` the
+    coordinator shows any guess above 0 (`_GUESS_MIN_CONF`); 0.50 is there the edge between a red
+    and a yellow guess in the app, where it is most open whether a guess is right.
+    """
     from pipeline_coordinator.resolver import _FIELD_MIN_CONF, _WEBSITE_MIN_CONF
 
     return _WEBSITE_MIN_CONF if FEEDBACK_ALIASES.get(field, field) == "website" else _FIELD_MIN_CONF
