@@ -96,7 +96,8 @@ promoted only on held-out companies people judged and the keywords left empty: a
 the 77 fields or `NONE` for companies the keywords left empty (later also for ones they gave a field,
 below), from the same text with names, emails
 and phone numbers replaced (`enrichment.llm`). Since #183 (decided 2026-11-09) each answer is also a
-guess in the app: a `technology_field` observation at 0.55, below the keywords; `NONE` writes nothing.
+guess in the app: a `technology_field` and a `wz_division_estimated` observation at 0.55, below
+the keywords; `NONE` writes nothing (task `publish_labels`).
 They may train the text classifier only after a person has checked a sample
 (`scripts/llm_labels_sample.py`, 100 labels of companies the keywords left empty); precision and cost per label go here. Not measured yet.
 About 12,900 tokens per company (Claude Opus 5.5, 189 companies, local): the 10 million tokens a month
@@ -112,8 +113,8 @@ answer. Zero-shot it agrees with Claude on 41 % of the Technologiefelder and 34 
 **Estimated WZ division (#140).** The same answer also names one of the 87 WZ divisions in
 `wz_divisions`, or `NONE`, stored as `wz_division` next to the label. It is an **estimate** of what the
 company does, from its website: never the official `wz_code`, and never in the WZ cluster column. It
-reaches the app as a field of its own, `wz_division_estimated`, "WZ (geschätzt)", through our own model
-(below). Companies the keywords left empty are asked first; once all of them are labelled, companies
+reaches the app as a field of its own, `wz_division_estimated`, "WZ (geschätzt)": as Claude's guess at
+0.55 (#183, above), through our own model (below) and through the local classifier (at most 0.50). Companies the keywords left empty are asked first; once all of them are labelled, companies
 the keywords gave a field (each record says which: `keyword_outcome`), so the WZ model also learns
 from those. Not measured yet.
 

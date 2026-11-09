@@ -115,13 +115,14 @@ needed. The hub has no GPU.
 
 | Task | Technique today | Next |
 |---|---|---|
-| Technologiefeld, purpose field | keyword weights; a spaCy text classifier only fills rows no keyword reached (`enrichment/branch_textcat.py`) | keywords run as DAG `technology_field`; the text classifier is trained weekly (`technology_field_train`), promoted only on held-out companies people judged (none yet) |
+| Technologiefeld, purpose field | keyword weights; a spaCy text classifier only fills rows no keyword reached (`enrichment/branch_textcat.py`); for the Technologiefeld also Claude's labels (0.55) and the local classifier (at most 0.50) as guesses below the keywords (#183) | keywords run as DAG `technology_field`; the text classifier is trained weekly (`technology_field_train`), promoted only on held-out companies people judged (none yet) |
 | Is a page the company's own site | rules: Impressum, register number, name and postcode ([website-verification](website-verification.md)) | |
 | Manager names | regular expressions on the Impressum, plus spaCy (`manager_ner`) | weekly training from votes |
-| Cluster, DeepTech, isAI | none | labels first, then a text classifier |
+| Cluster | none | labels first, then a text classifier |
+| DeepTech, isAI, WZ (geschätzt) | the local classifier GLiNER2.5-multi-Decide, zero-shot, on our own CPUs (`local_classifier`, #183); for the WZ division also Claude's labels | fine-tuning on Claude's labels and people's verdicts |
 
-A language model is never the only evidence and never used for fields with a fixed format (register
-numbers, postcodes, URLs). Its checked answers can become training labels for a small model.
+A language model's answer is only ever a guess, shown with its confidence (#183), and never used for
+fields with a fixed format (register numbers, postcodes, URLs). Its checked answers can become training labels for a small model.
 
 ## 7. Feedback loop: training `manager_ner`
 
