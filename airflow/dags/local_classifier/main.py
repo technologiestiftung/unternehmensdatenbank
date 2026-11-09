@@ -128,8 +128,9 @@ CHUNK = 10
 
 
 def _write(source_id: str, sync_run_id: str, asked: Mapping[str, Mapping[str, str]], websites: Mapping[str, str],
-           answers: Mapping[str, Mapping[str, tuple[str, float]]]) -> None:
-    """One chunk's answers, on a fresh connection."""
+           answers: Mapping[str, Mapping[str, tuple[str, float]]]) -> int:
+    """One chunk's answers, on a fresh connection. Returns how many earlier guesses were dropped."""
+    dropped = 0
     connection = get_connection()
     try:
         with connection, connection.cursor() as cur:
@@ -142,20 +143,27 @@ def _write(source_id: str, sync_run_id: str, asked: Mapping[str, Mapping[str, st
                 )
                 for field in asked:
                     value, conf = fields.get(field, (None, 0.0))
-                    replace_guess(cur, company_id=cid, source_record_id=record_id, source_id=source_id,
-                                  sync_run_id=sync_run_id, field_name=field, value_text=value,
-                                  confidence=decide.stored_confidence(conf),
-                                  metadata={"model": decide.MODEL_VERSION, "model_confidence": round(conf, 4),
-                                            "ai_generated": True})
+                    dropped += replace_guess(
+                        cur, company_id=cid, source_record_id=record_id, source_id=source_id,
+                        sync_run_id=sync_run_id, field_name=field, value_text=value,
+                        confidence=decide.stored_confidence(conf),
+                        metadata={"model": decide.MODEL_VERSION, "model_confidence": round(conf, 4),
+                                  "ai_generated": True})
     finally:
         connection.close()
+    return dropped
 
 
 def run_classify() -> int:
     """Ask the model about up to `MAX_COMPANIES` companies, write its guesses and drop those of companies
-    without a published website. Returns companies answered plus guesses dropped (0: nothing changed)."""
+    whose website is no longer the one they were read off. Returns companies answered plus guesses dropped
+    (0: nothing changed)."""
+    from enrichment import page_cache
     from technology_field.train import require_store, stored_text
 
+    if not page_cache.enabled():
+        log.info("No page store configured: no website text to read, nothing asked or dropped.")
+        return 0
     connection = get_connection()
     try:
         with connection, connection.cursor() as cur:
@@ -166,19 +174,19 @@ def run_classify() -> int:
             sync_run_id = start_sync_run(cur, source_id=source_id)
     finally:
         connection.close()
-    written = without_text = 0
+    written = without_text = dropped = 0
     for start in range(0, len(todo), CHUNK):
         chunk = todo[start:start + CHUNK]
         texts = {cid: text[:MAX_CHARS] for cid in chunk if (text := stored_text(websites[cid]))}
         require_store()
         # A company without stored text is recorded too, with no answers, so it is not picked again every run.
-        _write(source_id, sync_run_id, asked, websites, {cid: {} for cid in chunk} | answer(texts, asked))
+        dropped += _write(source_id, sync_run_id, asked, websites, {cid: {} for cid in chunk} | answer(texts, asked))
         written += len(texts)
         without_text += len(chunk) - len(texts)
     connection = get_connection()
     try:
         with connection, connection.cursor() as cur:
-            dropped = _drop_without_website(cur, source_id, list(asked), sorted(websites))
+            dropped += _drop_stale(cur, source_id, list(asked), websites)
             finish_sync_run(cur, sync_run_id=sync_run_id, records_seen=len(todo), records_created=written,
                             records_updated=dropped, records_failed=without_text)
     finally:
@@ -188,23 +196,34 @@ def run_classify() -> int:
     return written + dropped
 
 
-def _drop_without_website(cur: Any, source_id: str, fields: list[str], company_ids: list[str]) -> int:
-    """Guesses at 0 for every company whose website is no longer published with text, and its cached answers
-    marked stale, so it is asked again if the website comes back. Returns how many guesses were dropped."""
+#: This source's records whose website is not the company's current one (published, with text).
+_STALE = """
+    SELECT r.company_id FROM public.company_source_records r
+    LEFT JOIN unnest(%s::uuid[], %s::text[]) AS c(company_id, website)
+      ON c.company_id = r.company_id AND c.website = r.external_url
+    WHERE r.source_id = %s AND c.company_id IS NULL
+"""
+
+
+def _drop_stale(cur: Any, source_id: str, fields: list[str], websites: Mapping[str, str]) -> int:
+    """Guesses at 0 for every company whose website is gone or another than the one it was read off, and its
+    cached answers marked stale, so it is asked again. Returns how many guesses were dropped."""
+    ids = sorted(websites)
+    current = (ids, [websites[cid] for cid in ids], source_id)
     cur.execute(
-        """
+        f"""
         UPDATE public.company_field_observations SET confidence = 0, updated_at = now()
-        WHERE source_id = %s AND field_name = ANY(%s) AND confidence > 0 AND NOT (company_id = ANY(%s::uuid[]))
+        WHERE source_id = %s AND field_name = ANY(%s) AND confidence > 0 AND company_id IN ({_STALE})
         """,
-        (source_id, fields, company_ids),
+        (source_id, fields, *current),
     )
     dropped = cur.rowcount
     cur.execute(
-        """
+        f"""
         UPDATE public.company_source_records SET source_payload = source_payload - 'model'
-        WHERE source_id = %s AND source_payload ? 'model' AND NOT (company_id = ANY(%s::uuid[]))
+        WHERE source_id = %s AND source_payload ? 'model' AND company_id IN ({_STALE})
         """,
-        (source_id, company_ids),
+        (source_id, *current),
     )
     return dropped
 

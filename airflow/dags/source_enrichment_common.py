@@ -418,10 +418,11 @@ def replace_guess(
     value_text: str | None,
     confidence: float,
     metadata: dict[str, Any] | None = None,
-) -> None:
+) -> int:
     """A source's one current guess for a classification field (#183): this value at this confidence, every
     other value this source gave the company for the field at 0, so a model that changed its mind never
-    competes with itself. `value_text` None drops them all (the source has no guess any more).
+    competes with itself. `value_text` None drops them all (the source has no guess any more). Returns how
+    many values were dropped.
 
     Finds the row itself instead of relying on `ON CONFLICT`: `deeptech_class` and `is_ai` have no
     upsert key, and adding one could fail on duplicate corrections already stored.
@@ -452,6 +453,7 @@ def replace_guess(
         " AND value_text IS DISTINCT FROM %s",
         (company_id, field_name, source_id, value_text),
     )
+    return cur.rowcount
 
 
 def insert_text_observation(
