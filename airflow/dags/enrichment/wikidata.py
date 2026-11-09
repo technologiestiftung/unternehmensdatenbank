@@ -14,6 +14,13 @@ matches, 66 have an employee count and 34 a revenue. Read by hand: mostly the gr
 registered entity's alone (Zalando SE, HELIOS Kliniken GmbH), and at least one plainly wrong value
 (a small Kreuzberg UG with 98 million euros revenue). So they get an unmeasured, middling confidence.
 
+A third query (`FOUNDING_QUERY`, #137) reads the items' inception (P571) as a founding year. Measured
+on 2026-11-09: 3,169 items have one, 3,165 at least to the year. Of the 552 companies the local
+database matches, 424 get a year, 274 of them with no founding year from any other source. It dates
+the organisation, like the company's own website (same year in 10 of 12 against `structured_data`,
+7 of 7 against `website_founding_text`), not the current legal entity: GLEIF has the same year in
+only 50 of 141, and Wikidata is earlier in 74.
+
 A listed website is a **proposal**. Wikidata itself warns that a URL may be dead or hijacked, so
 every one goes through the same verification as a guessed domain (`pipeline.verify_proposed`).
 """
@@ -169,3 +176,41 @@ def fetch_figures() -> dict[str, dict[str, Figure]]:
                              headers={"Accept": "application/sparql-results+json", "User-Agent": USER_AGENT})
     response.raise_for_status()
     return parse_figures(response.json()["results"]["bindings"])
+
+
+# --- founding year (#137) ---------------------------------------------------------------------
+
+#: The same Berlin items' inception (P571), best-ranked statements only, with the date's precision.
+#: `wikibase:BestRank` rather than a rank FILTER: the FILTER timed out (504) on the figures query.
+FOUNDING_QUERY = """
+SELECT ?item ?date ?precision WHERE {
+  ?item wdt:P159 ?hq . ?hq wdt:P131* wd:Q64 . ?item wdt:P856 ?website .
+  ?item p:P571 ?st . ?st a wikibase:BestRank ; psv:P571 ?v .
+  ?v wikibase:timeValue ?date ; wikibase:timePrecision ?precision .
+}
+"""
+#: Wikidata's time precision for a year; 10 is a month, 11 a day. A decade (8) or century (7) names no year.
+YEAR_PRECISION = 9
+
+
+def parse_founding(bindings: Iterable[dict[str, Any]]) -> dict[str, int]:
+    """SPARQL rows -> per Wikidata id, its founding year: the earliest when it has several (45 of 3,169
+    Berlin items, 2026-11-09). Dates less precise than a year, and years before 1000, are left out."""
+    years: dict[str, int] = {}
+    for row in bindings:
+        match = re.match(r"\+?([1-9]\d{3})-", row["date"]["value"])
+        if int(row["precision"]["value"]) < YEAR_PRECISION or not match:
+            continue
+        qid = row["item"]["value"].rsplit("/", 1)[-1]
+        years[qid] = min(int(match.group(1)), years.get(qid, 9999))
+    return years
+
+
+def fetch_founding() -> dict[str, int]:
+    """One query to Wikidata's public endpoint. Raises on an HTTP error."""
+    from enrichment.http_client import session
+
+    response = session().get(ENDPOINT, params={"query": FOUNDING_QUERY}, timeout=120,
+                             headers={"Accept": "application/sparql-results+json", "User-Agent": USER_AGENT})
+    response.raise_for_status()
+    return parse_founding(response.json()["results"]["bindings"])

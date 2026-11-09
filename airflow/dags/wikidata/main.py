@@ -1,8 +1,8 @@
 """Websites Wikidata lists for Berlin companies, verified like a guessed domain (issue #26).
 
-Three tasks, and the figures inside match:
+Three tasks, and the figures and founding years inside match:
 
-1. **match**, at most once a day. Two SPARQL queries (`enrichment.wikidata`) and every item is matched
+1. **match**, at most once a day. Three SPARQL queries (`enrichment.wikidata`) and every item is matched
    to a company in SQL, with the one name key (`normalize_company_name`):
    - register digits AND the same name key -> `match_method = 'identifier'`, confidence 1.0. Wikidata
      holds the bare register number without the court, so the number alone proves nothing;
@@ -22,7 +22,11 @@ Three tasks, and the figures inside match:
    registered entity's alone, and not checked: confidence `FIGURE_CONFIDENCE`. One row per company and
    field, updated in place; a company whose item no longer matches, or no longer has the figure, keeps
    the row at confidence 0. A failed figures query is logged and skipped; the websites still match.
-4. **store_texts**, between the two (`run_texts`): each matched item's German Wikipedia article and
+4. **founding year**, inside match too (#137): each matched item's inception (P571) as `founding_year`,
+   the earliest year when a company has several. It dates the organisation, as the company's own
+   website does, not the current legal entity, so GLEIF (1.0) wins where it has a year; confidence
+   `FOUNDING_CONFIDENCE`. Kept and dropped like the figures. A failed query changes nothing.
+5. **store_texts**, between the two (`run_texts`): each matched item's German Wikipedia article and
    Wikidata description go into the company corpus (`enrichment.corpus`, #61), for training.
 
 The page, not the match, proves a website. An item that no longer matches keeps its record,
@@ -48,6 +52,7 @@ from source_enrichment_common import (
     ensure_source,
     finish_sync_run,
     get_connection,
+    insert_text_observation,
     schedule_label,
     start_sync_run,
     with_code_version,
@@ -64,7 +69,8 @@ DETAILS = SourceDetails(
         "Offizielle Websites, die Wikidata für Berliner Organisationen nennt, über Registernummer "
         "oder eindeutigen Namen zugeordnet und wie eine geratene Domain geprüft. Dazu Mitarbeiterzahl "
         "und Umsatz (in Euro) mit ihrem Stichtag, wo Wikidata sie nennt: oft die Zahlen des Konzerns, "
-        "nicht nur der eingetragenen Firma, und nicht geprüft."
+        "nicht nur der eingetragenen Firma, und nicht geprüft. Dazu das Gründungsjahr der "
+        "Organisation, nicht der heutigen Rechtsform."
     ),
     schedule=schedule_label(SCHEDULE),
     base_url="https://www.wikidata.org",
@@ -74,6 +80,10 @@ DETAILS = SourceDetails(
 BATCH_SIZE = int(os.getenv("WIKIDATA_BATCH_SIZE", "100"))
 #: Unmeasured. Above the bar (0.5), so the only source shows; below a register or an annual account.
 FIGURE_CONFIDENCE = 0.6
+#: Unmeasured, a policy: below GLEIF (1.0, the legal entity) and the company's own structured data
+#: (0.6), above a year read from its website text (0.55). The three organisation-dated sources agree
+#: on 17 of 19 companies locally (2026-11-09), so the order rarely decides anything.
+FOUNDING_CONFIDENCE = 0.58
 WORKERS = int(os.getenv("WIKIDATA_WORKERS", "8"))
 RECHECK_AFTER_DAYS = int(os.getenv("WIKIDATA_RECHECK_DAYS", "90"))
 
@@ -105,17 +115,24 @@ def run_match() -> int:
         except Exception as exc:  # noqa: BLE001  the figures are extra; the websites must still match
             log.warning("Wikidata figures not read (%s); the stored figures stay as they are.", type(exc).__name__)
             figures = None
+        try:
+            founding = wikidata.fetch_founding()
+        except Exception as exc:  # noqa: BLE001  the years are extra too
+            log.warning("Wikidata founding years not read (%s); the stored years stay as they are.",
+                        type(exc).__name__)
+            founding = None
         with connection, connection.cursor() as cur:
             sync_run_id = start_sync_run(cur, source_id=source_id)
             matched, demoted = match_items(cur, items, source_id=source_id)
             figures_changed = write_figures(cur, figures, source_id=source_id, sync_run_id=sync_run_id)
+            years_changed = write_founding_years(cur, founding, source_id=source_id, sync_run_id=sync_run_id)
             cur.execute("UPDATE public.sources SET last_synced_at = now() WHERE id = %s", (source_id,))
             finish_sync_run(cur, sync_run_id=sync_run_id, records_seen=len(items), records_created=matched,
                             records_updated=0, records_failed=0)
         log.info("%d Wikidata items with a Berlin headquarters and a website; %d matched a company;"
-                 " %d websites demoted; %d employee or revenue figures changed.",
-                 len(items), matched, demoted, figures_changed)
-        return demoted + figures_changed
+                 " %d websites demoted; %d employee or revenue figures changed; %d founding years changed.",
+                 len(items), matched, demoted, figures_changed, years_changed)
+        return demoted + figures_changed + years_changed
     finally:
         connection.close()
 
@@ -280,6 +297,53 @@ def write_figures(cur: Any, figures: dict[str, dict[str, wikidata.Figure]] | Non
                 (record_id, sync_run_id, amount, as_of, FIGURE_CONFIDENCE, metadata,
                  stored[(company_id, field)][0]),
             )
+    return len(plan)
+
+
+def planned_founding_years(
+    current: dict[str, tuple[str, int]], stored: dict[tuple[str, str], float],
+) -> list[tuple[str, str, str, str | None]]:
+    """What writing the founding years does: ("write" | "drop", company, year, record id).
+
+    Pure, so it can be tested without a database. `current` maps a company to (record id, year) for
+    its active matches; `stored` maps (company, year) to the confidence of this source's observation.
+    "drop" sets a year nothing supports any more to confidence 0; never deleted.
+    """
+    plan: list[tuple[str, str, str, str | None]] = [
+        ("write", company_id, str(year), record_id) for company_id, (record_id, year) in sorted(current.items())
+        if stored.get((company_id, str(year))) != FOUNDING_CONFIDENCE
+    ]
+    keep = {(company_id, str(year)) for company_id, (_, year) in current.items()}
+    plan += [("drop", company_id, year, None) for (company_id, year), confidence in sorted(stored.items())
+             if (company_id, year) not in keep and confidence > 0]
+    return plan
+
+
+def write_founding_years(cur: Any, years: dict[str, int] | None, *, source_id: str, sync_run_id: str) -> int:
+    """Each active match's founding year as a `founding_year` observation, the earliest when a company
+    matches several items. Returns how many rows changed. `years` None (the query failed) changes nothing."""
+    if years is None:
+        return 0
+    cur.execute("SELECT id::text, company_id::text, external_id FROM public.company_source_records"
+                " WHERE source_id = %s AND is_active ORDER BY external_id", (source_id,))
+    current: dict[str, tuple[str, int]] = {}
+    for record_id, company_id, qid in cur.fetchall():
+        if qid in years and (company_id not in current or years[qid] < current[company_id][1]):
+            current[company_id] = (record_id, years[qid])
+    cur.execute("SELECT company_id::text, value_text, COALESCE(confidence, 0)::float"
+                " FROM public.company_field_observations WHERE source_id = %s AND field_name = 'founding_year'",
+                (source_id,))
+    stored = {(company_id, year): confidence for company_id, year, confidence in cur.fetchall()}
+    plan = planned_founding_years(current, stored)
+    for action, company_id, year, record_id in plan:
+        if action == "drop":
+            cur.execute("UPDATE public.company_field_observations SET confidence = 0, updated_at = now()"
+                        " WHERE source_id = %s AND company_id = %s AND field_name = 'founding_year'"
+                        " AND value_text = %s", (source_id, company_id, year))
+            continue
+        insert_text_observation(cur, company_id=company_id, source_record_id=record_id, source_id=source_id,
+                                sync_run_id=sync_run_id, field_name="founding_year", value_text=year,
+                                confidence=FOUNDING_CONFIDENCE, metadata={"property": "P571"})
     return len(plan)
 
 
