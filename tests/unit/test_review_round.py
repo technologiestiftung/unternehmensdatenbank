@@ -112,6 +112,8 @@ def test_the_dag_form_becomes_the_draws_arguments() -> None:
                                "size": 150, "mode": "teach", "version": None, "title": None}
     assert draw_args({"REVIEW_FIELD": "website", "REVIEW_KIND": "gap"})["size"] == DEFAULT_SIZE
     assert draw_args({"REVIEW_FIELD": "website", "REVIEW_KIND": "gap", "REVIEW_SOURCE": ""})["source"] is None
+    # A field emptied in Airflow 3's form arrives as null, which the template renders as "None".
+    assert draw_args({"REVIEW_FIELD": "website", "REVIEW_KIND": "gap", "REVIEW_SOURCE": "None"})["source"] is None
     with pytest.raises(ValueError, match="required"):
         draw_args({"REVIEW_KIND": "gap"})
     with pytest.raises(ValueError, match="whole number"):

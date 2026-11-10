@@ -220,9 +220,11 @@ def draw(cur: Any, *, field: str, kind: str, source: str | None = None, size: in
 
 def draw_args(environ: Mapping[str, str]) -> dict[str, Any]:
     """`draw`'s arguments from the `REVIEW_*` variables the DAG `review_round` sets from its form.
-    An empty value is no value; the size defaults to `DEFAULT_SIZE`."""
+    An empty value is no value, and so is "None" (how the template renders a field left empty); the size
+    defaults to `DEFAULT_SIZE`."""
     def value(name: str) -> str | None:
-        return (environ.get(f"REVIEW_{name}") or "").strip() or None
+        text = (environ.get(f"REVIEW_{name}") or "").strip()
+        return None if text in ("", "None") else text
 
     field, kind = value("FIELD"), value("KIND")
     if not field or not kind:
