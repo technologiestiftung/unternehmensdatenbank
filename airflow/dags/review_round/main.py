@@ -26,18 +26,19 @@ def _make_dag():  # noqa: ANN201
         description="By hand only: draw a review round (Prüfen) for one source and field",
         schedule=None, start_date=datetime(2026, 11, 1, tzinfo=timezone.utc), catchup=False,
         max_active_runs=1, tags=["review"],
+        # Optional fields may be null: Airflow 3's form sends an emptied field as null, not "".
         params={
             "field": Param("technology_field", type="string", minLength=1,
                            description="Observation field, e.g. technology_field, candidate_url, website, wz_division_estimated"),
             "kind": Param("shown", enum=list(KINDS),
                           description="shown: values the app shows; refused: values it does not; gap: companies without a value"),
-            "source": Param("", type="string",
+            "source": Param("", type=["null", "string"],
                             description="Source key (sources.key), e.g. branch_classifier; required for shown and refused"),
             "size": Param(DEFAULT_SIZE, type="integer", minimum=1, maximum=MAX_SIZE),
             "mode": Param("measure", enum=list(MODES),
                           description="measure: random, gives a precision; teach: closest to the bar, never a precision"),
-            "version": Param("", type="string", description="Code or model version the values came from (optional)"),
-            "title": Param("", type="string", description="Title shown in the app (optional)"),
+            "version": Param("", type=["null", "string"], description="Code or model version the values came from (optional)"),
+            "title": Param("", type=["null", "string"], description="Title shown in the app (optional)"),
         },
     ) as dag:
         pipeline_task(
