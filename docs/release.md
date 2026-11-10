@@ -48,7 +48,7 @@ a keyword. CI runs it too.
 
 The hub's Airflow cannot install our packages (spaCy, bs4 ...). So every task runs as a
 **KubernetesPodOperator** pod from `ghcr.io/technologiestiftung/unternehmensdatenbank-pipelines`
-(`airflow/pipelines.Dockerfile`: the DAG packages and `airflow/requirements.txt`, no Airflow). A pod
+(`airflow/pipelines.Dockerfile`: the DAG packages, `airflow/requirements.txt` and the local classifier's `airflow/requirements-model.txt` with CPU-only PyTorch and its baked-in weights, no Airflow). A pod
 runs one task; its exit code is the task's result, its log the task's log.
 
 ```
