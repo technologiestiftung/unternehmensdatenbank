@@ -24,6 +24,8 @@ COPY requirements.txt /tmp/requirements.txt
 # CPU-only torch from the PyTorch index, alone, so that index serves no other package (requirements.txt).
 RUN pip install --no-cache-dir --index-url https://download.pytorch.org/whl/cpu "torch>=2.5,<3"
 RUN pip install --no-cache-dir -r /tmp/requirements.txt
+COPY requirements-model.txt /tmp/requirements-model.txt
+RUN pip install --no-cache-dir -r /tmp/requirements-model.txt
 
 COPY dags/ /opt/pipelines/
 
