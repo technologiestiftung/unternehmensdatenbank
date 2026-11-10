@@ -19,7 +19,7 @@ guesses per company (each one a DNS lookup). Needs the database, no network:
 the DAG `review_round` (field `website`, kind `gap`, size 200, mode `measure`). Its tasks are active
 companies without a website, in a random order stored with the round. On the Prüfen page the person
 types the website found, or answers "gibt es nicht" (no own website: none found, or only a directory or
-social page) or "?". Prints the answers, sorts each found website the way the 111 misses were sorted
+social page) or "?". Prints the answers, sorts each found website the way the 110 misses were sorted
 (discovery never ran, never generated, another TLD, guessed but lost at the DNS lookup or probe, lost at the page check),
 and the test-set rows to append (sole traders left out). `--verify` also reads each found page
 again through `pipeline.verify_proposed` (network) and counts which ones prove their company.
