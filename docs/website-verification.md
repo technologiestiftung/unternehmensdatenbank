@@ -135,7 +135,21 @@ test set as a hand-found miss.
 **Measuring a change:** `scripts/url_discovery_test_set.csv` (register entry and host only; sole traders
 left out, because their domain can carry the owner's name) holds 106 of the 110, the 4 websites found
 by hand, and 292 of the 300 sampled hits; `scripts/measure_url_guesses.py` reports
-how many each group gets guessed. `--draw-hand-sample` draws the 200 companies for the hand search.
+how many each group gets guessed.
+
+**The hand search (#89)** is a Prüfen round: trigger the DAG `review_round` with field `website`, kind
+`gap`, size 200, mode `measure`. It draws active companies without a website in a random order stored
+with the round. The person searches each one (name and "Berlin", then name and register number) and
+types the website, or answers "gibt es nicht" (none found, or only a directory or social page: no own
+website either way) or "?". `measure_url_guesses.py --round <id>` then counts the answers, sorts each
+found website like the 111 misses (never generated, another TLD, guessed but lost at the DNS lookup or
+probe, lost at the page check) and prints the rows to add to the test set; `--verify` reads each page
+again and counts how many prove their company.
+
+**A website typed there is a correction, and it is shown.** The review queue copies it into
+`extraction_feedback`, and `feedback_observations` gives the first correction of an empty field 0.60.
+So a hand-found website goes live without our page check, like any website corrected in the app; it is
+a person's answer, not a guess. `--verify` measures how many of them our verification would have proven.
 
 ## Sites that name the company but prove nothing (#96)
 
