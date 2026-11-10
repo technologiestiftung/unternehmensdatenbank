@@ -21,3 +21,4 @@ def test_each_miss_lands_in_one_bucket() -> None:
     assert miss_reason("alphabeta.de", guessed, set()) == "guessed, lost at the DNS lookup or probe"
     assert miss_reason("alpha-beta.berlin", guessed, set()) == "another TLD"
     assert miss_reason("beta24.de", guessed, set()) == "never generated"
+    assert miss_reason("alphabeta.de", guessed, None) == "discovery never ran"

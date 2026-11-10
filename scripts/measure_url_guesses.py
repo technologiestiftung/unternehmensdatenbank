@@ -20,7 +20,7 @@ the DAG `review_round` (field `website`, kind `gap`, size 200, mode `measure`). 
 companies without a website, in a random order stored with the round. On the Prüfen page the person
 types the website found, or answers "gibt es nicht" (no own website: none found, or only a directory or
 social page) or "?". Prints the answers, sorts each found website the way the 111 misses were sorted
-(never generated, another TLD, guessed but lost at the DNS lookup or probe, lost at the page check),
+(discovery never ran, never generated, another TLD, guessed but lost at the DNS lookup or probe, lost at the page check),
 and the test-set rows to append (sole traders left out). `--verify` also reads each found page
 again through `pipeline.verify_proposed` (network) and counts which ones prove their company.
 """
@@ -84,8 +84,11 @@ def host_of(url: str) -> str:
     return (urlparse(url if "//" in url else f"//{url}").hostname or "").removeprefix("www.")
 
 
-def miss_reason(host: str, guessed: list[str], stored: set[str]) -> str:
-    """Why discovery missed a website a person found: the buckets of #89."""
+def miss_reason(host: str, guessed: list[str], stored: set[str] | None) -> str:
+    """Why discovery missed a website a person found: the buckets of #89. `stored` is None when
+    discovery never ran on the company (no `discovery_tier` row)."""
+    if stored is None:
+        return "discovery never ran"
     if host in stored:
         return "lost at the page check"
     if host in guessed:
@@ -118,15 +121,17 @@ def read_round(round_id: str, *, verify: bool) -> None:
         found = [t for t in tasks if t[5]]
         cur.execute(
             """
-            SELECT o.company_id::text, o.value_text FROM public.company_field_observations o
+            SELECT o.company_id::text, o.field_name, o.value_text FROM public.company_field_observations o
             JOIN public.sources s ON s.id = o.source_id AND s.key = 'website_discovery'
             WHERE o.company_id = ANY(%s::uuid[])
             """,
             ([t[0] for t in found],),
         )
-        stored: dict[str, set[str]] = {}
-        for company_id, url in cur.fetchall():
-            stored.setdefault(company_id, set()).add(host_of(url))
+        observations = cur.fetchall()
+        stored: dict[str, set[str]] = {c: set() for c, field, _ in observations if field == "discovery_tier"}
+        for company_id, field, value in observations:
+            if field != "discovery_tier" and company_id in stored:
+                stored[company_id].add(host_of(value))
         common, affixes = frozenset(_common_words(cur)), _affixes(cur)
         companies = proposals._companies(cur, [t[0] for t in found]) if verify else {}
     if not tasks:
@@ -140,7 +145,7 @@ def read_round(round_id: str, *, verify: bool) -> None:
         host = host_of(correction)
         guessed = [g.host.removeprefix("www.")
                    for g in url_patterns.generate_candidates(name, city, common=common, affixes=affixes)]
-        reasons[miss_reason(host, guessed, stored.get(company_id, set()))] += 1
+        reasons[miss_reason(host, guessed, stored.get(company_id))] += 1
         if verify:
             best = pipeline.verify_proposed(companies[company_id], [f"https://{host}"],
                                             method=conf.METHOD_WEB_SEARCH, common=common)

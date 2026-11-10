@@ -142,7 +142,7 @@ how many each group gets guessed.
 with the round. The person searches each one (name and "Berlin", then name and register number) and
 types the website, or answers "gibt es nicht" (none found, or only a directory or social page: no own
 website either way) or "?". `measure_url_guesses.py --round <id>` then counts the answers, sorts each
-found website like the 111 misses (never generated, another TLD, guessed but lost at the DNS lookup or
+found website like the 111 misses (discovery never ran on the company, never generated, another TLD, guessed but lost at the DNS lookup or
 probe, lost at the page check) and prints the rows to add to the test set; `--verify` reads each page
 again and counts how many prove their company.
 
