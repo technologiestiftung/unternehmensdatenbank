@@ -1,0 +1,43 @@
+table:
+  name: review_round_requests
+  schema: public
+configuration:
+  custom_name: review_round_requests
+object_relationships:
+  - name: round
+    using:
+      manual_configuration:
+        remote_table:
+          name: review_rounds
+          schema: public
+        column_mapping:
+          round_id: id
+insert_permissions:
+  # #190: a manager asks for a round; the DAG review_round_requests draws it. Status and result are the DAG's.
+  - role: manager
+    permission:
+      check: {}
+      columns:
+        - field_name
+        - kind
+        - source_key
+        - size
+        - mode
+        - title
+select_permissions:
+  - role: manager
+    permission:
+      columns:
+        - id
+        - field_name
+        - kind
+        - source_key
+        - size
+        - mode
+        - title
+        - status
+        - round_id
+        - error
+        - requested_at
+        - done_at
+      filter: {}

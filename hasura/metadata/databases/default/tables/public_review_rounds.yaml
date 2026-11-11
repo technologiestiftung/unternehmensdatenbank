@@ -53,3 +53,52 @@ select_permissions:
           _where:
             enabled:
               _eq: true
+  # #190: a manager renames and deletes rounds from the app; the same switch applies.
+  - role: manager
+    permission:
+      columns:
+        - id
+        - source_key
+        - field_name
+        - feedback_field
+        - kind
+        - mode
+        - version
+        - title
+        - size
+        - created_at
+        - closed_at
+      filter:
+        _exists:
+          _table:
+            name: review_settings
+            schema: public
+          _where:
+            enabled:
+              _eq: true
+update_permissions:
+  - role: manager
+    permission:
+      columns:
+        - title
+      filter:
+        _exists:
+          _table:
+            name: review_settings
+            schema: public
+          _where:
+            enabled:
+              _eq: true
+      check: {}
+delete_permissions:
+  # Deleting a round takes back its votes (V11's BEFORE DELETE trigger).
+  - role: manager
+    permission:
+      filter:
+        _exists:
+          _table:
+            name: review_settings
+            schema: public
+          _where:
+            enabled:
+              _eq: true
