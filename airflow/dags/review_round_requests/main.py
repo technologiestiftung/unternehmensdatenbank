@@ -1,6 +1,6 @@
-"""Draw the review rounds a manager asked for in the app (#190).
+"""Draw the review rounds someone asked for in the app (#190).
 
-The app's "Prüfen" page writes a row into `review_round_requests` (Hasura role `manager` only; V11). Every
+The app's "Prüfen" page writes a row into `review_round_requests` (any logged-in person, Hasura role `user`; V11). Every
 `SCHEDULE` this DAG draws each pending request with `review_round.draw.draw`, oldest first, each in its own
 transaction, and writes back `drawn` with the round, or `failed` with the reason (e.g. "nothing to draw
 for ..."), which the app shows. The app never talks to Airflow.
@@ -74,7 +74,7 @@ def _make_dag():  # noqa: ANN201
 
     with DAG(
         dag_id=DAG_ID,
-        description="Draws the review rounds a manager asked for on the app's Prüfen page",
+        description="Draws the review rounds someone asked for on the app's Prüfen page",
         schedule=SCHEDULE, start_date=datetime(2026, 11, 11, tzinfo=timezone.utc), catchup=False,
         max_active_runs=1, tags=["review"],
     ) as dag:

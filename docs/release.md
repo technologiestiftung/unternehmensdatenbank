@@ -154,10 +154,10 @@ No `:latest`, and tags are never overwritten: a hotfix is a new patch release.
 
 ## Keycloak roles
 
-The realm needs the role `user` (everyone) and, since #190, `manager`: who may start, rename and delete
-review rounds on the app's Prüfen page. On play and on the hub someone creates `manager` once in the
-realm and assigns it to the people who manage rounds; the local realm file gives it to `dev`. **Never
-`admin`:** Hasura treats a role of that name as its superuser and checks no permission for it.
+The realm needs only the role `user` (everyone). Every logged-in person may also start, rename and delete
+review rounds on the app's Prüfen page (#190): a separate role for that is not set up yet (decided
+2026-11-11). **Never name a role `admin`:** Hasura treats a role of that name as its superuser and checks
+no permission for it.
 
 ## Open
 

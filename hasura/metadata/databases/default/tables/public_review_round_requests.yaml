@@ -13,8 +13,8 @@ object_relationships:
         column_mapping:
           round_id: id
 insert_permissions:
-  # #190: a manager asks for a round; the DAG review_round_requests draws it. Status and result are the DAG's.
-  - role: manager
+  # #190: every logged-in person may ask for a round (no manager role yet, decided 2026-11-11); the DAG review_round_requests draws it. Status and result are the DAG's.
+  - role: user
     permission:
       check: {}
       columns:
@@ -25,7 +25,7 @@ insert_permissions:
         - mode
         - title
 select_permissions:
-  - role: manager
+  - role: user
     permission:
       columns:
         - id

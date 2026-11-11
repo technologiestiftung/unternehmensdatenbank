@@ -4,8 +4,7 @@
   "sslRequired": "none",
   "roles": {
     "realm": [
-      { "name": "user", "description": "Can read company profiles and write comments (Hasura role `user`)." },
-      { "name": "manager", "description": "Can start, rename and delete review rounds on the Prüfen page (Hasura role `manager`, #190). Never `admin`: Hasura treats that role as its superuser." }
+      { "name": "user", "description": "Can read company profiles and write comments (Hasura role `user`)." }
     ]
   },
   "clients": [
@@ -32,7 +31,7 @@
       "firstName": "Local",
       "lastName": "Developer",
       "credentials": [{ "type": "password", "value": "dev", "temporary": false }],
-      "realmRoles": ["user", "manager", "default-roles-datahub"]
+      "realmRoles": ["user", "default-roles-datahub"]
     }
   ]
 }
