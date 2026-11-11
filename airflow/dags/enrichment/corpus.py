@@ -53,11 +53,12 @@ _bucket_ready = False
 #: Set after S3 failed to answer: the rest of the run works without the store instead of waiting for
 #: a timeout on every page (8 threads, thousands of pages).
 _unreachable = False
-#: S3 answers that mean the store cannot work as configured, for any object.
 #: Every request, writes too (an object is only ever overwritten whole, so a repeated PUT is harmless):
-#: 3 tries more after a dropped connection, a timeout or a 5xx, 0.5 s, 1 s, 2 s apart.
+#: 3 tries more after a dropped connection, a timeout or a 5xx. urllib3 waits 0 s before the first
+#: retry, then backoff_factor * 2**(n-1): 1 s, then 2 s.
 RETRY_SETTINGS = {"total": 3, "backoff_factor": 0.5, "status_forcelist": (500, 502, 503, 504),
                   "allowed_methods": None, "raise_on_status": False}
+#: S3 answers that mean the store cannot work as configured, for any object.
 UNUSABLE = frozenset({"AccessDenied", "InvalidAccessKeyId", "SignatureDoesNotMatch", "NoSuchBucket",
                       "AllAccessDisabled", "InvalidBucketName"})
 #: Error codes already logged this run: a wrong key must be visible, but once, not per page.
