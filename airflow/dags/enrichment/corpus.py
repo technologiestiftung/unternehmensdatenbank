@@ -53,6 +53,11 @@ _bucket_ready = False
 #: Set after S3 failed to answer: the rest of the run works without the store instead of waiting for
 #: a timeout on every page (8 threads, thousands of pages).
 _unreachable = False
+#: Every request, writes too (an object is only ever overwritten whole, so a repeated PUT is harmless):
+#: 3 tries more after a dropped connection, a timeout or a 5xx. urllib3 waits 0 s before the first
+#: retry, then backoff_factor * 2**(n-1): 1 s, then 2 s.
+RETRY_SETTINGS = {"total": 3, "backoff_factor": 0.5, "status_forcelist": (500, 502, 503, 504),
+                  "allowed_methods": None, "raise_on_status": False}
 #: S3 answers that mean the store cannot work as configured, for any object.
 UNUSABLE = frozenset({"AccessDenied", "InvalidAccessKeyId", "SignatureDoesNotMatch", "NoSuchBucket",
                       "AllAccessDisabled", "InvalidBucketName"})
@@ -90,7 +95,8 @@ def _failed(exc: Exception, what: str) -> None:
             _unreachable = True
         return
     if not _unreachable:
-        log.warning("Company corpus unreachable (%s); this run continues without it.", type(exc).__name__)
+        log.warning("Company corpus unreachable (%s: %s); this run continues without it.", type(exc).__name__,
+                    getattr(exc, "reason", None) or exc)
     _unreachable = True
 
 
@@ -117,14 +123,17 @@ def _s3() -> Any:
 
             import urllib3
 
+            RETRY = urllib3.Retry(**RETRY_SETTINGS)
             _client = Minio(
                 _setting("CORPUS_S3_ENDPOINT"),
                 access_key=_setting("CORPUS_S3_ACCESS_KEY"),
                 secret_key=_setting("CORPUS_S3_SECRET_KEY"),
                 secure=_setting("CORPUS_S3_SECURE", "false").lower() in {"1", "true", "yes"},
-                # Short timeouts and no retries: an S3 that does not answer is switched off, not waited for.
+                # Short timeouts, a few retries: one dropped connection must not switch the store off for
+                # a whole run (it did on play, 2026-11-10: every `local_classifier` run failed on it), and an
+                # S3 that does not answer at all costs about 15 s once, then is switched off.
                 http_client=urllib3.PoolManager(timeout=urllib3.Timeout(connect=3, read=30), maxsize=16,
-                                                retries=urllib3.Retry(total=0)),
+                                                retries=RETRY),
             )
         if not _bucket_ready:
             if not _client.bucket_exists(bucket()):
