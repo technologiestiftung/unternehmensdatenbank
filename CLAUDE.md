@@ -47,7 +47,8 @@ scripts/free_checks.sh                              # every free check, as CI ru
 - **Three DB roles, as on the hub:** `app` owns the schema (Flyway, host scripts), DAGs run as
   `writer` (rows only, no DDL), Hasura as `reader`. A DAG that needs DDL is wrong, not the grant.
 - **Keycloak realm roles are Hasura roles; never name one `admin`.** Hasura treats `admin` as its superuser
-  and checks no permission for it. Rounds are managed by `manager` (#190, [release](docs/release.md)).
+  and checks no permission for it. Rounds are started, renamed and deleted by any `user` for now (#190; no
+  manager role yet, decided 2026-11-11).
 - `cp .env.example .env`; `dev-up.sh` fills in a Fernet key. Every DAG starts **paused** (Airflow's
   default); unpausing it in Airflow is the only switch.
 

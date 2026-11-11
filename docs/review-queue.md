@@ -54,10 +54,10 @@ draw a round  ──►  review_tasks  ──►  a person judges in the app  �
 
 ## Draw a round
 
-**In the app** (#190), for a **manager** only (the Keycloak realm role `manager`): the form "Neue Runde" on
+**In the app** (#190), for every logged-in person (no separate role yet, decided 2026-11-11): the form "Neue Runde" on
 `/pruefen` writes a request into `review_round_requests`. The DAG `review_round_requests` draws every
 pending request within 5 minutes with the same `review_round.draw`, and writes back the round or why it
-failed ("nothing to draw for ..."), which the page shows. The app never talks to Airflow. A manager also
+failed ("nothing to draw for ..."), which the page shows. The app never talks to Airflow. Anyone also
 renames a round (its title only) and deletes one.
 
 **Deleting a round takes back its votes**, as if each verdict were set to "unsure": a vote the round
@@ -104,7 +104,6 @@ Counts only, never who judged what.
 1. Export the verdicts once (training data).
 2. One migration drops the triggers and their functions, the two views and the five tables (with `review_round_requests`, V11).
 3. Delete the Hasura metadata (`review_*`, `v_review_round_results`, `v_review_breakdown`), restart Hasura.
-   The Keycloak role `manager` is used by nothing else yet.
 4. Delete `airflow/dags/review_round/`, `airflow/dags/review_round_requests/` and the app's `/pruefen` routes.
 
 What was copied into `extraction_feedback` stays: it is ordinary feedback.

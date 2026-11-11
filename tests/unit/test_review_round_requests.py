@@ -72,7 +72,7 @@ def test_a_refused_draw_is_rolled_back_and_its_reason_kept() -> None:
 
 def test_no_role_is_named_admin_because_hasura_never_checks_its_permissions() -> None:
     """Hasura treats the role `admin` as its superuser: a Keycloak realm role of that name would bypass every
-    permission (measured locally, 2026-11-11: it could set a request's status). The rounds use `manager`."""
+    permission (measured locally, 2026-11-11: it could set a request's status)."""
     import json
     from pathlib import Path
 
@@ -83,5 +83,5 @@ def test_no_role_is_named_admin_because_hasura_never_checks_its_permissions() ->
     roles = {permission["role"] for table in tables if isinstance(table, dict)  # tables.yaml is the list of includes
              for kind, permissions in table.items() if kind.endswith("_permissions") for permission in permissions}
     realm = json.loads((root / "keycloak/datahub-realm.json").read_text())
-    assert "manager" in roles and "admin" not in roles
+    assert "admin" not in roles
     assert "admin" not in {role["name"] for role in realm["roles"]["realm"]}
