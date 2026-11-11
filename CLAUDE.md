@@ -46,6 +46,8 @@ scripts/free_checks.sh                              # every free check, as CI ru
 - Profiles: `debug`, `datahub` (Keycloak, Hasura), `local-s3` (RustFS; off on a server with its own S3).
 - **Three DB roles, as on the hub:** `app` owns the schema (Flyway, host scripts), DAGs run as
   `writer` (rows only, no DDL), Hasura as `reader`. A DAG that needs DDL is wrong, not the grant.
+- **Keycloak realm roles are Hasura roles; never name one `admin`.** Hasura treats `admin` as its superuser
+  and checks no permission for it. Rounds are managed by `manager` (#190, [release](docs/release.md)).
 - `cp .env.example .env`; `dev-up.sh` fills in a Fernet key. Every DAG starts **paused** (Airflow's
   default); unpausing it in Airflow is the only switch.
 
@@ -154,7 +156,7 @@ purpose; the purpose comes from OpenRegister, and the `purpose_field` DAG (#178)
 
 `V1__baseline.sql` is the whole schema as of 2026-11-04, squashed five times (last: V1-V9, from the
 play server's schema), schema only; the reference rows are `V1.1__reference_data.sql`. The next
-migration is V9. Numbers like "(V3)" in comments and docs name the
+migration is V12. Numbers like "(V3)" in comments and docs name the
 pre-squash migration, to find its reasoning in git history. A database migrated before the squash needs its Flyway history reset once
 ([data-model](docs/data-model.md), "Migration strategy"). **Forward-only:** never edit a migration
 that ran anywhere shared. Flyway runs under `--profile tools`, not with `docker compose up`; on the

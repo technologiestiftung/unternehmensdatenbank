@@ -152,6 +152,13 @@ No `:latest`, and tags are never overwritten: a hotfix is a new patch release.
   schema readable by the previous app: add a column, never rename or drop one in the same release.
 - **One-time repo settings:** required reviewers on the `production` environment; protect `main`.
 
+## Keycloak roles
+
+The realm needs the role `user` (everyone) and, since #190, `manager`: who may start, rename and delete
+review rounds on the app's Prüfen page. On play and on the hub someone creates `manager` once in the
+realm and assigns it to the people who manage rounds; the local realm file gives it to `dev`. **Never
+`admin`:** Hasura treats a role of that name as its superuser and checks no permission for it.
+
 ## Open
 
 - **S3 on the hub** (#85), questions for the hub team (datahub@ts.berlin): who creates the bucket and

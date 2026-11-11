@@ -54,6 +54,20 @@ draw a round  ──►  review_tasks  ──►  a person judges in the app  �
 
 ## Draw a round
 
+**In the app** (#190), for a **manager** only (the Keycloak realm role `manager`): the form "Neue Runde" on
+`/pruefen` writes a request into `review_round_requests`. The DAG `review_round_requests` draws every
+pending request within 5 minutes with the same `review_round.draw`, and writes back the round or why it
+failed ("nothing to draw for ..."), which the page shows. The app never talks to Airflow. A manager also
+renames a round (its title only) and deletes one.
+
+**Deleting a round takes back its votes**, as if each verdict were set to "unsure": a vote the round
+created is removed, an app vote it overwrote gets its earlier answer back. A trigger (V11) deletes the
+verdicts before the round; without it the cascade removed the round first and every vote stayed
+(measured locally, 2026-11-11).
+
+Why the role is never called `admin`: [release](release.md), "Keycloak roles"; a test
+(`tests/unit/test_review_round_requests.py`) fails on one.
+
 **In Airflow** (local and play): trigger the DAG `review_round` with "Trigger DAG w/ config" and fill in
 the form: field, kind, source (for `shown`/`refused`), size (at most 1,000), mode, and optionally the
 version and a title. One run draws one round; it is never retried, since a retry would draw a second
@@ -88,8 +102,9 @@ Counts only, never who judged what.
 ## Removal
 
 1. Export the verdicts once (training data).
-2. One migration drops the trigger and its function, the two views and the four tables.
+2. One migration drops the triggers and their functions, the two views and the five tables (with `review_round_requests`, V11).
 3. Delete the Hasura metadata (`review_*`, `v_review_round_results`, `v_review_breakdown`), restart Hasura.
-4. Delete `airflow/dags/review_round/` and the app's `/pruefen` routes.
+   The Keycloak role `manager` is used by nothing else yet.
+4. Delete `airflow/dags/review_round/`, `airflow/dags/review_round_requests/` and the app's `/pruefen` routes.
 
 What was copied into `extraction_feedback` stays: it is ordinary feedback.
