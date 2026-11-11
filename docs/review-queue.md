@@ -65,8 +65,7 @@ created is removed, an app vote it overwrote gets its earlier answer back. A tri
 verdicts before the round; without it the cascade removed the round first and every vote stayed
 (measured locally, 2026-11-11).
 
-**Never name the role `admin`:** Hasura treats that role as its superuser and checks no permission for it,
-so a Keycloak role `admin` would open every table to its holders (measured locally, 2026-11-11). A test
+Why the role is never called `admin`: [release](release.md), "Keycloak roles"; a test
 (`tests/unit/test_review_round_requests.py`) fails on one.
 
 **In Airflow** (local and play): trigger the DAG `review_round` with "Trigger DAG w/ config" and fill in
