@@ -1,11 +1,14 @@
 """`run_task` and `pipeline_task.task_target`: what a hub pod runs, and that it can run nothing else."""
 from __future__ import annotations
 
+import logging
+import threading
+
 import pytest
 
 from pipeline_coordinator.main import run_pipeline_coordinator
 from pipeline_task import task_target
-from run_task import resolve
+from run_task import heartbeat, resolve
 from website_discovery.main import run_discover
 
 
@@ -90,3 +93,14 @@ def test_a_failed_task_logs_one_line_and_still_fails(monkeypatch, caplog) -> Non
     assert [r.getMessage() for r in caplog.records if r.name == "run_task"] == [
         "pipeline_task_failed target=foerderkatalog.main:run_foerderkatalog last_try=true "
         "error=OSError: 503 Service Unavailable"]
+
+
+def test_a_long_task_logs_until_it_is_done(caplog: pytest.LogCaptureFixture) -> None:
+    done = threading.Event()
+    with caplog.at_level(logging.INFO, logger="run_task"):
+        thread = heartbeat("x.main:run_y", done, every=0.01)
+        threading.Event().wait(0.1)
+        done.set()
+        thread.join(1)
+    assert not thread.is_alive()
+    assert "still running: x.main:run_y" in caplog.text
