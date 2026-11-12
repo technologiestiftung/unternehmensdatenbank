@@ -87,11 +87,13 @@ def questions(cur: Any) -> dict[str, dict[str, str]]:
     return {"technology_field": fields, "wz_division_estimated": divisions, "deeptech_class": DEEPTECH, "is_ai": IS_AI}
 
 
-def to_ask(websites: Mapping[str, str], cached: Mapping[str, Mapping[str, Any]], limit: int) -> list[str]:
+def to_ask(websites: Mapping[str, str], cached: Mapping[str, Mapping[str, Any]], limit: int,
+           asked_with: str | None = None) -> list[str]:
     """Companies whose answers are missing or stale (another model, another website): never asked first,
-    then the rest, each in id order; at most `limit`."""
+    then the rest, each in id order; at most `limit`. `asked_with` defaults to this model's `ASKED_WITH`."""
+    asked_with = asked_with or ASKED_WITH
     stale = [cid for cid, website in websites.items()
-             if cached.get(cid, {}).get("model") != ASKED_WITH or cached[cid].get("website") != website]
+             if cached.get(cid, {}).get("model") != asked_with or cached[cid].get("website") != website]
     return sorted(stale, key=lambda cid: (cid in cached, cid))[:limit]
 
 
@@ -128,8 +130,10 @@ CHUNK = 10
 
 
 def _write(source_id: str, sync_run_id: str, asked: Mapping[str, Mapping[str, str]], websites: Mapping[str, str],
-           answers: Mapping[str, Mapping[str, tuple[str, float]]]) -> int:
-    """One chunk's answers, on a fresh connection. Returns how many earlier guesses were dropped."""
+           answers: Mapping[str, Mapping[str, tuple[str, float]]], *, model: str = decide.MODEL_VERSION,
+           asked_with: str = ASKED_WITH) -> int:
+    """One chunk's answers, on a fresh connection. Returns how many earlier guesses were dropped. `jeff`
+    writes through here too, with its own `model` and `asked_with`."""
     dropped = 0
     connection = get_connection()
     try:
@@ -138,7 +142,7 @@ def _write(source_id: str, sync_run_id: str, asked: Mapping[str, Mapping[str, st
                 record_id, _ = upsert_source_record(
                     cur, company_id=cid, source_id=source_id, external_id=cid, external_url=websites[cid],
                     source_company_name=None,
-                    source_payload={"model": ASKED_WITH, "website": websites[cid],
+                    source_payload={"model": asked_with, "website": websites[cid],
                                     "answers": {field: [value, round(conf, 4)] for field, (value, conf) in fields.items()}},
                 )
                 for field in asked:
@@ -147,7 +151,7 @@ def _write(source_id: str, sync_run_id: str, asked: Mapping[str, Mapping[str, st
                         cur, company_id=cid, source_record_id=record_id, source_id=source_id,
                         sync_run_id=sync_run_id, field_name=field, value_text=value,
                         confidence=decide.stored_confidence(conf),
-                        metadata={"model": decide.MODEL_VERSION, "model_confidence": round(conf, 4),
+                        metadata={"model": model, "model_confidence": round(conf, 4),
                                   "ai_generated": True})
     finally:
         connection.close()
