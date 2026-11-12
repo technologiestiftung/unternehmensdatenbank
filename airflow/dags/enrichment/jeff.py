@@ -40,10 +40,12 @@ def session() -> requests.Session:
 
 
 def model(http: requests.Session) -> str:
-    """The name of the model jeff serves now (`GET /v1/models`, first entry; the rest are aliases)."""
+    """The model jeff serves now (`GET /v1/models`, first entry; the rest are aliases): its name and its
+    description, which names the weights' path, because jeff sets the name apart from the weights it loads."""
     response = http.get(f"{BASE_URL}/v1/models", timeout=TIMEOUT)
     response.raise_for_status()
-    return response.json()["models"][0]["name"]
+    served = response.json()["models"][0]
+    return f"{served['name']} ({served['description']})"
 
 
 def ask(http: requests.Session, state: str, instructions: str, labels: Sequence[str]) -> dict[str, Any]:

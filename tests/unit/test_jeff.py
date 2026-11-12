@@ -25,9 +25,9 @@ class _Jeff:
     """Answers a question that fits one part with its first label at 0.7, every label's probability falling
     with its position; a final round (16 labels) with its last label at 0.9."""
 
-    def __init__(self, busy: int = 0) -> None:
+    def __init__(self, busy: int = 0, weights: str = "models/gliformer-large-v1") -> None:
         self.questions: list[list[str]] = []
-        self.busy = busy
+        self.busy, self.weights = busy, weights
 
     def post(self, url: str, *, json: dict[str, Any], timeout: int) -> _Response:
         if self.busy:
@@ -44,8 +44,9 @@ class _Jeff:
     def get(self, url: str, *, timeout: int) -> _Response:
         assert url.endswith("/v1/models")
         return _Response(200, {"models": [
-            {"name": "gliformer-large-v2", "description": "GLiFormer served by jeff", "release_date": "2026-09-16"},
-            {"name": "jev-latest", "description": "Alias of gliformer-large-v2", "release_date": "2026-09-16"}]})
+            {"name": "gliformer-large-v1", "description": f"GLiFormer served by jeff ({self.weights})",
+             "release_date": "2026-09-16"},
+            {"name": "jev-latest", "description": "Alias of gliformer-large-v1", "release_date": "2026-09-16"}]})
 
 
 def test_77_fields_go_in_two_parts_and_a_final_round_of_their_best() -> None:
@@ -58,8 +59,9 @@ def test_77_fields_go_in_two_parts_and_a_final_round_of_their_best() -> None:
     assert http.questions == [first, second, first[:jeff.FINALISTS] + second[:jeff.FINALISTS]]
 
 
-def test_the_model_is_the_one_jeff_serves_not_an_alias() -> None:
-    assert jeff.model(_Jeff()) == "gliformer-large-v2"
+def test_the_model_is_the_one_jeff_serves_not_an_alias_and_new_weights_change_it() -> None:
+    assert jeff.model(_Jeff()) == "gliformer-large-v1 (GLiFormer served by jeff (models/gliformer-large-v1))"
+    assert jeff.model(_Jeff(weights="models/finetuned")) != jeff.model(_Jeff())
 
 
 def test_labels_that_fit_are_asked_once() -> None:
