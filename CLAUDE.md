@@ -144,7 +144,9 @@ purpose; the purpose comes from OpenRegister, and the `purpose_field` DAG (#178)
    `removed_at` and a `removed_reason` with the count, never a deleted row or a stop-list in code.
 6. **Every source is a guess with a confidence; the keywords rank first** (#183, 2026-11-09). At
    priority 100: keywords 0.60 > Wirtschaftsatlas layers 0.56 > Claude 0.55 > spaCy 0.52-0.55 > the
-   local classifier (GLiNER2.5-multi-Decide, at most 0.50); corrections (priority 50) win outright.
+   local models (GLiNER2.5-multi-Decide in `local_classifier`, GLiFormer in `jeff`, #194; each at most
+   0.50); corrections (priority 50) win outright. `jeff` is TSB's self-hosted jev API: text goes to it
+   unredacted (decided 2026-11-11); jev itself or a third-party host needs it-compliance first.
    For `technology_field`, `wz_division_estimated`, `deeptech_class` and `is_ai`
    (`resolver.GUESS_FIELDS`) any guess above 0 is shown and the app colours it by confidence. The
    spaCy model is still promoted only when it beats the keywords on companies people voted on.

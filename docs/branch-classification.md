@@ -110,6 +110,12 @@ same website text. Its confidence is scaled to at most 0.50, so every other sour
 answer. Zero-shot it agrees with Claude on 41 % of the Technologiefelder and 34 % of the WZ divisions
 (183 companies, #182); fine-tuning on Claude's labels and people's verdicts is the next step.
 
+**jeff (#194).** The DAG `jeff` asks two of those questions, Technologiefeld and WZ division, of [jeff](https://github.com/technologiestiftung/jeff),
+TSB's self-hosted copy of the jev API, running GLiFormer (400M parameters). Same text, same rank (at most
+0.50), its own source, so a Prüfen round can compare it with the local classifier. jeff takes at most 64
+labels per question: the 77 fields and the 87 divisions are each asked in two parts, then a final round of
+each part's 8 most probable labels. Nothing is measured yet.
+
 **Estimated WZ division (#140).** The same answer also names one of the 87 WZ divisions in
 `wz_divisions`, or `NONE`, stored as `wz_division` next to the label. It is an **estimate** of what the
 company does, from its website: never the official `wz_code`, and never in the WZ cluster column. It
