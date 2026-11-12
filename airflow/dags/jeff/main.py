@@ -57,20 +57,19 @@ DETAILS = SourceDetails(
 )
 MAX_COMPANIES = int(os.getenv("JEFF_MAX_COMPANIES", "300"))
 MAX_CHARS = int(os.getenv("JEFF_MAX_CHARS", "2500"))
-WORKERS = int(os.getenv("JEFF_WORKERS", "4"))
+WORKERS = 4
 FIELDS = ("technology_field", "wz_division_estimated")
 INSTRUCTIONS = {
     "technology_field": "In welchem Technologiefeld arbeitet diese Firma?",
     "wz_division_estimated": "Zu welcher Abteilung der Wirtschaftszweige (WZ 2025) gehört diese Firma?",
 }
-MODEL_VERSION = f"jeff/{jeff.MODEL}"
-#: What a cached answer was made with. Change a question's wording, raise the number.
-ASKED_WITH = f"{MODEL_VERSION}/questions-1"
+#: Part of each cached answer's key, after the model jeff serves. Change a question's wording, raise the number.
+QUESTIONS = "questions-1"
 
 
-def _source_id(cur: Any) -> str:
+def _source_id(cur: Any, model_version: str) -> str:
     return ensure_source(cur, key=SOURCE_KEY, name="jeff (GLiFormer, self-hosted)", source_type="classifier",
-                         metadata={"dag_id": DAG_ID, "model": MODEL_VERSION, "url": jeff.BASE_URL}, details=DETAILS)
+                         metadata={"dag_id": DAG_ID, "model": model_version, "url": jeff.BASE_URL}, details=DETAILS)
 
 
 def answer_one(http: Any, text: str, asked: Mapping[str, Mapping[str, str]]) -> dict[str, tuple[str, float]]:
@@ -93,13 +92,15 @@ def run_classify() -> int:
         log.info("No page store configured: no website text to read, nothing asked or dropped.")
         return 0
     http = jeff.session()
+    model_version = f"jeff/{jeff.model(http)}"
+    asked_with = f"{model_version}/{QUESTIONS}"
     connection = get_connection()
     try:
         with connection, connection.cursor() as cur:
-            source_id = _source_id(cur)
+            source_id = _source_id(cur, model_version)
             asked = {field: labels for field, labels in local.questions(cur).items() if field in FIELDS}
             websites = local._websites(cur)
-            todo = local.to_ask(websites, local._cached(cur, source_id), MAX_COMPANIES, asked_with=ASKED_WITH)
+            todo = local.to_ask(websites, local._cached(cur, source_id), MAX_COMPANIES, asked_with=asked_with)
             sync_run_id = start_sync_run(cur, source_id=source_id)
     finally:
         connection.close()
@@ -112,7 +113,7 @@ def run_classify() -> int:
             answers = dict(zip(texts, pool.map(lambda cid: answer_one(http, texts[cid], asked), texts)))
             # A company without stored text is recorded too, with no answers, so it is not picked again every run.
             dropped += local._write(source_id, sync_run_id, asked, websites, {cid: {} for cid in chunk} | answers,
-                                    model=MODEL_VERSION, asked_with=ASKED_WITH)
+                                    model=model_version, asked_with=asked_with)
             written += len(texts)
             without_text += len(chunk) - len(texts)
     connection = get_connection()

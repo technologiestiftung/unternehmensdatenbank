@@ -22,11 +22,9 @@ from typing import Any, Mapping, Sequence
 import requests
 
 BASE_URL = os.getenv("JEFF_BASE_URL", "https://jeff.ionos-dev.ds-apps.tsb-berlin.de").rstrip("/")
-#: The model jeff serves; part of each cached answer's key, so a new model asks every company again.
-MODEL = os.getenv("JEFF_MODEL", "gliformer-large-v1")
 MAX_LABELS = int(os.getenv("JEFF_MAX_LABELS", "64"))
 #: Labels from each part that go into the final question.
-FINALISTS = int(os.getenv("JEFF_FINALISTS", "8"))
+FINALISTS = 8
 TIMEOUT = 120
 #: 429 (rate limit) and 529 (queue full) are waited out; anything else fails the task.
 RETRIES = 5
@@ -39,6 +37,13 @@ def session() -> requests.Session:
     s = requests.Session()
     s.headers.update({"Authorization": f"Bearer {key}", "Content-Type": "application/json"})
     return s
+
+
+def model(http: requests.Session) -> str:
+    """The name of the model jeff serves now (`GET /v1/models`, first entry; the rest are aliases)."""
+    response = http.get(f"{BASE_URL}/v1/models", timeout=TIMEOUT)
+    response.raise_for_status()
+    return response.json()["models"][0]["name"]
 
 
 def ask(http: requests.Session, state: str, instructions: str, labels: Sequence[str]) -> dict[str, Any]:
