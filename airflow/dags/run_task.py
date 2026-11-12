@@ -14,6 +14,7 @@ import json
 import logging
 import os
 import sys
+import threading
 from pathlib import Path
 
 #: Where a KubernetesPodOperator with `do_xcom_push` reads a pod's result. It mounts the directory
@@ -21,6 +22,10 @@ from pathlib import Path
 XCOM_FILE = Path("/airflow/xcom/return.json")
 
 log = logging.getLogger("run_task")
+
+#: Seconds between "still running" lines. Play reaches Docker through a proxy that cuts a connection
+#: quiet for 10 minutes; Airflow then lost a running training container and failed it with a 409.
+HEARTBEAT_SECONDS = 300
 
 
 #: The DAG packages live next to this file, in the image as locally.
@@ -53,16 +58,31 @@ def failure_line(target: str, error: BaseException, last_try: str) -> str:
     return f"pipeline_task_failed target={target} last_try={last_try} error={type(error).__name__}: {message}"
 
 
+def heartbeat(target: str, done: threading.Event, every: float = HEARTBEAT_SECONDS) -> threading.Thread:
+    """A daemon thread logging one line every `every` seconds until `done` is set."""
+    def beat() -> None:
+        while not done.wait(every):
+            log.info("still running: %s", target)
+
+    thread = threading.Thread(target=beat, daemon=True)
+    thread.start()
+    return thread
+
+
 def main(argv: list[str]) -> int:
     if len(argv) != 1:
         print(__doc__)
         return 2
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
+    done = threading.Event()
+    heartbeat(argv[0], done)
     try:
         result = resolve(argv[0])()
     except Exception as error:
         log.error(failure_line(argv[0], error, os.environ.get("PIPELINE_LAST_TRY", "unknown")))
         raise
+    finally:
+        done.set()
     if XCOM_FILE.parent.is_dir():
         XCOM_FILE.write_text(json.dumps(result))
     return 0

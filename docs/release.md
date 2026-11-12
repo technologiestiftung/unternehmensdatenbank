@@ -71,6 +71,9 @@ docker compose and the official Airflow image: the same image and `run_task` arg
 Docker container instead of a pod. It joins the network named by `pipeline_network` and gets the
 worker's own `PG_DSN` and DAG settings instead of a secret (`airflow/dags/pipeline_task.py`). Every
 task pulls the image first, so a merge to main reaches play without a manual `docker pull`.
+Airflow reaches Docker through a proxy that cuts a connection quiet for 10 minutes, so `run_task` logs
+"still running" every 5 minutes: before that, a training run that printed nothing for 20 minutes was
+failed while its container kept running (a 409 on removal, 2026-11-12).
 
 A pod shares no disk, so state between runs belongs in Postgres, and files a later run needs in S3:
 the company corpus (#61) and the trained models (`enrichment.model_store`, under `models/<name>/` in the
