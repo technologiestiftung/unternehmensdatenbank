@@ -72,6 +72,11 @@ def test_a_page_is_matched_on_its_path_not_on_a_host_that_holds_a_careers_word()
     ]
 
 
+def test_a_category_word_in_the_query_string_still_matches() -> None:
+    links = cp.links_from_homepage(homepage(("/index.php?page=leistungen", "Mehr")), BASE)
+    assert [(link.category, link.url) for link in links] == [("leistungen", "https://example.de/index.php?page=leistungen")]
+
+
 def test_a_careers_link_under_an_about_path_is_a_careers_page() -> None:
     links = cp.links_from_homepage(homepage(("/unternehmen/karriere", "Karriere")), BASE)
     assert [(link.category, link.url) for link in links] == [("karriere", "https://example.de/unternehmen/karriere")]

@@ -76,7 +76,7 @@ from enrichment.url_patterns import CONNECT_TIMEOUT_S, HEADERS, HTTP_TIMEOUT_S
 
 log = logging.getLogger(__name__)
 
-#: What a link has to look like to be worth fetching, by category. Matched against the URL path AND the
+#: What a link has to look like to be worth fetching, by category. Matched against the URL without its host AND the
 #: anchor text, because plenty of sites label the link "Was wir tun" and point it at `/wwt`.
 #:
 #: These are patterns over link *labels*, not evidence about a company, so unlike the branch keywords
@@ -203,10 +203,11 @@ def links_from_homepage(
             continue
         if not _same_host(full, base_url):
             continue
-        path = urlparse(full).path
-        if path.lower().endswith(".pdf"):
+        parsed = urlparse(full)
+        target = parsed._replace(scheme="", netloc="").geturl()
+        if parsed.path.lower().endswith(".pdf"):
             if len(pdfs) < MAX_PDFS and full not in seen and any(
-                    CATEGORIES[name].search(path) or CATEGORIES[name].search(label) for name in PDF_CATEGORIES):
+                    CATEGORIES[name].search(target) or CATEGORIES[name].search(label) for name in PDF_CATEGORIES):
                 pdfs.append(ContentLink(category=PDF, url=full, label=label))
                 seen.add(full)
             continue
@@ -219,7 +220,7 @@ def links_from_homepage(
         for category, pattern in _MATCH_ORDER:
             if len(found[category]) >= max_per_category:
                 continue
-            if pattern.search(path) or pattern.search(label):
+            if pattern.search(target) or pattern.search(label):
                 found[category].append(ContentLink(category=category, url=full, label=label))
                 seen.add(full)
                 break
