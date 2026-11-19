@@ -129,3 +129,72 @@ def test_a_scheduled_or_unknown_run_asks_the_next_companies(monkeypatch, value, 
     else:
         monkeypatch.setenv("JEFF_COMPANIES", value)
     assert main.companies() == want
+
+
+class _Connection:
+    def __enter__(self) -> _Connection:
+        return self
+
+    def __exit__(self, *exc: object) -> None:
+        return None
+
+    def cursor(self) -> _Connection:
+        return self
+
+    def close(self) -> None:
+        return None
+
+
+ALL = ["c1", "c2", "c3"]
+
+
+@pytest.mark.parametrize(("mode", "asked"), [("claude", ["c1"]), ("next", ALL), ("", ALL)])
+def test_claude_mode_narrows_who_is_asked_not_whose_guesses_stay(monkeypatch, mode, asked) -> None:  # noqa: ANN001
+    """The user intent: `claude` asks only Claude's companies, but every website still goes to `_drop_stale`,
+    or every other company's jeff guesses would be zeroed. A version that filtered `websites` itself fails here."""
+    import sys
+    import types
+
+    from enrichment import page_cache
+
+    websites = {"c1": "https://a.de", "c2": "https://b.de", "c3": "https://c.de"}
+    seen: dict[str, Any] = {}
+    train = types.ModuleType("technology_field.train")
+    train.require_store, train.stored_text = (lambda: None), (lambda website: f"Text von {website}")
+    monkeypatch.setitem(sys.modules, "technology_field.train", train)
+    monkeypatch.setenv("JEFF_COMPANIES", mode)
+    monkeypatch.setattr(page_cache, "enabled", lambda: True)
+    monkeypatch.setattr(main.jeff, "session", _Jeff)
+    monkeypatch.setattr(main, "get_connection", _Connection)
+    monkeypatch.setattr(main, "_source_id", lambda cur, model: "src")
+    monkeypatch.setattr(main.local, "questions", lambda cur: {"technology_field": {"a": "A"}})
+    monkeypatch.setattr(main, "wz_tree", lambda cur: TREE)
+    monkeypatch.setattr(main.local, "_websites", lambda cur: dict(websites))
+    monkeypatch.setattr(main, "claude_labelled", lambda cur: {"c1", "elsewhere"})
+    monkeypatch.setattr(main.local, "_cached", lambda cur, source_id: {})
+    monkeypatch.setattr(main, "start_sync_run", lambda cur, source_id: 1)
+    monkeypatch.setattr(main, "finish_sync_run", lambda cur, **kw: seen.setdefault("finished", kw))
+    monkeypatch.setattr(main, "agreement", lambda cur, source_id: {"technology_field": (4, 1)})
+
+    def write(source_id, run, asked_fields, sites, answers, **kw):  # noqa: ANN001, ANN003, ANN202
+        seen.setdefault("answered", []).extend(sorted(answers))
+        return 0
+
+    def drop(cur, source_id, fields, sites):  # noqa: ANN001, ANN202
+        seen["drop_stale_websites"] = dict(sites)
+        return 0
+
+    monkeypatch.setattr(main.local, "_write", write)
+    monkeypatch.setattr(main.local, "_drop_stale", drop)
+    assert main.run_classify() == len(asked)
+    assert seen["answered"] == asked
+    assert seen["drop_stale_websites"] == websites
+    assert seen["finished"]["records_seen"] == len(asked)
+
+
+def test_jeff_settings_reach_a_docker_task() -> None:
+    from pipeline_task import pipeline_environment
+
+    worker = {"JEFF_MAX_LABELS": "128", "JEFF_MAX_COMPANIES": "475", "JEFF_COMPANIES": "claude", "PATH": "/usr/bin"}
+    assert pipeline_environment(worker) == {"JEFF_MAX_LABELS": "128", "JEFF_MAX_COMPANIES": "475",
+                                            "JEFF_COMPANIES": "claude"}
