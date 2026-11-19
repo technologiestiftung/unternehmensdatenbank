@@ -116,8 +116,8 @@ answer. Zero-shot it agrees with Claude on 41 % of the Technologiefelder and 34 
 
 **jeff (#194).** The DAG `jeff` asks two of those questions, Technologiefeld and WZ division, of [jeff](https://github.com/technologiestiftung/jeff),
 TSB's self-hosted copy of the jev API, running GLiFormer (400M parameters). Same text, same rank (at most
-0.50), its own source, so a Prüfen round can compare it with the local classifier. How it asks (jeff takes
-at most 64 labels per question) and its first run: [dags](dags.md). Its precision is not measured yet.
+0.50), its own source, so a Prüfen round can compare it with the local classifier. How it asks (at most `JEFF_MAX_LABELS`
+labels per question, 128 on TSB's server) and its first run: [dags](dags.md). Its precision is not measured yet.
 
 **Estimated WZ division (#140).** The same answer also names one of the 87 WZ divisions in
 `wz_divisions`, or `NONE`, stored as `wz_division` next to the label. It is an **estimate** of what the
