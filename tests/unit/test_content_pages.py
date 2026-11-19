@@ -60,6 +60,18 @@ def test_a_pdf_is_matched_on_its_path_not_on_a_host_that_holds_a_category_word()
     assert [link.url for link in links] == ["https://www.it-loesungen-berlin.de/leistungen.pdf"]
 
 
+def test_a_page_is_matched_on_its_path_not_on_a_host_that_holds_a_careers_word() -> None:
+    base = "https://www.jobs-agentur.de/"
+    html = homepage(("https://www.jobs-agentur.de/leistungen", "Was wir bieten"),
+                    ("https://www.jobs-agentur.de/ueber-uns", "Team"),
+                    ("https://www.jobs-agentur.de/impressum", "Impressum"))
+    links = cp.links_from_homepage(html, base)
+    assert [(link.category, link.url) for link in links] == [
+        ("leistungen", "https://www.jobs-agentur.de/leistungen"),
+        ("ueber_uns", "https://www.jobs-agentur.de/ueber-uns"),
+    ]
+
+
 def test_a_careers_link_under_an_about_path_is_a_careers_page() -> None:
     links = cp.links_from_homepage(homepage(("/unternehmen/karriere", "Karriere")), BASE)
     assert [(link.category, link.url) for link in links] == [("karriere", "https://example.de/unternehmen/karriere")]

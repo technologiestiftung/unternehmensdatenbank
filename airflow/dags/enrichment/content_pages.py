@@ -76,7 +76,7 @@ from enrichment.url_patterns import CONNECT_TIMEOUT_S, HEADERS, HTTP_TIMEOUT_S
 
 log = logging.getLogger(__name__)
 
-#: What a link has to look like to be worth fetching, by category. Matched against the href AND the
+#: What a link has to look like to be worth fetching, by category. Matched against the URL path AND the
 #: anchor text, because plenty of sites label the link "Was wir tun" and point it at `/wwt`.
 #:
 #: These are patterns over link *labels*, not evidence about a company, so unlike the branch keywords
@@ -219,7 +219,7 @@ def links_from_homepage(
         for category, pattern in _MATCH_ORDER:
             if len(found[category]) >= max_per_category:
                 continue
-            if pattern.search(href) or pattern.search(label):
+            if pattern.search(path) or pattern.search(label):
                 found[category].append(ContentLink(category=category, url=full, label=label))
                 seen.add(full)
                 break
