@@ -32,7 +32,8 @@ Needs `JEFF_API_KEY`, an Airflow variable (Admin → Variables; `pipeline_task`,
 `JEFF_MAX_LABELS`, 128 on TSB's server since 2026-11-19; with jeff's default 64 it is two parts and a final
 round, `jeff.choose`), the WZ in two. On play, 2026-11-19, six requests took about 25 s per company. The 87 WZ
 divisions would now fit one question too; the two steps stay until a measurement shows which agrees better. Answers are cached in each company's source record
-with the model and the website, as in `local_classifier`; at most `MAX_COMPANIES` per run, never asked first.
+with the model, the questions, the label limit (a new `JEFF_MAX_LABELS` asks everyone again) and the website, as
+in `local_classifier`; at most `MAX_COMPANIES` per run, never asked first.
 """
 from __future__ import annotations
 
@@ -116,12 +117,12 @@ def choose_wz(http: Any, text: str, tree: WzTree) -> tuple[str | None, float]:
 
 
 def answer_one(http: Any, text: str, asked: Mapping[str, Mapping[str, str]],
-               wz: WzTree | None = None) -> dict[str, tuple[str, float]]:
-    """field -> (stored value, jeff's own confidence); a field jeff gave no known label for is left out. With
-    `wz`, the WZ division is asked in two steps (`choose_wz`)."""
+               wz: WzTree) -> dict[str, tuple[str, float]]:
+    """field -> (stored value, jeff's own confidence); a field jeff gave no known label for is left out. The WZ
+    division is asked in two steps (`choose_wz`)."""
     answers = {}
     for field, labels in asked.items():
-        if field == "wz_division_estimated" and wz:
+        if field == "wz_division_estimated":
             label, confidence = choose_wz(http, text, wz)
         else:
             label, confidence = jeff.choose(http, text, INSTRUCTIONS[field], list(labels))
@@ -174,7 +175,7 @@ def run_classify() -> int:
         return 0
     http = jeff.session()
     model_version = f"jeff/{jeff.model(http)}"
-    asked_with = f"{model_version}/{QUESTIONS}"
+    asked_with = f"{model_version}/{QUESTIONS}/labels-{jeff.MAX_LABELS}"
     connection = get_connection()
     try:
         with connection, connection.cursor() as cur:

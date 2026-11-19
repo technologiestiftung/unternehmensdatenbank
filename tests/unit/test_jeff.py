@@ -49,10 +49,10 @@ class _Jeff:
             {"name": "jev-latest", "description": "Alias of gliformer-large-v1", "release_date": "2026-09-16"}]})
 
 
-def test_77_fields_fit_one_question_at_the_servers_128() -> None:
+def test_77_fields_fit_one_question_at_the_servers_128(monkeypatch) -> None:  # noqa: ANN001
+    monkeypatch.setattr(jeff, "MAX_LABELS", 128)
     http = _Jeff()
     fields = [f"Feld {i}" for i in range(77)]
-    assert jeff.MAX_LABELS == 128
     assert jeff.choose(http, "Text", "Welches Feld?", fields) == ("Feld 0", 0.7)
     assert http.questions == [fields]
 
@@ -90,15 +90,15 @@ def test_a_full_queue_is_waited_out_and_a_missing_key_fails_loudly(monkeypatch) 
 
 def test_answers_are_stored_values_and_an_unknown_label_is_left_out() -> None:
     asked = {"technology_field": {"Künstliche Intelligenz": "Artificial Intelligence"},
-             "wz_division_estimated": {"62 Erbringung von Dienstleistungen der Informationstechnologie": "62"}}
-    assert main.answer_one(_Jeff(), "Text", asked) == {"technology_field": ("Artificial Intelligence", 0.7),
-                                                      "wz_division_estimated": ("62", 0.7)}
+             "wz_division_estimated": {"01 Landwirtschaft": "01"}}
+    assert main.answer_one(_Jeff(), "Text", asked, TREE) == {
+        "technology_field": ("Artificial Intelligence", 0.7), "wz_division_estimated": ("01", pytest.approx(0.49))}
 
     class _Lost(_Jeff):
         def post(self, url: str, *, json: dict[str, Any], timeout: int) -> _Response:
             return _Response(200, {"answers": {"q": {"choice": "erfunden", "confidence": 0.9, "probabilities": {}}}})
 
-    assert main.answer_one(_Lost(), "Text", asked) == {}
+    assert main.answer_one(_Lost(), "Text", asked, TREE) == {}
 
 
 def test_jeff_never_writes_the_official_wz_code() -> None:
