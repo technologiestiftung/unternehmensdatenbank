@@ -90,45 +90,26 @@ def test_a_full_queue_is_waited_out_and_a_missing_key_fails_loudly(monkeypatch) 
 
 def test_answers_are_stored_values_and_an_unknown_label_is_left_out() -> None:
     asked = {"technology_field": {"Künstliche Intelligenz": "Artificial Intelligence"},
-             "wz_division_estimated": {"01 Landwirtschaft": "01"}}
-    assert main.answer_one(_Jeff(), "Text", asked, TREE) == {
-        "technology_field": ("Artificial Intelligence", 0.7), "wz_division_estimated": ("01", pytest.approx(0.49))}
+             "wz_division_estimated": {"62 Erbringung von Dienstleistungen der Informationstechnologie": "62"}}
+    assert main.answer_one(_Jeff(), "Text", asked) == {"technology_field": ("Artificial Intelligence", 0.7),
+                                                      "wz_division_estimated": ("62", 0.7)}
 
     class _Lost(_Jeff):
         def post(self, url: str, *, json: dict[str, Any], timeout: int) -> _Response:
             return _Response(200, {"answers": {"q": {"choice": "erfunden", "confidence": 0.9, "probabilities": {}}}})
 
-    assert main.answer_one(_Lost(), "Text", asked, TREE) == {}
+    assert main.answer_one(_Lost(), "Text", asked) == {}
 
 
 def test_jeff_never_writes_the_official_wz_code() -> None:
     assert "wz_code" not in main.FIELDS and set(main.FIELDS) <= set(main.INSTRUCTIONS)
 
 
-TREE = ({"A Land- und Forstwirtschaft, Fischerei": "A", "B Bergbau": "B"},
-        {"A": {"01 Landwirtschaft": "01", "02 Forstwirtschaft": "02"}, "B": {"05 Kohlenbergbau": "05"}})
-
-
-def test_the_wz_is_asked_section_first_then_its_divisions_and_both_must_be_right() -> None:
+def test_all_87_wz_divisions_are_one_question() -> None:
     http = _Jeff()
-    assert main.choose_wz(http, "Text", TREE) == ("01 Landwirtschaft", pytest.approx(0.7 * 0.7))
-    assert http.questions == [list(TREE[0]), ["01 Landwirtschaft", "02 Forstwirtschaft"]]
-
-
-def test_a_section_with_one_division_needs_no_second_question() -> None:
-    class _B(_Jeff):
-        def post(self, url: str, *, json: dict[str, Any], timeout: int) -> _Response:
-            self.questions.append(list(json["questions"]["q"]["criteria"]))
-            return _Response(200, {"answers": {"q": {"choice": "B Bergbau", "confidence": 0.6, "probabilities": {}}}})
-
-    http = _B()
-    assert main.choose_wz(http, "Text", TREE) == ("05 Kohlenbergbau", 0.6)
-    assert len(http.questions) == 1
-
-
-def test_with_the_wz_tree_the_stored_value_is_still_the_two_digit_division() -> None:
-    asked = {"wz_division_estimated": {"01 Landwirtschaft": "01", "02 Forstwirtschaft": "02", "05 Kohlenbergbau": "05"}}
-    assert main.answer_one(_Jeff(), "Text", asked, TREE) == {"wz_division_estimated": ("01", pytest.approx(0.49))}
+    divisions = {f"{i:02d} Abteilung {i}": f"{i:02d}" for i in range(1, 88)}
+    assert main.answer_one(http, "Text", {"wz_division_estimated": divisions}) == {"wz_division_estimated": ("01", 0.7)}
+    assert http.questions == [list(divisions)]
 
 
 @pytest.mark.parametrize(("value", "want"), [(None, "next"), ("", "next"), ("claude", "claude"), ("anything", "next")])
@@ -177,7 +158,6 @@ def test_claude_mode_narrows_who_is_asked_not_whose_guesses_stay(monkeypatch, mo
     monkeypatch.setattr(main, "get_connection", _Connection)
     monkeypatch.setattr(main, "_source_id", lambda cur, model: "src")
     monkeypatch.setattr(main.local, "questions", lambda cur: {"technology_field": {"a": "A"}})
-    monkeypatch.setattr(main, "wz_tree", lambda cur: TREE)
     monkeypatch.setattr(main.local, "_websites", lambda cur: dict(websites))
     monkeypatch.setattr(main, "claude_labelled", lambda cur: {"c1", "elsewhere"})
     monkeypatch.setattr(main.local, "_cached", lambda cur, source_id: {})

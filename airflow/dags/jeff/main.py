@@ -9,10 +9,11 @@ questions:
 | `technology_field` | Berlin's 77 Technologiefelder (stored in English, `name_en`; asked in German) |
 | `wz_division_estimated` | the 87 WZ 2025 divisions (stored as two digits, "62"); never the official `wz_code` |
 
-**The WZ division in two steps** (#198): first the 22 sections ("J Information und Kommunikation"), then only
-that section's divisions. Two small questions instead of 87 labels in parts and a final round; the stored
-confidence is the section's times the division's, because both have to be right. A section with one division
-needs no second question.
+**Each field is one question with all its labels** (77 and 87, under jeff's 128). The WZ was asked in two
+steps for a day (#201: the 22 sections first, then the section's divisions). It went wrong: on play,
+2026-11-19, 40 companies got section A (agriculture) 8 times and I (hospitality) 11 times, where Claude, over
+475 companies, gave A never and I 13 times. The short section titles pulled the answers; the 87 division
+titles say more. Not a position bias: the first Technologiefelder were never chosen.
 
 **Measuring** (form field `companies`): `next` (the schedule) asks the next companies never asked; `claude`
 asks only companies Claude labelled (`llm_labels`), so jeff's agreement with Claude, logged at the end of every
@@ -28,10 +29,9 @@ more often. Nothing here has been measured.
 **Text leaves the pod, to TSB's own server** (`enrichment.jeff`), whole and unredacted (decided 2026-11-11).
 Needs `JEFF_API_KEY`, an Airflow variable (Admin → Variables; `pipeline_task`, "API keys").
 
-**Cost.** Three requests per company: the 77 Technologiefelder in one question (jeff takes up to
-`JEFF_MAX_LABELS`, 128 on TSB's server since 2026-11-19; with jeff's default 64 it is two parts and a final
-round, `jeff.choose`), the WZ in two. On play, 2026-11-19, six requests took about 25 s per company. The 87 WZ
-divisions would now fit one question too; the two steps stay until a measurement shows which agrees better. Answers are cached in each company's source record
+**Cost.** Two requests per company, one per field (jeff takes up to `JEFF_MAX_LABELS`, 128 on TSB's server
+since 2026-11-19; with jeff's default 64 a field is asked in two parts and a final round, `jeff.choose`). On
+play, 2026-11-19: six requests took about 25 s per company, three about 10 s. Answers are cached in each company's source record
 with the model, the questions, the label limit (a new `JEFF_MAX_LABELS` asks everyone again) and the website, as
 in `local_classifier`; at most `MAX_COMPANIES` per run, never asked first.
 """
@@ -76,9 +76,8 @@ INSTRUCTIONS = {
     "technology_field": "In welchem Technologiefeld arbeitet diese Firma?",
     "wz_division_estimated": "Zu welcher Abteilung der Wirtschaftszweige (WZ 2025) gehört diese Firma?",
 }
-WZ_SECTION_INSTRUCTIONS = "Zu welchem Abschnitt der Wirtschaftszweige (WZ 2025) gehört diese Firma?"
 #: Part of each cached answer's key, after the model jeff serves. Change a question's wording, raise the number.
-QUESTIONS = "questions-2"
+QUESTIONS = "questions-3"
 #: Which companies a run asks (form field `companies`, `JEFF_COMPANIES`).
 COMPANIES = ("next", "claude")
 
@@ -88,44 +87,11 @@ def _source_id(cur: Any, model_version: str) -> str:
                          metadata={"dag_id": DAG_ID, "model": model_version, "url": jeff.BASE_URL}, details=DETAILS)
 
 
-WzTree = tuple[dict[str, str], dict[str, dict[str, str]]]
-
-
-def wz_tree(cur: Any) -> WzTree:
-    """(section label -> section letter, section letter -> {division label -> division}); the division labels
-    are `local_classifier.questions`' own, so an answer maps to the same stored value."""
-    cur.execute("SELECT division, title, section, section_title FROM public.wz_divisions ORDER BY section, division")
-    sections: dict[str, str] = {}
-    divisions: dict[str, dict[str, str]] = {}
-    for division, title, section, section_title in cur.fetchall():
-        sections[f"{section} {section_title}"] = section
-        divisions.setdefault(section, {})[f"{division} {title}"] = division
-    return sections, divisions
-
-
-def choose_wz(http: Any, text: str, tree: WzTree) -> tuple[str | None, float]:
-    """(division label, confidence): the section first, then its divisions; the confidence is both multiplied."""
-    sections, divisions = tree
-    section_label, section_confidence = jeff.choose(http, text, WZ_SECTION_INSTRUCTIONS, list(sections))
-    if section_label not in sections:
-        return None, 0.0
-    labels = list(divisions[sections[section_label]])
-    if len(labels) == 1:
-        return labels[0], section_confidence
-    label, confidence = jeff.choose(http, text, INSTRUCTIONS["wz_division_estimated"], labels)
-    return label, section_confidence * confidence
-
-
-def answer_one(http: Any, text: str, asked: Mapping[str, Mapping[str, str]],
-               wz: WzTree) -> dict[str, tuple[str, float]]:
-    """field -> (stored value, jeff's own confidence); a field jeff gave no known label for is left out. The WZ
-    division is asked in two steps (`choose_wz`)."""
+def answer_one(http: Any, text: str, asked: Mapping[str, Mapping[str, str]]) -> dict[str, tuple[str, float]]:
+    """field -> (stored value, jeff's own confidence); a field jeff gave no known label for is left out."""
     answers = {}
     for field, labels in asked.items():
-        if field == "wz_division_estimated":
-            label, confidence = choose_wz(http, text, wz)
-        else:
-            label, confidence = jeff.choose(http, text, INSTRUCTIONS[field], list(labels))
+        label, confidence = jeff.choose(http, text, INSTRUCTIONS[field], list(labels))
         if label in labels:
             answers[field] = (labels[label], confidence)
     return answers
@@ -181,7 +147,6 @@ def run_classify() -> int:
         with connection, connection.cursor() as cur:
             source_id = _source_id(cur, model_version)
             asked = {field: labels for field, labels in local.questions(cur).items() if field in FIELDS}
-            tree = wz_tree(cur)
             websites = local._websites(cur)
             # Only who is asked narrows; `websites` stays whole, or `_drop_stale` would zero everybody else's guesses.
             candidates = websites
@@ -198,7 +163,7 @@ def run_classify() -> int:
             chunk = todo[start:start + local.CHUNK]
             texts = {cid: text[:MAX_CHARS] for cid in chunk if (text := stored_text(websites[cid]))}
             require_store()
-            answers = dict(zip(texts, pool.map(lambda cid: answer_one(http, texts[cid], asked, tree), texts)))
+            answers = dict(zip(texts, pool.map(lambda cid: answer_one(http, texts[cid], asked), texts)))
             # A company without stored text is recorded too, with no answers, so it is not picked again every run.
             dropped += local._write(source_id, sync_run_id, asked, websites, {cid: {} for cid in chunk} | answers,
                                     model=model_version, asked_with=asked_with)
