@@ -47,7 +47,7 @@ corpus (pipelines only) and only classifiers read it. Nothing from it is shown o
 
 Two namespaces are used in `page_cache`, and the split matters:
 
-    content:<page url>              the raw HTML of one services or about page
+    content:<page url>              the raw HTML of one page, or a PDF's raw bytes (base64, `pdf`)
     content-index:<version>|<base>  which pages were chosen for this company, and their categories
 
 The index is what makes a second run free: without it, the links have to be parsed again and the
@@ -176,8 +176,9 @@ def links_from_homepage(
     """The services and about pages this homepage links to, capped.
 
     A pure function over HTML that is already on disk, so it costs nothing and can be tested without
-    a network. Deterministic: categories in `CATEGORIES` order, links in the order the page lists
-    them, so two runs pick the same pages and a cached result stays valid.
+    a network. Deterministic: the capped categories in `CATEGORIES` order, then `EXTRA_CAPS`, then
+    the PDF; links in the order the page lists them, so two runs pick the same pages and a cached
+    result stays valid.
     """
     if not html or not base_url:
         return []
@@ -319,7 +320,7 @@ class ContentPages:
 
     @property
     def text(self) -> str:
-        """All of it, in CATEGORIES order, as one string for the matcher."""
+        """All of it, in CATEGORIES order and the PDF last, as one string for the matcher."""
         return " ".join(
             part for category in (*CATEGORIES, PDF) for part in self.pages.get(category) or ()
         )
