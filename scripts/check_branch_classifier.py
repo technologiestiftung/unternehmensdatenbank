@@ -332,10 +332,13 @@ def main() -> int:
     check("another host is refused", any("facebook" in u for u in urls), False)
     check("mailto is refused", any("mailto" in u for u in urls), False)
     check("a fragment link is refused", any("#" in u for u in urls), False)
-    check("a PDF is refused", any(u.endswith(".pdf") for u in urls), False)
+    check("a services PDF is picked, once (#198)", [u for u in urls if u.endswith(".pdf")],
+          ["https://example.de/prospekt.pdf"])
     check("the homepage itself is refused", "https://example.de/" in urls, False)
     check("the Impressum is not a content page", any("impressum" in u for u in urls), False)
-    check("at most 4 pages per company", len(links) <= content_pages.MAX_PER_COMPANY, True)
+    pages_in_cap = [link for link in links
+                    if link.category not in content_pages.EXTRA_CAPS and link.category != content_pages.PDF]
+    check("at most 4 pages per company", len(pages_in_cap) <= content_pages.MAX_PER_COMPANY, True)
     per_category: dict[str, int] = {}
     for link in links:
         per_category[link.category] = per_category.get(link.category, 0) + 1

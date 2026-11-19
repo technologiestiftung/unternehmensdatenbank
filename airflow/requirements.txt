@@ -10,6 +10,8 @@ PyYAML>=6.0
 # manager_ner: spaCy and its German model, pinned together (the model is built for 3.8).
 spacy>=3.8,<3.9
 de_core_news_md @ https://github.com/explosion/spacy-models/releases/download/de_core_news_md-3.8.0/de_core_news_md-3.8.0-py3-none-any.whl
+# content_pages (#198): the text of a services PDF. pip-audit clean 2026-11-19; 7.x was a day old.
+pypdf>=6.21.4,<7
 # llm_labels (#87): the Claude API. pip-audit clean 2026-11-04.
 anthropic>=2.4,<3
 # local_classifier (#183): torch and gliner2[local] are in requirements-model.txt, installed by the images only:

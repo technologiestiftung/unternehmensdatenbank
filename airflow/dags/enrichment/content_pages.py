@@ -37,6 +37,14 @@ pages that loaded were second-in-category and their text never reached the match
 fetch, 74.6 MB of HTML, re-parsed and discarded on every `classify` run. `ContentPages.pages` holds a
 list per category for that reason.
 
+**Two more kinds, outside that cap (#198).** A careers page (`karriere`) says what a company really does
+and which skills it hires for ("Python-Entwickler:in für unsere Robotik-Plattform"): at most
+`MAX_CAREERS` per company. A PDF whose link looks like a services, product or solutions document
+(a brochure, a Leistungsübersicht): at most `MAX_PDFS`, at most `MAX_PDF_BYTES`, and only the first
+`MAX_PDF_PAGES` pages are read. A careers page names contact people; like every page it stays in the
+corpus (pipelines only) and only classifiers read it. Nothing from it is shown or extracted (developer,
+2026-11-19).
+
 Two namespaces are used in `page_cache`, and the split matters:
 
     content:<page url>              the raw HTML of one services or about page
@@ -52,7 +60,9 @@ like a change that had no effect.
 """
 from __future__ import annotations
 
+import base64
 import hashlib
+import io
 import logging
 import os
 import re
@@ -79,17 +89,31 @@ CATEGORIES: dict[str, re.Pattern[str]] = {
     "produkte": re.compile(r"produkt|sortiment|katalog|speisekarte|menu|shop", re.I),
     "ueber_uns": re.compile(r"ueber.?uns|über.?uns|about|unternehmen|philosophie|wir.sind", re.I),
     "loesungen": re.compile(r"loesung|lösung|branchen|anwendung|referenz|projekte", re.I),
+    "karriere": re.compile(r"karriere|career|jobs?\b|stellenangebot|stellenanzeige|offene.stellen", re.I),
 }
 
 #: At most this many pages per category, and this many per company, in CATEGORIES order.
 MAX_PER_CATEGORY = int(os.getenv("COMBINED_CONTENT_MAX_PER_CATEGORY", "2"))
 MAX_PER_COMPANY = int(os.getenv("COMBINED_CONTENT_MAX_PER_COMPANY", "4"))
 
+#: Categories fetched on top of `MAX_PER_COMPANY`, with their own cap: otherwise the last category
+#: would almost never get a slot.
+MAX_CAREERS = 1
+EXTRA_CAPS = {"karriere": MAX_CAREERS}
+
+#: PDFs: one per company, only for these categories (a brochure, not a privacy policy or a menu card
+#: of the about page), checked by size before it is downloaded, and only its first pages read.
+PDF = "pdf"
+MAX_PDFS = 1
+PDF_CATEGORIES = ("leistungen", "produkte", "loesungen")
+MAX_PDF_BYTES = 5_000_000
+MAX_PDF_PAGES = 5
+
 #: Links that go somewhere a browser would not fetch as a page.
 _SKIP_SCHEMES = ("mailto:", "tel:", "javascript:", "data:", "#")
 
-#: File extensions that are a download rather than a page. A 30 MB brochure PDF is not worth the
-#: bandwidth and `visible_text` cannot read it anyway.
+#: File extensions that are a download rather than a page. A PDF is checked before this list: one that
+#: looks like a services document is read (`MAX_PDFS`), every other one is skipped here.
 _SKIP_SUFFIXES = (".pdf", ".jpg", ".jpeg", ".png", ".gif", ".svg", ".zip", ".doc", ".docx", ".xls",
                   ".xlsx", ".mp4", ".webp", ".ico")
 
@@ -120,7 +144,7 @@ def selection_version() -> str:
     at are cached under their own URLs.
     """
     material = "|".join(
-        [str(MAX_PER_CATEGORY), str(MAX_PER_COMPANY)]
+        [str(MAX_PER_CATEGORY), str(MAX_PER_COMPANY), str(EXTRA_CAPS), str(MAX_PDFS), str(PDF_CATEGORIES)]
         + [f"{name}={pattern.pattern}" for name, pattern in CATEGORIES.items()]
     )
     return hashlib.sha256(material.encode("utf-8")).hexdigest()[:12]
@@ -161,6 +185,7 @@ def links_from_homepage(
 
     soup = BeautifulSoup(html, "html.parser", **SOUP_OPTIONS)
     found: dict[str, list[ContentLink]] = {name: [] for name in CATEGORIES}
+    pdfs: list[ContentLink] = []
     seen: set[str] = set()
     homepage = base_url.split("#")[0].rstrip("/")
 
@@ -172,9 +197,15 @@ def links_from_homepage(
         full = urljoin(base_url, href).split("#")[0]
         if not full.lower().startswith(("http://", "https://")):
             continue
-        if full.lower().endswith(_SKIP_SUFFIXES):
-            continue
         if not _same_host(full, base_url):
+            continue
+        if urlparse(full).path.lower().endswith(".pdf"):
+            if len(pdfs) < MAX_PDFS and full not in seen and any(
+                    CATEGORIES[name].search(href) or CATEGORIES[name].search(label) for name in PDF_CATEGORIES):
+                pdfs.append(ContentLink(category=PDF, url=full, label=label))
+                seen.add(full)
+            continue
+        if full.lower().endswith(_SKIP_SUFFIXES):
             continue
         # The homepage links to itself from its logo, and re-reading it as a services page would
         # double-count every keyword already found there.
@@ -188,10 +219,9 @@ def links_from_homepage(
                 seen.add(full)
                 break
 
-    ordered: list[ContentLink] = []
-    for category in CATEGORIES:
-        ordered.extend(found[category])
-    return ordered[:max_per_company]
+    ordered = [link for category in CATEGORIES if category not in EXTRA_CAPS for link in found[category]]
+    extras = [link for category, cap in EXTRA_CAPS.items() for link in found[category][:cap]]
+    return ordered[:max_per_company] + extras + pdfs
 
 
 def _fetch(url: str) -> str:
@@ -224,6 +254,47 @@ def _fetch(url: str) -> str:
     return html
 
 
+def _fetch_pdf(url: str) -> str:
+    """One PDF's text, cached as the raw file (base64), never raising. Empty for anything too large,
+    not a PDF, or unreadable. The size is checked before the body is read, and again while reading,
+    because `Content-Length` may be missing or wrong."""
+    cached = page_cache.get("content", url)
+    if cached is not None:
+        return pdf_text(cached.get("pdf") or "")
+    encoded = ""
+    try:
+        with session().get(url, headers=HEADERS, timeout=(CONNECT_TIMEOUT_S, HTTP_TIMEOUT_S),
+                           allow_redirects=True, stream=True) as response:
+            declared = int(response.headers.get("Content-Length") or 0)
+            if response.status_code < 400 and declared <= MAX_PDF_BYTES:
+                body = bytearray()
+                for chunk in response.iter_content(65536):
+                    body.extend(chunk)
+                    if len(body) > MAX_PDF_BYTES:
+                        break
+                if len(body) <= MAX_PDF_BYTES and bytes(body[:5]) == b"%PDF-":
+                    encoded = base64.b64encode(bytes(body)).decode("ascii")
+    except Exception as exc:  # noqa: BLE001  an unreachable file is an expected outcome
+        log.debug("content pdf %s failed: %s", url, type(exc).__name__)
+    page_cache.put("content", url, {"html": "", "pdf": encoded, "final_url": url})
+    return pdf_text(encoded)
+
+
+def pdf_text(encoded: str) -> str:
+    """The text of a stored PDF's first `MAX_PDF_PAGES` pages; empty when it cannot be read."""
+    if not encoded:
+        return ""
+    try:
+        from pypdf import PdfReader
+
+        reader = PdfReader(io.BytesIO(base64.b64decode(encoded)))
+        text = " ".join((page.extract_text() or "") for page in reader.pages[:MAX_PDF_PAGES])
+    except Exception as exc:  # noqa: BLE001  a broken or encrypted PDF is an expected outcome
+        log.debug("pdf unreadable: %s", type(exc).__name__)
+        return ""
+    return " ".join(text.split())
+
+
 @dataclass
 class ContentPages:
     """Every services or about page we have for one company."""
@@ -244,7 +315,7 @@ class ContentPages:
     def text(self) -> str:
         """All of it, in CATEGORIES order, as one string for the matcher."""
         return " ".join(
-            part for category in CATEGORIES for part in self.pages.get(category) or ()
+            part for category in (*CATEGORIES, PDF) for part in self.pages.get(category) or ()
         )
 
 
@@ -276,14 +347,15 @@ def content_for(
     pages: dict[str, list[str]] = {}
     fetched = failed = 0
     for link in links:
-        if fetch:
-            html = _fetch(link.url)
+        if link.category == PDF:
+            text = _fetch_pdf(link.url) if fetch else pdf_text((page_cache.get("content", link.url) or {}).get("pdf") or "")
+        elif fetch:
+            text = visible_text(_fetch(link.url))
         else:
-            cached = page_cache.get("content", link.url)
-            html = (cached or {}).get("html") or ""
-        if html:
+            text = visible_text((page_cache.get("content", link.url) or {}).get("html") or "")
+        if text:
             fetched += 1
-            pages.setdefault(link.category, []).append(visible_text(html))
+            pages.setdefault(link.category, []).append(text)
         else:
             failed += 1
     return ContentPages(pages=pages, links=links, fetched=fetched, failed=failed)

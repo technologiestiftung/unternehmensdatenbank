@@ -193,7 +193,7 @@ def record_document(
     if kind not in KINDS:
         raise ValueError(f"unknown kind {kind!r}")
     record = get(namespace, url)
-    content = (record or {}).get("html") or (record or {}).get("text")
+    content = (record or {}).get("html") or (record or {}).get("text") or (record or {}).get("pdf")
     if not content:
         return
     data = content.encode("utf-8")
