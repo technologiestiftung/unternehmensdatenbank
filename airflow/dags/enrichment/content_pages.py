@@ -52,9 +52,10 @@ sitemap index through at most `MAX_CHILD_SITEMAPS` of its sitemaps, "page" sitem
 go through the same selection as the homepage's links, without labels. The XML is stored raw under
 `sitemap:<url>`; `<loc>` is read with a regex, never an XML parser (no entity expansion).
 
-Two namespaces are used in `page_cache`, and the split matters:
+Three namespaces are used in `page_cache`, and the split matters:
 
     content:<page url>              the raw HTML of one page, or a PDF's raw bytes (base64, `pdf`)
+    sitemap:<sitemap url>           a sitemap's raw XML (`xml`), "" when the site has none
     content-index:<version>|<base>  which pages were chosen for this company, and their categories
 
 The index is what makes a second run free: without it, the links have to be parsed again and the
