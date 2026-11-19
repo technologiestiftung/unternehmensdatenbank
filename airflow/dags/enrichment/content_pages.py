@@ -125,7 +125,7 @@ MAX_PDF_PAGES = 5
 MAX_CHILD_SITEMAPS = 3
 MAX_SITEMAP_BYTES = 5_000_000
 MAX_SITEMAP_URLS = 5_000
-_LOC = re.compile(r"<loc>\s*(.*?)\s*</loc>", re.I | re.S)
+_LOC = re.compile(r"<loc>\s*(?:<!\[CDATA\[\s*)?(.*?)\s*(?:\]\]>\s*)?</loc>", re.I | re.S)
 
 #: Links that go somewhere a browser would not fetch as a page.
 _SKIP_SCHEMES = ("mailto:", "tel:", "javascript:", "data:", "#")
@@ -287,26 +287,28 @@ def sitemap_locs(xml: str) -> list[str]:
     return [html_module.unescape(loc) for loc in _LOC.findall(xml or "")[:MAX_SITEMAP_URLS]]
 
 
-def sitemap_urls(base_url: str, fetch: bool = True) -> list[str] | None:
+def sitemap_urls(base_url: str, fetch: bool = True) -> tuple[list[str], bool]:
     """The page URLs `/sitemap.xml` lists, through at most `MAX_CHILD_SITEMAPS` sitemaps of an index
-    ("page" sitemaps first: WordPress and Yoast keep posts, products and tags apart). None when something
-    needed is not stored and `fetch` is off."""
+    ("page" sitemaps first: WordPress and Yoast keep posts, products and tags apart), and whether every
+    sitemap needed was there: False when one is not stored and `fetch` is off. A missing child is
+    skipped, so the URLs of the stored ones still count."""
     parsed = urlparse(base_url)
     root = _sitemap_xml(f"{parsed.scheme}://{parsed.netloc}/sitemap.xml", fetch)
     if root is None:
-        return None
+        return [], False
     if "<sitemapindex" not in root:
-        return sitemap_locs(root)
+        return sitemap_locs(root), True
     children = [url for url in sitemap_locs(root) if _same_host(url, base_url)]
     children.sort(key=lambda url: "page" not in url.lower())
     urls: list[str] = []
+    complete = True
     for child in children[:MAX_CHILD_SITEMAPS]:
         xml = _sitemap_xml(child, fetch)
         if xml is None:
-            return None
-        if "<sitemapindex" not in xml:
+            complete = False
+        elif "<sitemapindex" not in xml:
             urls.extend(sitemap_locs(xml))
-    return urls[:MAX_SITEMAP_URLS]
+    return urls[:MAX_SITEMAP_URLS], complete
 
 
 def _fetch(url: str) -> str:
@@ -423,8 +425,7 @@ def content_for(
         links = links_from_homepage(homepage_html, base_url)
         complete = True
         if not has_core_page(links):
-            from_sitemap = sitemap_urls(base_url, fetch)
-            complete = from_sitemap is not None
+            from_sitemap, complete = sitemap_urls(base_url, fetch)
             if from_sitemap:
                 links = links_from_homepage(homepage_html, base_url, sitemap_urls=from_sitemap)
         # An index built without a sitemap that was not stored would hide it for 90 days.
