@@ -52,6 +52,19 @@ def test_one_services_pdf_is_picked_and_any_other_pdf_is_not() -> None:
     assert [(link.category, link.url) for link in links] == [("pdf", "https://example.de/leistungen.pdf")]
 
 
+def test_a_pdf_is_matched_on_its_path_not_on_a_host_that_holds_a_category_word() -> None:
+    base = "https://www.it-loesungen-berlin.de/"
+    html = homepage(("https://www.it-loesungen-berlin.de/datenschutz.pdf", "Datenschutz"),
+                    ("https://www.it-loesungen-berlin.de/leistungen.pdf", "Download"))
+    links = cp.links_from_homepage(html, base)
+    assert [link.url for link in links] == ["https://www.it-loesungen-berlin.de/leistungen.pdf"]
+
+
+def test_a_careers_link_under_an_about_path_is_a_careers_page() -> None:
+    links = cp.links_from_homepage(homepage(("/unternehmen/karriere", "Karriere")), BASE)
+    assert [(link.category, link.url) for link in links] == [("karriere", "https://example.de/unternehmen/karriere")]
+
+
 def test_a_stored_pdf_is_read_and_anything_else_reads_as_nothing() -> None:
     assert cp.pdf_text(base64.b64encode(minimal_pdf("Wir bauen Robotik-Plattformen")).decode()) == \
         "Wir bauen Robotik-Plattformen"

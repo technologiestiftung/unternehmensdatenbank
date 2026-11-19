@@ -101,6 +101,10 @@ MAX_PER_COMPANY = int(os.getenv("COMBINED_CONTENT_MAX_PER_COMPANY", "4"))
 MAX_CAREERS = 1
 EXTRA_CAPS = {"karriere": MAX_CAREERS}
 
+#: A link is matched against the extra categories first: `/unternehmen/karriere` is a careers page,
+#: not an about page that takes a capped slot.
+_MATCH_ORDER = sorted(CATEGORIES.items(), key=lambda item: item[0] not in EXTRA_CAPS)
+
 #: PDFs: one per company, only for these categories (a brochure, not a privacy policy or a menu card
 #: of the about page), checked by size before it is downloaded, and only its first pages read.
 PDF = "pdf"
@@ -199,9 +203,10 @@ def links_from_homepage(
             continue
         if not _same_host(full, base_url):
             continue
-        if urlparse(full).path.lower().endswith(".pdf"):
+        path = urlparse(full).path
+        if path.lower().endswith(".pdf"):
             if len(pdfs) < MAX_PDFS and full not in seen and any(
-                    CATEGORIES[name].search(href) or CATEGORIES[name].search(label) for name in PDF_CATEGORIES):
+                    CATEGORIES[name].search(path) or CATEGORIES[name].search(label) for name in PDF_CATEGORIES):
                 pdfs.append(ContentLink(category=PDF, url=full, label=label))
                 seen.add(full)
             continue
@@ -211,7 +216,7 @@ def links_from_homepage(
         # double-count every keyword already found there.
         if full.rstrip("/") == homepage or full in seen:
             continue
-        for category, pattern in CATEGORIES.items():
+        for category, pattern in _MATCH_ORDER:
             if len(found[category]) >= max_per_category:
                 continue
             if pattern.search(href) or pattern.search(label):
