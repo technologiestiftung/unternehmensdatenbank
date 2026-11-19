@@ -28,9 +28,10 @@ more often. Nothing here has been measured.
 **Text leaves the pod, to TSB's own server** (`enrichment.jeff`), whole and unredacted (decided 2026-11-11).
 Needs `JEFF_API_KEY`, an Airflow variable (Admin → Variables; `pipeline_task`, "API keys").
 
-**Cost.** About five requests per company: the 77 Technologiefelder are more than jeff takes in one question
-(`JEFF_MAX_LABELS`, 64), so they are asked in two parts and a final round (`jeff.choose`); the WZ takes two.
-On play, 2026-11-19: about 25 s per company with the WZ in parts. Answers are cached in each company's source record
+**Cost.** Three requests per company: the 77 Technologiefelder in one question (jeff takes up to
+`JEFF_MAX_LABELS`, 128 on TSB's server since 2026-11-19; with jeff's default 64 it is two parts and a final
+round, `jeff.choose`), the WZ in two. On play, 2026-11-19, six requests took about 25 s per company. The 87 WZ
+divisions would now fit one question too; the two steps stay until a measurement shows which agrees better. Answers are cached in each company's source record
 with the model and the website, as in `local_classifier`; at most `MAX_COMPANIES` per run, never asked first.
 """
 from __future__ import annotations

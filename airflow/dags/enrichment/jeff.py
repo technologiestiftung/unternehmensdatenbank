@@ -9,9 +9,10 @@ probability. No training needed, like `enrichment.decide`.
 2026-11-11 that text goes to it unredacted, because we host it. That covers this self-hosted jeff only: jev
 itself, or jeff on a third-party host, needs it-compliance first.
 
-**At most `MAX_LABELS` labels per question** (the server's `JEFF_MAX_LABELS`, 64 by default; more is a 422).
-Berlin's 77 Technologiefelder and the 87 WZ divisions do not fit, so `choose` asks them in parts and puts each
-part's best `FINALISTS` into a final question, whose answer and confidence count.
+**At most `MAX_LABELS` labels per question** (the server's `JEFF_MAX_LABELS`; more is a 422). jeff's default is
+64; TSB's server was raised to 128 on 2026-11-19, so Berlin's 77 Technologiefelder fit one question. A list
+longer than the limit is asked in parts, each part's best `FINALISTS` going into a final question, whose answer
+and confidence count. Set `JEFF_MAX_LABELS` to the server's value when it changes.
 """
 from __future__ import annotations
 
@@ -22,11 +23,13 @@ from typing import Any, Mapping, Sequence
 import requests
 
 BASE_URL = os.getenv("JEFF_BASE_URL", "https://jeff.ionos-dev.ds-apps.tsb-berlin.de").rstrip("/")
-MAX_LABELS = int(os.getenv("JEFF_MAX_LABELS", "64"))
+MAX_LABELS = int(os.getenv("JEFF_MAX_LABELS", "128"))
 #: Labels from each part that go into the final question.
 FINALISTS = 8
 TIMEOUT = 120
-#: 429 (rate limit) and 529 (queue full) are waited out; anything else fails the task.
+#: 429 (rate limit), 529 (queue full) and a gateway without jeff behind it (502-504: a restart or a deploy,
+#: one ended a run on play on 2026-11-19) are waited out; anything else fails the task.
+WAIT_STATUSES = (429, 502, 503, 504, 529)
 RETRIES = 5
 
 
@@ -54,7 +57,7 @@ def ask(http: requests.Session, state: str, instructions: str, labels: Sequence[
         "type": "choice", "instructions": instructions, "criteria": {label: None for label in labels}}}}
     for attempt in range(RETRIES):
         response = http.post(f"{BASE_URL}/v1/systemone", json=body, timeout=TIMEOUT)
-        if response.status_code in (429, 529) and attempt < RETRIES - 1:
+        if response.status_code in WAIT_STATUSES and attempt < RETRIES - 1:
             time.sleep(float(response.headers.get("retry-after-ms") or 1000 * 2 ** attempt) / 1000)
             continue
         response.raise_for_status()
@@ -62,8 +65,9 @@ def ask(http: requests.Session, state: str, instructions: str, labels: Sequence[
     raise AssertionError("unreachable")
 
 
-def parts(labels: Sequence[str], size: int = MAX_LABELS) -> list[list[str]]:
-    """`labels` in as few even parts as fit `size` each."""
+def parts(labels: Sequence[str], size: int | None = None) -> list[list[str]]:
+    """`labels` in as few even parts as fit `size` each (`MAX_LABELS`, read when called)."""
+    size = size or MAX_LABELS
     n = -(-len(labels) // size)
     step = -(-len(labels) // n)
     return [list(labels[i:i + step]) for i in range(0, len(labels), step)]

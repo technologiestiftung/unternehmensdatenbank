@@ -25,14 +25,14 @@ class _Jeff:
     """Answers a question that fits one part with its first label at 0.7, every label's probability falling
     with its position; a final round (16 labels) with its last label at 0.9."""
 
-    def __init__(self, busy: int = 0, weights: str = "models/gliformer-large-v1") -> None:
+    def __init__(self, busy: int = 0, weights: str = "models/gliformer-large-v1", status: int = 529) -> None:
         self.questions: list[list[str]] = []
-        self.busy, self.weights = busy, weights
+        self.busy, self.weights, self.status = busy, weights, status
 
     def post(self, url: str, *, json: dict[str, Any], timeout: int) -> _Response:
         if self.busy:
             self.busy -= 1
-            return _Response(529)
+            return _Response(self.status)
         labels = list(json["questions"]["q"]["criteria"])
         assert len(labels) <= jeff.MAX_LABELS, "jeff answers 422 above its label limit"
         self.questions.append(labels)
@@ -49,12 +49,21 @@ class _Jeff:
             {"name": "jev-latest", "description": "Alias of gliformer-large-v1", "release_date": "2026-09-16"}]})
 
 
-def test_77_fields_go_in_two_parts_and_a_final_round_of_their_best() -> None:
-    fields = [f"Feld {i}" for i in range(77)]
-    assert [len(p) for p in jeff.parts(fields)] == [39, 38]
-    assert [len(p) for p in jeff.parts([str(i) for i in range(87)])] == [44, 43]
+def test_77_fields_fit_one_question_at_the_servers_128() -> None:
     http = _Jeff()
-    first, second = jeff.parts(fields)
+    fields = [f"Feld {i}" for i in range(77)]
+    assert jeff.MAX_LABELS == 128
+    assert jeff.choose(http, "Text", "Welches Feld?", fields) == ("Feld 0", 0.7)
+    assert http.questions == [fields]
+
+
+def test_77_fields_go_in_two_parts_and_a_final_round_of_their_best(monkeypatch) -> None:  # noqa: ANN001
+    monkeypatch.setattr(jeff, "MAX_LABELS", 64)
+    fields = [f"Feld {i}" for i in range(77)]
+    assert [len(p) for p in jeff.parts(fields, 64)] == [39, 38]
+    assert [len(p) for p in jeff.parts([str(i) for i in range(87)], 64)] == [44, 43]
+    http = _Jeff()
+    first, second = jeff.parts(fields, 64)
     assert jeff.choose(http, "Text", "Welches Feld?", fields) == (second[jeff.FINALISTS - 1], 0.9)
     assert http.questions == [first, second, first[:jeff.FINALISTS] + second[:jeff.FINALISTS]]
 
@@ -198,3 +207,14 @@ def test_jeff_settings_reach_a_docker_task() -> None:
     worker = {"JEFF_MAX_LABELS": "128", "JEFF_MAX_COMPANIES": "475", "JEFF_COMPANIES": "claude", "PATH": "/usr/bin"}
     assert pipeline_environment(worker) == {"JEFF_MAX_LABELS": "128", "JEFF_MAX_COMPANIES": "475",
                                             "JEFF_COMPANIES": "claude"}
+
+
+@pytest.mark.parametrize("status", [429, 502, 503, 504, 529])
+def test_a_gateway_without_jeff_or_a_full_queue_is_waited_out(status: int) -> None:
+    assert jeff.choose(_Jeff(busy=2, status=status), "Text", "Welche?", ["a"]) == ("a", 0.7)
+
+
+def test_a_bad_request_fails_at_once() -> None:
+    http = _Jeff(busy=1, status=422)
+    with pytest.raises(RuntimeError):
+        jeff.choose(http, "Text", "Welche?", ["a"])
