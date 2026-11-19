@@ -145,3 +145,58 @@ def test_careers_and_pdf_text_are_read_after_the_services_pages(store, monkeypat
 def test_a_pdf_too_large_or_not_a_pdf_is_not_read(store, monkeypatch: pytest.MonkeyPatch, response) -> None:  # noqa: ANN001
     monkeypatch.setattr(cp, "session", lambda: FakeSession({"https://example.de/a.pdf": response}))
     assert cp._fetch_pdf("https://example.de/a.pdf") == ""
+
+
+def urlset(*paths: str) -> bytes:
+    return ("<?xml version='1.0'?><urlset>" + "".join(f"<url><loc>https://example.de{p}</loc></url>" for p in paths)
+            + "</urlset>").encode()
+
+
+def sitemapindex(*names: str) -> bytes:
+    return ("<sitemapindex>" + "".join(f"<sitemap><loc>https://example.de/{n}</loc></sitemap>" for n in names)
+            + "</sitemapindex>").encode()
+
+
+def test_sitemap_urls_are_read_unescaped_and_in_order() -> None:
+    xml = "<urlset><url><loc> https://example.de/a?x=1&amp;y=2 </loc></url><url><loc>https://example.de/b</loc></url></urlset>"
+    assert cp.sitemap_locs(xml) == ["https://example.de/a?x=1&y=2", "https://example.de/b"]
+
+
+def test_a_homepage_without_services_links_takes_them_from_the_sitemap(store, monkeypatch: pytest.MonkeyPatch) -> None:  # noqa: ANN001
+    fake = FakeSession({
+        "https://example.de/sitemap.xml": FakeResponse(sitemapindex("post-sitemap.xml", "page-sitemap.xml")),
+        "https://example.de/page-sitemap.xml": FakeResponse(urlset("/", "/kontakt", "/unsere-leistungen", "/karriere")),
+        "https://example.de/post-sitemap.xml": FakeResponse(urlset("/blog/hallo")),
+    })
+    monkeypatch.setattr(cp, "session", lambda: fake)
+    monkeypatch.setattr(cp, "_fetch", lambda url: "<p>Text</p>")
+
+    pages = cp.content_for(BASE, homepage(("/kontakt", "Kontakt")))
+    assert [(link.category, link.url) for link in pages.links] == [
+        ("leistungen", "https://example.de/unsere-leistungen"), ("karriere", "https://example.de/karriere")]
+    assert fake.asked[:2] == ["https://example.de/sitemap.xml", "https://example.de/page-sitemap.xml"]
+
+
+def test_a_homepage_with_a_services_link_never_asks_for_the_sitemap(store, monkeypatch: pytest.MonkeyPatch) -> None:  # noqa: ANN001
+    fake = FakeSession({})
+    monkeypatch.setattr(cp, "session", lambda: fake)
+    monkeypatch.setattr(cp, "_fetch", lambda url: "<p>Text</p>")
+    cp.content_for(BASE, homepage(("/leistungen", "Leistungen")))
+    assert fake.asked == []
+
+
+def test_a_replay_without_the_stored_sitemap_does_not_freeze_the_choice(store, monkeypatch: pytest.MonkeyPatch) -> None:  # noqa: ANN001
+    fake = FakeSession({"https://example.de/sitemap.xml": FakeResponse(urlset("/leistungen"))})
+    monkeypatch.setattr(cp, "session", lambda: fake)
+    monkeypatch.setattr(cp, "_fetch", lambda url: "<p>Text</p>")
+    html = homepage(("/kontakt", "Kontakt"))
+
+    assert cp.content_for(BASE, html, fetch=False).links == []
+    assert fake.asked == []
+    assert [link.url for link in cp.content_for(BASE, html).links] == ["https://example.de/leistungen"]
+
+
+def test_a_page_that_is_no_sitemap_gives_no_urls(store, monkeypatch: pytest.MonkeyPatch) -> None:  # noqa: ANN001
+    monkeypatch.setattr(cp, "session", lambda: FakeSession({
+        "https://example.de/sitemap.xml": FakeResponse(b"<html><a href='/leistungen'>x</a></html>")}))
+    assert cp.sitemap_urls(BASE) == []

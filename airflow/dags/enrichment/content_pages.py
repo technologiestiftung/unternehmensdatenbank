@@ -45,6 +45,13 @@ and which skills it hires for ("Python-Entwickler:in für unsere Robotik-Plattfo
 corpus (pipelines only) and only classifiers read it. Nothing from it is shown or extracted (developer,
 2026-11-19).
 
+**The sitemap, when the homepage links to nothing useful.** 4,470 of 15,871 companies on play (2026-11-19)
+had no services or about page: their homepage's links did not say so, often a menu built by JavaScript.
+For them `/sitemap.xml` is read (redirects followed: WordPress, Yoast and Shopify answer there), a
+sitemap index through at most `MAX_CHILD_SITEMAPS` of its sitemaps, "page" sitemaps first, and its URLs
+go through the same selection as the homepage's links, without labels. The XML is stored raw under
+`sitemap:<url>`; `<loc>` is read with a regex, never an XML parser (no entity expansion).
+
 Two namespaces are used in `page_cache`, and the split matters:
 
     content:<page url>              the raw HTML of one page, or a PDF's raw bytes (base64, `pdf`)
@@ -113,6 +120,13 @@ PDF_CATEGORIES = ("leistungen", "produkte", "loesungen")
 MAX_PDF_BYTES = 5_000_000
 MAX_PDF_PAGES = 5
 
+#: The sitemap fallback: how many child sitemaps of an index are read, how large one may be, and how
+#: many of its URLs are considered (a shop lists 50,000 products).
+MAX_CHILD_SITEMAPS = 3
+MAX_SITEMAP_BYTES = 5_000_000
+MAX_SITEMAP_URLS = 5_000
+_LOC = re.compile(r"<loc>\s*(.*?)\s*</loc>", re.I | re.S)
+
 #: Links that go somewhere a browser would not fetch as a page.
 _SKIP_SCHEMES = ("mailto:", "tel:", "javascript:", "data:", "#")
 
@@ -148,7 +162,8 @@ def selection_version() -> str:
     at are cached under their own URLs.
     """
     material = "|".join(
-        [str(MAX_PER_CATEGORY), str(MAX_PER_COMPANY), str(EXTRA_CAPS), str(MAX_PDFS), str(PDF_CATEGORIES)]
+        [str(MAX_PER_CATEGORY), str(MAX_PER_COMPANY), str(EXTRA_CAPS), str(MAX_PDFS), str(PDF_CATEGORIES),
+         f"sitemap={MAX_CHILD_SITEMAPS},{MAX_SITEMAP_URLS}"]
         + [f"{name}={pattern.pattern}" for name, pattern in CATEGORIES.items()]
     )
     return hashlib.sha256(material.encode("utf-8")).hexdigest()[:12]
@@ -172,15 +187,17 @@ def links_from_homepage(
     *,
     max_per_category: int = MAX_PER_CATEGORY,
     max_per_company: int = MAX_PER_COMPANY,
+    sitemap_urls: tuple[str, ...] | list[str] = (),
 ) -> list[ContentLink]:
-    """The services and about pages this homepage links to, capped.
+    """The services and about pages this homepage links to, capped. `sitemap_urls` are considered after
+    the homepage's links, as links without a label.
 
     A pure function over HTML that is already on disk, so it costs nothing and can be tested without
     a network. Deterministic: the capped categories in `CATEGORIES` order, then `EXTRA_CAPS`, then
     the PDF; links in the order the page lists them, so two runs pick the same pages and a cached
     result stays valid.
     """
-    if not html or not base_url:
+    if not base_url or not (html or sitemap_urls):
         return []
     try:
         from bs4 import BeautifulSoup
@@ -188,17 +205,17 @@ def links_from_homepage(
         log.warning("beautifulsoup4 is missing; no content pages will be found")
         return []
 
-    soup = BeautifulSoup(html, "html.parser", **SOUP_OPTIONS)
+    anchors = BeautifulSoup(html or "", "html.parser", **SOUP_OPTIONS).find_all("a", href=True)
+    candidates = [((anchor["href"] or "").strip(), " ".join(anchor.get_text(" ").split())[:80]) for anchor in anchors]
+    candidates += [(url, "") for url in sitemap_urls]
     found: dict[str, list[ContentLink]] = {name: [] for name in CATEGORIES}
     pdfs: list[ContentLink] = []
     seen: set[str] = set()
     homepage = base_url.split("#")[0].rstrip("/")
 
-    for anchor in soup.find_all("a", href=True):
-        href = (anchor["href"] or "").strip()
+    for href, label in candidates:
         if not href or href.lower().startswith(_SKIP_SCHEMES):
             continue
-        label = " ".join(anchor.get_text(" ").split())[:80]
         full = urljoin(base_url, href).split("#")[0]
         if not full.lower().startswith(("http://", "https://")):
             continue
@@ -229,6 +246,67 @@ def links_from_homepage(
     ordered = [link for category in CATEGORIES if category not in EXTRA_CAPS for link in found[category]]
     extras = [link for category, cap in EXTRA_CAPS.items() for link in found[category][:cap]]
     return ordered[:max_per_company] + extras + pdfs
+
+
+def has_core_page(links: list[ContentLink]) -> bool:
+    """Did the selection find a services, product, about or solutions page (not only careers or a PDF)?"""
+    return any(link.category not in EXTRA_CAPS and link.category != PDF for link in links)
+
+
+def _sitemap_xml(url: str, fetch: bool) -> str | None:
+    """One sitemap's XML: stored, else downloaded when allowed. "" when there is none; None when it is not
+    stored and `fetch` is off, so the caller knows the answer is incomplete."""
+    cached = page_cache.get("sitemap", url)
+    if cached is not None:
+        return cached.get("xml") or ""
+    if not fetch:
+        return None
+    xml = ""
+    try:
+        with session().get(url, headers=HEADERS, timeout=(CONNECT_TIMEOUT_S, HTTP_TIMEOUT_S),
+                           allow_redirects=True, stream=True) as response:
+            if response.status_code < 400 and int(response.headers.get("Content-Length") or 0) <= MAX_SITEMAP_BYTES:
+                body = bytearray()
+                for chunk in response.iter_content(65536):
+                    body.extend(chunk)
+                    if len(body) > MAX_SITEMAP_BYTES:
+                        break
+                text = bytes(body).decode("utf-8", errors="replace")
+                if len(body) <= MAX_SITEMAP_BYTES and ("<urlset" in text or "<sitemapindex" in text):
+                    xml = text
+    except Exception as exc:  # noqa: BLE001  a site without a sitemap is an expected outcome
+        log.debug("sitemap %s failed: %s", url, type(exc).__name__)
+    page_cache.put("sitemap", url, {"xml": xml, "final_url": url})
+    return xml
+
+
+def sitemap_locs(xml: str) -> list[str]:
+    """The `<loc>` URLs of a sitemap or sitemap index, in order, at most `MAX_SITEMAP_URLS`."""
+    import html as html_module
+
+    return [html_module.unescape(loc) for loc in _LOC.findall(xml or "")[:MAX_SITEMAP_URLS]]
+
+
+def sitemap_urls(base_url: str, fetch: bool = True) -> list[str] | None:
+    """The page URLs `/sitemap.xml` lists, through at most `MAX_CHILD_SITEMAPS` sitemaps of an index
+    ("page" sitemaps first: WordPress and Yoast keep posts, products and tags apart). None when something
+    needed is not stored and `fetch` is off."""
+    parsed = urlparse(base_url)
+    root = _sitemap_xml(f"{parsed.scheme}://{parsed.netloc}/sitemap.xml", fetch)
+    if root is None:
+        return None
+    if "<sitemapindex" not in root:
+        return sitemap_locs(root)
+    children = [url for url in sitemap_locs(root) if _same_host(url, base_url)]
+    children.sort(key=lambda url: "page" not in url.lower())
+    urls: list[str] = []
+    for child in children[:MAX_CHILD_SITEMAPS]:
+        xml = _sitemap_xml(child, fetch)
+        if xml is None:
+            return None
+        if "<sitemapindex" not in xml:
+            urls.extend(sitemap_locs(xml))
+    return urls[:MAX_SITEMAP_URLS]
 
 
 def _fetch(url: str) -> str:
@@ -343,11 +421,19 @@ def content_for(
         links = [ContentLink(**entry) for entry in index.get("links") or []]
     else:
         links = links_from_homepage(homepage_html, base_url)
-        page_cache.put(
-            "content-index",
-            key,
-            {"links": [{"category": x.category, "url": x.url, "label": x.label} for x in links]},
-        )
+        complete = True
+        if not has_core_page(links):
+            from_sitemap = sitemap_urls(base_url, fetch)
+            complete = from_sitemap is not None
+            if from_sitemap:
+                links = links_from_homepage(homepage_html, base_url, sitemap_urls=from_sitemap)
+        # An index built without a sitemap that was not stored would hide it for 90 days.
+        if complete:
+            page_cache.put(
+                "content-index",
+                key,
+                {"links": [{"category": x.category, "url": x.url, "label": x.label} for x in links]},
+            )
 
     from enrichment.url_patterns import visible_text
 
