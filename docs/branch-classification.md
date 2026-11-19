@@ -71,6 +71,9 @@ On top of those 4 (#198): one careers page (`/karriere`, `/jobs`), because a job
 builds and who it hires, and one PDF whose link looks like a services, product or solutions document
 (at most 5 MB, first 5 pages). Careers pages name contact people; they stay in the corpus and only
 classifiers read them, nothing from them is shown (developer, 2026-11-19).
+When the homepage links to no services or about page at all (4,470 of 15,871 companies on play,
+2026-11-19), the site's `/sitemap.xml` is read instead and its URLs go through the same selection
+(at most 3 sitemaps of an index, "page" sitemaps first).
 
 **A Technologiefeld requires a website somebody downloaded**, and the gate asks Postgres ("did anybody
 fetch and check a page for this company"), not a file. Gating on unchecked canonical websites would
