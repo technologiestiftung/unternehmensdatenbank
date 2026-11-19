@@ -96,8 +96,9 @@ def get(namespace: str, key: str) -> dict[str, Any] | None:
 
 
 def loaded(record: dict[str, Any] | None) -> bool:
-    """Did the page load: HTML, and a 2xx status (a record without one came from a page that loaded)."""
-    return bool(record and record.get("html")) and 200 <= (record.get("status_code") or 200) < 300
+    """Did the page load: HTML or a PDF (`content_pages`), and a 2xx status (a record without one came
+    from a page that loaded)."""
+    return bool(record and (record.get("html") or record.get("pdf"))) and 200 <= (record.get("status_code") or 200) < 300
 
 
 def put(namespace: str, key: str, record: dict[str, Any]) -> None:

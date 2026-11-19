@@ -189,11 +189,12 @@ def record_document(
 ) -> None:
     """Index one stored text as belonging to a company (`company_documents`). Read back from the store,
     so `sha256` and `bytes` describe the stored HTML or text and `read_at` is when it was downloaded;
-    nothing is indexed when the corpus is off or holds no text under `object_key(namespace, url)`."""
+    nothing is indexed when the corpus is off or holds no text under `object_key(namespace, url)`.
+    A PDF record is hashed and counted in its stored base64 form, not as the PDF file."""
     if kind not in KINDS:
         raise ValueError(f"unknown kind {kind!r}")
     record = get(namespace, url)
-    content = (record or {}).get("html") or (record or {}).get("text")
+    content = (record or {}).get("html") or (record or {}).get("text") or (record or {}).get("pdf")
     if not content:
         return
     data = content.encode("utf-8")

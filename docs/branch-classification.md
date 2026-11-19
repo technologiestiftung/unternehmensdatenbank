@@ -67,6 +67,10 @@ The homepage and the Impressum rarely say what a company does. The real text is 
 `/ueber-uns`, `/produkte`. **Follow the homepage's links, never guess paths**: 84% of homepages link to
 such a page, and `/leistungen` 404s on a site that calls it `/de/unternehmen/leistungen`. Every page
 that comes back is read; capped at 2 per category and 4 per company.
+On top of those 4 (#198): one careers page (`/karriere`, `/jobs`), because a job ad says what a company
+builds and who it hires, and one PDF whose link looks like a services, product or solutions document
+(at most 5 MB, first 5 pages). Careers pages name contact people; they stay in the corpus and only
+classifiers read them, nothing from them is shown (developer, 2026-11-19).
 
 **A Technologiefeld requires a website somebody downloaded**, and the gate asks Postgres ("did anybody
 fetch and check a page for this company"), not a file. Gating on unchecked canonical websites would
